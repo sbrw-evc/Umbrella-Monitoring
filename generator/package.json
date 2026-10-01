@@ -1,0 +1,6 @@
+{
+  "name": "umbrella-diagrams",
+  "private": true,
+  "description": "Рендер схем draw.io в PNG",
+  "dependencies": { "mxgraph": "^4.2.2", "playwright": "^1.56.1" }
+}
