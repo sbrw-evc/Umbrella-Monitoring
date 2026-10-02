@@ -1305,7 +1305,14 @@ func (s *Server) grafana(w http.ResponseWriter, r *http.Request) {
 	v.Set("to", strconv.FormatInt(to.UnixMilli(), 10))
 	v.Set("var-ci", a.CIName)
 	v.Set("var-service", a.Service)
-	http.Redirect(w, r, strings.TrimRight(s.cfg.GrafanaURL, "/")+"/d/umb-"+strings.ToLower(a.ID)+"?"+v.Encode(), http.StatusFound)
+	v.Set("var-incident", a.ID)
+	// A URL that already names a dashboard (.../d/<uid>) is used as is, e.g.
+	// the provisioned incidents dashboard of the lab.
+	target := strings.TrimRight(s.cfg.GrafanaURL, "/")
+	if !strings.Contains(target, "/d/") {
+		target += "/d/umb-" + strings.ToLower(a.ID)
+	}
+	http.Redirect(w, r, target+"?"+v.Encode(), http.StatusFound)
 }
 
 // ---- static ----

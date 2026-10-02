@@ -12,7 +12,16 @@
 param([switch]$Zabbix)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
-Initialize-Lab $PSScriptRoot 'smoke-test'
+Initialize-Lab $PSScriptRoot
+# Admin session, then the smoke-test service account (monitoring + auditor)
+# with a fresh API token for the checks below.
+$adminToken = Get-UmbToken (Get-Setting 'UMBRELLA_ADMIN_USER' 'admin') (Get-Setting 'UMBRELLA_ADMIN_PASSWORD')
+if (-not $adminToken) { Stop-Lab "cannot sign in to Umbrella at ${UmbUrl}: check UMBRELLA_ADMIN_PASSWORD in .env" }
+$script:UmbToken = $adminToken
+$smokeUid = Set-LabUser @{ username = 'smoke-test'; name = 'Smoke test'; service = $true; roles = @('monitoring', 'auditor'); business_services = @() }
+$tok = Umb POST "/api/users/$smokeUid/tokens" @{ name = 'smoke-ps-' + (Get-Date -Format 'HHmmss'); days = 1 }
+if (-not $tok.token) { Stop-Lab 'cannot create an API token for smoke-test' }
+$script:UmbToken = [string]$tok.token
 if ((Get-Setting 'ZABBIX_E2E') -eq '1') { $Zabbix = $true }
 
 $Token = Get-Setting 'SMOKE_WEBHOOK_TOKEN'
@@ -167,7 +176,7 @@ Check 'Maintenance window deleted' { $st -eq 204 }
 Section '9. Unknown CI and parse errors'
 [void](Send-Ingest $c1 $Token (New-Event "u1-$Run" "smoke-unknown-$Run" 'sig-u' 'warning' 'firing'))
 $a = Get-Incident '' 'sig-u'
-Check 'Event for a CI missing in CMDB opens an unbound incident' { $a.ci_name -eq "smoke-unknown-$Run" -and -not $a.ci_id } $a
+Check 'Event for a CI missing in CMDB: auto-created CI (UMBRELLA_CMDB_AUTO) or unbound incident' { $a.ci_name -eq "smoke-unknown-$Run" } $a
 $before = @((Umb GET '/api/parse-errors').items | Where-Object { $_.connector_id -eq $c1 }).Count
 [void](Send-Ingest $c1 $Token 'definitely not json {')
 $after = @((Umb GET '/api/parse-errors').items | Where-Object { $_.connector_id -eq $c1 }).Count
@@ -203,7 +212,7 @@ if ($curl) {
   $old = $ErrorActionPreference
   $ErrorActionPreference = 'Continue'
   $wsLine = [string](@(& (First $curl).Source -sS -i -N --max-time 3 -H 'Connection: Upgrade' -H 'Upgrade: websocket' `
-        -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H "Origin: $UmbUrl" "$UmbUrl/api/ws" 2>$null) | Select-Object -First 1)
+        -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H "Origin: $UmbUrl" -H "Authorization: Bearer $($script:UmbToken)" "$UmbUrl/api/ws" 2>$null) | Select-Object -First 1)
   $ErrorActionPreference = $old
 }
 if ($curl) {
@@ -275,6 +284,8 @@ if ($Zabbix) {
   }
 }
 
+$script:UmbToken = $adminToken
+[void](Umb DELETE "/api/users/$smokeUid/tokens/$($tok.item.id)")
 Write-Host ''
 Write-Host ("Result: {0} passed, {1} failed" -f $script:Pass, $script:Failed.Count) -ForegroundColor White
 foreach ($f in $script:Failed) { Write-Host "  - $f" }
