@@ -1,0 +1,142 @@
+// Package store keeps Umbrella state. The MVP step 1 store is in memory
+// behind one lock; the PostgreSQL implementation replaces it without
+// changing callers, because everything goes through Read and Write.
+package store
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"sync"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+)
+
+// Limits of the in-memory rings.
+const (
+	MaxEvents      = 20000
+	MaxParseErrors = 2000
+)
+
+// Data is the whole state. Access it only inside Read or Write.
+type Data struct {
+	Teams       []model.Team
+	CIs         map[string]*model.CI
+	Relations   []model.Relation
+	Connectors  map[string]*model.Connector
+	Events      []*model.Event // oldest first
+	Alerts      map[string]*model.Alert
+	ParseErrors []*model.ParseError // oldest first
+	Maintenance map[string]*model.Maintenance
+	Rules       []model.Rule
+	Audit       []AuditEntry
+	Users       map[string]*model.User
+	Roles       map[string]*model.Role
+	Tokens      map[string]*model.APIToken
+	Channels    map[string]*model.Channel
+	Deliveries  []*model.Delivery // oldest first
+	seq         map[string]int
+}
+
+// AuditEntry records a change made by a person.
+type AuditEntry struct {
+	At     string `json:"at"`
+	Actor  string `json:"actor"`
+	Action string `json:"action"`
+	Object string `json:"object"`
+}
+
+// Store guards Data.
+type Store struct {
+	mu sync.RWMutex
+	d  Data
+}
+
+// New returns an empty store.
+func New() *Store {
+	return &Store{d: Data{
+		CIs:         map[string]*model.CI{},
+		Connectors:  map[string]*model.Connector{},
+		Alerts:      map[string]*model.Alert{},
+		Maintenance: map[string]*model.Maintenance{},
+		Users:       map[string]*model.User{},
+		Roles:       map[string]*model.Role{},
+		Tokens:      map[string]*model.APIToken{},
+		Channels:    map[string]*model.Channel{},
+		seq:         map[string]int{},
+	}}
+}
+
+// Read runs f under the read lock. f must not keep pointers after return.
+func (s *Store) Read(f func(d *Data)) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	f(&s.d)
+}
+
+// Write runs f under the write lock.
+func (s *Store) Write(f func(d *Data)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f(&s.d)
+}
+
+// NextID returns a readable sequential id like "ALR-42". Call inside Write.
+func (d *Data) NextID(prefix string) string {
+	d.seq[prefix]++
+	return fmt.Sprintf("%s-%d", prefix, d.seq[prefix])
+}
+
+// UseID records an id assigned outside NextID (seed data), so NextID never
+// hands it out again.
+func (d *Data) UseID(id string) {
+	i := strings.LastIndex(id, "-")
+	if i < 0 {
+		return
+	}
+	if n, err := strconv.Atoi(id[i+1:]); err == nil && n > d.seq[id[:i]] {
+		d.seq[id[:i]] = n
+	}
+}
+
+// AddEvent appends to the ring.
+func (d *Data) AddEvent(e *model.Event) {
+	d.Events = append(d.Events, e)
+	if len(d.Events) > MaxEvents {
+		d.Events = append([]*model.Event(nil), d.Events[len(d.Events)-MaxEvents:]...)
+	}
+}
+
+// AddParseError appends to the ring.
+func (d *Data) AddParseError(p *model.ParseError) {
+	d.ParseErrors = append(d.ParseErrors, p)
+	if len(d.ParseErrors) > MaxParseErrors {
+		d.ParseErrors = append([]*model.ParseError(nil), d.ParseErrors[len(d.ParseErrors)-MaxParseErrors:]...)
+	}
+}
+
+// AddDelivery appends to the notification delivery ring.
+func (d *Data) AddDelivery(x *model.Delivery) {
+	d.Deliveries = append(d.Deliveries, x)
+	if len(d.Deliveries) > 1000 {
+		d.Deliveries = append([]*model.Delivery(nil), d.Deliveries[len(d.Deliveries)-1000:]...)
+	}
+}
+
+// UserByName finds a user by login, ignoring case.
+func (d *Data) UserByName(username string) *model.User {
+	for _, u := range d.Users {
+		if strings.EqualFold(u.Username, username) {
+			return u
+		}
+	}
+	return nil
+}
+
+// AddAudit appends an audit line.
+func (d *Data) AddAudit(a AuditEntry) {
+	d.Audit = append(d.Audit, a)
+	if len(d.Audit) > 5000 {
+		d.Audit = d.Audit[len(d.Audit)-5000:]
+	}
+}
