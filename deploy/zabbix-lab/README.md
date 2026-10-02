@@ -17,6 +17,18 @@ git clone -b feature/mvp-app https://github.com/sbrw-evc/Umbrella-Monitoring.git
 /opt/umbrella-monitoring/deploy/zabbix-lab/install.sh
 ```
 
+### Windows (PowerShell)
+
+Нужен Docker Desktop в режиме Linux-контейнеров и 8 ГБ памяти на машине. Если Docker нет, поставьте его: `winget install -e --id Docker.DockerDesktop`. Затем выполните в PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/sbrw-evc/Umbrella-Monitoring/feature/mvp-app/deploy/zabbix-lab/install.ps1 -OutFile $env:TEMP\umbrella-install.ps1; powershell -ExecutionPolicy Bypass -File $env:TEMP\umbrella-install.ps1
+```
+
+`install.ps1` делает то же, что `install.sh`, только Docker не ставит, а при необходимости запускает Docker Desktop. Код скачивается в `%USERPROFILE%\umbrella-monitoring` через git, а если git нет, архивом. Параметры: `-Dir`, `-Branch`, `-NoBuild`, `-SkipTest`. Порты и адрес задаются переменными окружения, как в Linux.
+
+Настройка и тест тоже есть в двух вариантах: `configure.ps1` и `smoke-test.ps1 [-Zabbix]` повторяют `configure.sh` и `smoke-test.sh` и проверяют те же 53 пункта. Они работают в Windows PowerShell 5.1 и PowerShell 7 и обходятся без curl и jq.
+
 Что делает `install.sh`:
 
 1. Ставит git, curl, jq и Docker Engine с плагином compose.
@@ -62,6 +74,7 @@ Umbrella MVP хранит данные в памяти. После переза�
 ```bash
 ./smoke-test.sh            # только Umbrella
 ./smoke-test.sh --zabbix   # плюс сквозная проверка через Zabbix
+.\smoke-test.ps1 -Zabbix   # то же в PowerShell
 ```
 
 Каждый прогон создаёт свои КЕ и сигналы, поэтому тест можно повторять. Проверяется 53 пункта:
@@ -83,7 +96,7 @@ Umbrella MVP хранит данные в памяти. После переза�
 | Коннектор и аудит | остановленный коннектор отклоняет события (409), записи в журнале аудита |
 | Zabbix | вход в API, хост и триггер, доступность агента, проблема → инцидент (High → error), Zabbix отмечает отправку как Sent, восстановление → инцидент решён |
 
-Тест проверен на этом стенде: 53 из 53.
+Тест проверен на этом стенде: 53 из 53 и в bash, и в PowerShell 7.
 
 ![Инцидент из Zabbix в Umbrella](screens/zabbix-incident.png)
 

@@ -223,6 +223,13 @@ if [ "$ZABBIX_E2E" = 1 ]; then
     done
     check "Zabbix agent 2 is reachable (interface available)" $([ "$AVAIL" = 1 ]; echo $?) "available=$AVAIL"
     LAB_CI=$(ci_id "$LAB_HOST")
+    # Start from OK: a problem left open by an earlier run would not fire again.
+    zbx history.push "$(jq -nc --arg i "$ITEM" '[{itemid:$i,value:"0"}]')" >/dev/null
+    for i in $(seq 1 30); do
+      [ "$(zbx trigger.get "$(jq -nc --arg t "$TRG" '{triggerids:[$t],output:["value"]}')" | jq -r '.[0].value')" = 0 ] && break
+      sleep 2
+    done
+    sleep 2
     zbx history.push "$(jq -nc --arg i "$ITEM" '[{itemid:$i,value:"1"}]')" >/dev/null
     A=$(wait_incident "$LAB_CI" "zabbix:$TRG" '.status == "open" or .status == "acknowledged"' 120)
     check "Zabbix problem -> Umbrella incident on the lab host (High -> error)" "$(jqt "$A" '.severity == "error" and .method == "use"')" "$A"
