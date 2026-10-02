@@ -19,7 +19,7 @@ $Token = Get-Setting 'SMOKE_WEBHOOK_TOKEN'
 if (-not $Token) { Stop-Lab 'set SMOKE_WEBHOOK_TOKEN in .env (Umbrella reads it as UMB_SECRET_LAB_SMOKE)' }
 $Run = (Get-Date -Format 'HHmmss') + (Get-Random -Maximum 99999)
 $script:Pass = 0
-$script:Failed = New-Object System.Collections.Generic.List[string]
+$script:Failed = @()
 
 function Section([string]$Text) { Write-Host ''; Write-Host $Text -ForegroundColor White }
 # Check NAME { condition } [detail]: the condition must return $true.
@@ -30,7 +30,7 @@ function Check([string]$Name, [scriptblock]$Condition, $Detail = $null) {
     $script:Pass++
     Write-Host '  PASS ' -ForegroundColor Green -NoNewline; Write-Host $Name
   } else {
-    $script:Failed.Add($Name)
+    $script:Failed += $Name
     Write-Host '  FAIL ' -ForegroundColor Red -NoNewline; Write-Host $Name
     if ($Detail) {
       if ($Detail -isnot [string]) { $Detail = ConvertTo-Json -InputObject $Detail -Depth 6 -Compress }
@@ -194,15 +194,23 @@ $ev = Umb GET "/api/events?connector=$c1&limit=50"
 Check 'Event log keeps raw payload and labels' { @($ev.items | Where-Object { $_.labels.run -eq $Run -and $_.raw }).Count -ge 5 }
 [void](Umb GET "/api/cis/$h1"); $st = Status
 Check 'CI card opens' { $st -eq 200 }
-$wsCode = 0
-try {
-  $ws = New-Object System.Net.WebSockets.ClientWebSocket
-  $ws.Options.SetRequestHeader('Origin', $UmbUrl)
-  $ws.ConnectAsync([uri](($UmbUrl -replace '^http', 'ws') + '/api/ws'), [Threading.CancellationToken]::None).Wait(5000) | Out-Null
-  if ($ws.State -eq 'Open') { $wsCode = 101 }
-  $ws.Dispose()
-} catch { }
-Check 'Live updates: WebSocket handshake (101)' { $wsCode -eq 101 }
+# ConstrainedLanguage has no WebSocket client, so the handshake goes through
+# curl (built into Windows 10 and later). Without curl the check is skipped.
+$curl = Get-Command 'curl.exe' -CommandType Application -ErrorAction SilentlyContinue
+if (-not $curl) { $curl = Get-Command 'curl' -CommandType Application -ErrorAction SilentlyContinue }
+$wsLine = ''
+if ($curl) {
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  $wsLine = [string](@(& (First $curl).Source -sS -i -N --max-time 3 -H 'Connection: Upgrade' -H 'Upgrade: websocket' `
+        -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H "Origin: $UmbUrl" "$UmbUrl/api/ws" 2>$null) | Select-Object -First 1)
+  $ErrorActionPreference = $old
+}
+if ($curl) {
+  Check 'Live updates: WebSocket handshake (101)' { $wsLine -match ' 101' } $wsLine
+} else {
+  Write-Host '  SKIP Live updates: WebSocket handshake (curl not found)' -ForegroundColor Yellow
+}
 
 Section '12. PagerDuty gateway'
 [void](Umb POST '/api/selfcheck/pd-outage' @{ on = $true })

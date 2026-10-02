@@ -1,30 +1,31 @@
 # Shared helpers for configure.ps1 and smoke-test.ps1.
-# Works in Windows PowerShell 5.1 and PowerShell 7 (Windows, Linux, macOS).
+# Written for ConstrainedLanguage mode (AppLocker / WDAC): only cmdlets and
+# core types, no Add-Type and no .NET method calls. Works in Windows
+# PowerShell 5.1 and PowerShell 7 (Windows, Linux, macOS).
 
-Add-Type -AssemblyName System.Net.Http
 $ErrorActionPreference = 'Stop'
+
+function Get-Setting([string]$Name, [string]$Default = '') {
+  $item = Get-Item -Path "Env:$Name" -ErrorAction SilentlyContinue
+  if ($null -eq $item -or $item.Value -eq '') { return $Default }
+  return $item.Value
+}
 
 function Read-DotEnv([string]$Path) {
   if (-not (Test-Path $Path)) { return }
   foreach ($line in Get-Content $Path) {
     if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$') {
-      $v = $Matches[2] -replace '\s+#.*$', ''
-      [Environment]::SetEnvironmentVariable($Matches[1], $v.Trim('"'), 'Process')
+      $name = $Matches[1]
+      $v = ($Matches[2] -replace '\s+#.*$', '').Trim('"')
+      # Variables already set in the session win over .env, as in docker compose.
+      if ((Get-Setting $name) -eq '') { Set-Item -Path "Env:$name" -Value $v }
     }
   }
-}
-
-function Get-Setting([string]$Name, [string]$Default = '') {
-  $v = [Environment]::GetEnvironmentVariable($Name, 'Process')
-  if ([string]::IsNullOrEmpty($v)) { return $Default }
-  return $v
 }
 
 function Write-Step([string]$Text) { Write-Host "==> $Text" -ForegroundColor Cyan }
 function Stop-Lab([string]$Text) { Write-Host "ERROR: $Text" -ForegroundColor Red; exit 1 }
 
-$script:Http = New-Object System.Net.Http.HttpClient
-$script:Http.Timeout = [TimeSpan]::FromSeconds(30)
 $script:LastStatus = 0
 $script:ZbxToken = ''
 
@@ -41,26 +42,43 @@ function ConvertTo-JsonBody($Value) {
   return (ConvertTo-Json -InputObject $Value -Depth 20 -Compress)
 }
 
-# Send-Http returns @{ Status; Body; Json }. Non-2xx answers are returned, not thrown.
+function ConvertFrom-JsonText([string]$Text) {
+  if (-not $Text) { return $null }
+  $t = $Text.TrimStart()
+  if ($t.Length -eq 0 -or -not ($t.StartsWith('{') -or $t.StartsWith('['))) { return $null }
+  try { return ($Text | ConvertFrom-Json) } catch { return $null }
+}
+
+# Send-Http returns @{ Status; Body; Json }. Non-2xx answers are returned, not
+# thrown; a connection failure gives Status 0.
 function Send-Http([string]$Method, [string]$Url, $Body = $null, [hashtable]$Headers = @{}) {
-  $req = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::new($Method), $Url)
-  foreach ($k in $Headers.Keys) { [void]$req.Headers.TryAddWithoutValidation($k, [string]$Headers[$k]) }
+  $req = @{ Method = $Method; Uri = $Url; Headers = $Headers; UseBasicParsing = $true; TimeoutSec = 30 }
   if ($null -ne $Body) {
-    $req.Content = [System.Net.Http.StringContent]::new((ConvertTo-JsonBody $Body), [Text.Encoding]::UTF8, 'application/json')
+    $req['Body'] = ConvertTo-JsonBody $Body
+    $req['ContentType'] = 'application/json; charset=utf-8'
   }
-  try {
-    $resp = $script:Http.SendAsync($req).GetAwaiter().GetResult()
-  } catch {
-    $script:LastStatus = 0
-    return @{ Status = 0; Body = $_.Exception.Message; Json = $null }
+  $status = 0
+  $text = ''
+  if ($PSVersionTable.PSVersion.Major -ge 7) {
+    $req['SkipHttpErrorCheck'] = $true
+    try {
+      $resp = Invoke-WebRequest @req
+      $status = [int]$resp.StatusCode
+      $text = [string]$resp.Content
+    } catch { $text = $_.Exception.Message }
+  } else {
+    # Windows PowerShell 5.1 throws on non-2xx; the code and body are on the error.
+    try {
+      $resp = Invoke-WebRequest @req
+      $status = [int]$resp.StatusCode
+      $text = [string]$resp.Content
+    } catch {
+      if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+      if ($_.ErrorDetails) { $text = [string]$_.ErrorDetails.Message } else { $text = $_.Exception.Message }
+    }
   }
-  $text = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-  $script:LastStatus = [int]$resp.StatusCode
-  $json = $null
-  if ($text -and $text.TrimStart().Length -gt 0 -and '{['.Contains($text.TrimStart()[0])) {
-    try { $json = $text | ConvertFrom-Json } catch { }
-  }
-  return @{ Status = [int]$resp.StatusCode; Body = $text; Json = $json }
+  $script:LastStatus = $status
+  return @{ Status = $status; Body = $text; Json = (ConvertFrom-JsonText $text) }
 }
 
 # Umb calls the Umbrella API and returns the parsed JSON; $script:LastStatus holds the code.
@@ -111,7 +129,7 @@ function Get-ConnectorId([string]$Name) {
 }
 
 function Get-CiId([string]$Name) {
-  $c = First (@((Umb GET ('/api/cis?q=' + [uri]::EscapeDataString($Name))).items) | Where-Object { $_.name -eq $Name })
+  $c = First (@((Umb GET ('/api/cis?q=' + ($Name -replace '[^A-Za-z0-9._-]', ''))).items) | Where-Object { $_.name -eq $Name })
   if ($c) { return $c.id }
   return ''
 }

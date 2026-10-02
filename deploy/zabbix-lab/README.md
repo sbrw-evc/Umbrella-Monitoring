@@ -27,7 +27,9 @@ irm https://raw.githubusercontent.com/sbrw-evc/Umbrella-Monitoring/feature/mvp-a
 
 `install.ps1` делает то же, что `install.sh`, только Docker не ставит, а при необходимости запускает Docker Desktop. Код скачивается в `%USERPROFILE%\umbrella-monitoring` через git, а если git нет, архивом. Параметры: `-Dir`, `-Branch`, `-NoBuild`, `-SkipTest`. Порты и адрес задаются переменными окружения, как в Linux.
 
-Настройка и тест тоже есть в двух вариантах: `configure.ps1` и `smoke-test.ps1 [-Zabbix]` повторяют `configure.sh` и `smoke-test.sh` и проверяют те же 53 пункта. Они работают в Windows PowerShell 5.1 и PowerShell 7 и обходятся без curl и jq.
+Настройка и тест тоже есть в двух вариантах: `configure.ps1` и `smoke-test.ps1 [-Zabbix]` повторяют `configure.sh` и `smoke-test.sh` и проверяют те же 53 пункта. Они работают в Windows PowerShell 5.1 и PowerShell 7 и обходятся без jq.
+
+Скрипты рассчитаны на режим ConstrainedLanguage (AppLocker или WDAC): в них нет Add-Type и вызовов .NET, только командлеты. HTTP идёт через `Invoke-WebRequest`, секреты берутся из `New-Guid`, архив распаковывается через встроенный `tar.exe`. Проверка WebSocket использует встроенный `curl.exe`, а если его нет, пропускается. Если политика запрещает запуск самих файлов .ps1, их нужно подписать или добавить в разрешённые.
 
 Что делает `install.sh`:
 
@@ -96,7 +98,7 @@ Umbrella MVP хранит данные в памяти. После переза�
 | Коннектор и аудит | остановленный коннектор отклоняет события (409), записи в журнале аудита |
 | Zabbix | вход в API, хост и триггер, доступность агента, проблема → инцидент (High → error), Zabbix отмечает отправку как Sent, восстановление → инцидент решён |
 
-Тест проверен на этом стенде: 53 из 53 и в bash, и в PowerShell 7.
+Тест проверен на этом стенде: 53 из 53 в bash и в PowerShell 7, в том числе в режиме ConstrainedLanguage.
 
 ![Инцидент из Zabbix в Umbrella](screens/zabbix-incident.png)
 

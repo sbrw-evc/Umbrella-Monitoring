@@ -2,7 +2,8 @@
 .SYNOPSIS
   One-command Umbrella + Zabbix lab install for Windows (PowerShell version of install.sh).
 .DESCRIPTION
-  Needs Docker Desktop (or Docker Engine with the compose plugin). Fetches the
+  Needs Docker Desktop (or Docker Engine with the compose plugin). Runs in
+  ConstrainedLanguage mode (AppLocker / WDAC): only cmdlets, no .NET calls. Fetches the
   repository, writes .env with random secrets, starts Umbrella + Zabbix 7.0
   (server, web, agent 2), connects Zabbix to Umbrella (configure.ps1) and runs
   the MVP test (smoke-test.ps1 -Zabbix). Running it again updates the code and
@@ -26,7 +27,6 @@ param(
   [switch]$SkipTest
 )
 $ErrorActionPreference = 'Stop'
-[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 function Write-Step([string]$Text) { Write-Host "==> $Text" -ForegroundColor Cyan }
 function Stop-Lab([string]$Text) { Write-Host "ERROR: $Text" -ForegroundColor Red; exit 1 }
@@ -79,17 +79,28 @@ if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'docker-compose.yml')
   $lab = Join-Path $Dir 'deploy\zabbix-lab'
 } else {
   Write-Step "Downloading $Repo ($Branch) to $Dir (git not found)"
-  $zip = Join-Path ([IO.Path]::GetTempPath()) 'umbrella-monitoring.zip'
-  $tmp = Join-Path ([IO.Path]::GetTempPath()) ('umbrella-' + [guid]::NewGuid())
+  $tempDir = $env:TEMP
+  if (-not $tempDir) { $tempDir = '/tmp' }
+  $zip = Join-Path $tempDir 'umbrella-monitoring.zip'
+  $tmp = Join-Path $tempDir ('umbrella-' + (New-Guid).Guid)
   Invoke-WebRequest -UseBasicParsing "https://codeload.github.com/$Repo/zip/refs/heads/$Branch" -OutFile $zip
-  Expand-Archive $zip $tmp
+  # tar (built into Windows 10 and later) unpacks zip without .NET calls;
+  # Expand-Archive is the fallback.
+  New-Item -ItemType Directory -Path $tmp | Out-Null
+  $tar = ''
+  if ($env:SystemRoot) { $tar = Join-Path $env:SystemRoot 'System32\tar.exe' }
+  if ($tar -and (Test-Path $tar)) {
+    Invoke-Native $tar @('-xf', $zip, '-C', $tmp)
+  } else {
+    Expand-Archive $zip $tmp
+  }
   $src = Get-ChildItem $tmp | Select-Object -First 1
   $keep = $null
   $envFile = Join-Path $Dir 'deploy\zabbix-lab\.env'
   if (Test-Path $envFile) { $keep = Get-Content $envFile -Raw }
   if (Test-Path $Dir) { Remove-Item $Dir -Recurse -Force }
   Move-Item $src.FullName $Dir
-  if ($keep) { [IO.File]::WriteAllText($envFile, $keep) }
+  if ($keep) { Set-Content -Path $envFile -Value $keep -NoNewline -Encoding ascii }
   Remove-Item $zip, $tmp -Recurse -Force -ErrorAction SilentlyContinue
   $lab = Join-Path $Dir 'deploy\zabbix-lab'
 }
@@ -98,25 +109,24 @@ Set-Location $lab
 $envPath = Join-Path $lab '.env'
 if (-not (Test-Path $envPath)) {
   Write-Step 'Writing .env with random secrets'
-  function New-Secret {
-    $b = New-Object byte[] 16
-    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b)
-    -join ($b | ForEach-Object { $_.ToString('x2') })
-  }
+  # New-Guid draws from the system crypto RNG; two GUIDs give 64 hex chars.
+  function New-Secret { ((New-Guid).Guid + (New-Guid).Guid) -replace '-', '' }
   function Pick([string]$Name, [string]$Default) {
-    $v = [Environment]::GetEnvironmentVariable($Name)
-    if ($v) { return $v }
+    $item = Get-Item -Path "Env:$Name" -ErrorAction SilentlyContinue
+    if ($item -and $item.Value) { return $item.Value }
     return $Default
   }
   $ip = Pick 'PUBLIC_HOST' ''
-  if (-not $ip) {
-    try {
-      $ip = [Net.Dns]::GetHostAddresses([Net.Dns]::GetHostName()) |
-        Where-Object { $_.AddressFamily -eq 'InterNetwork' -and -not [Net.IPAddress]::IsLoopback($_) } |
-        Select-Object -First 1 | ForEach-Object { $_.ToString() }
-    } catch { }
-    if (-not $ip) { $ip = 'localhost' }
+  if (-not $ip -and (Get-Command Get-NetIPAddress -ErrorAction SilentlyContinue)) {
+    $ip = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+      Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' -and $_.InterfaceAlias -notlike 'vEthernet*' } |
+      Select-Object -First 1 -ExpandProperty IPAddress
   }
+  if (-not $ip -and (Get-Command hostname -CommandType Application -ErrorAction SilentlyContinue) -and -not ($env:OS -eq 'Windows_NT')) {
+    $ip = [string](@(& hostname -I 2>$null) | Select-Object -First 1)
+    $ip = ($ip.Trim() -split '\s+')[0]
+  }
+  if (-not $ip) { $ip = 'localhost' }
   $lines = @(
     "PUBLIC_HOST=$ip",
     "UMBRELLA_PORT=$(Pick 'UMBRELLA_PORT' '8080')",
@@ -130,7 +140,7 @@ if (-not (Test-Path $envPath)) {
     "TZ=$(Pick 'TZ' 'Europe/Moscow')"
   )
   # LF line endings and no BOM, as docker compose expects.
-  [IO.File]::WriteAllText($envPath, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding $false))
+  Set-Content -Path $envPath -Value (($lines -join "`n") + "`n") -NoNewline -Encoding ascii
   if ($IsWindows -or $env:OS -eq 'Windows_NT') {
     [void](Test-Native icacls @($envPath, '/inheritance:r', '/grant:r', "$($env:USERNAME):(R,W)"))
   } else {
