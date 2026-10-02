@@ -220,7 +220,6 @@ export interface Team {
 
 export interface Meta {
   teams: Team[]
-  users: string[]
   grafana: boolean
   pd_mode: string
   version: string
@@ -233,23 +232,145 @@ export interface IncidentList {
   hourly: Record<string, number>[]
 }
 
-let currentUser = 'Дежурный инженер'
-export function setUser(u: string) {
-  currentUser = u
+// ---- access ----
+
+export type Perm =
+  | 'incidents.view'
+  | 'incidents.act'
+  | 'cmdb.view'
+  | 'cmdb.edit'
+  | 'connectors.view'
+  | 'connectors.edit'
+  | 'events.view'
+  | 'maintenance.edit'
+  | 'rules.view'
+  | 'notify.edit'
+  | 'selfcheck.view'
+  | 'selfcheck.admin'
+  | 'audit.view'
+  | 'users.admin'
+
+export interface User {
+  id: string
+  username: string
+  name?: string
+  email?: string
+  roles: string[]
+  business_services?: string[]
+  disabled?: boolean
+  service?: boolean
+  must_change_password?: boolean
+  created_at: string
+  last_login_at?: string
+  password_changed_at?: string
+  locked_until?: string
+  sessions?: number
+  tokens?: number
 }
 
+export interface Role {
+  id: string
+  name: string
+  description?: string
+  permissions: Perm[]
+  all_services: boolean
+  built_in?: boolean
+  updated_at?: string
+}
+
+export interface APIToken {
+  id: string
+  user_id: string
+  name: string
+  prefix: string
+  created_at: string
+  expires_at?: string
+  last_used_at?: string
+}
+
+export interface Me {
+  user: User
+  permissions: Perm[]
+  all_services: boolean
+  business_services: { id: string; name: string }[]
+  csrf: string
+}
+
+export type ChannelType = 'teams' | 'zoom'
+export type NotifyEvent = 'open' | 'escalate' | 'ack' | 'resolve' | 'fallback'
+
+export interface Channel {
+  id: string
+  name: string
+  type: ChannelType
+  mode: 'always' | 'fallback'
+  enabled: boolean
+  min_severity: Severity
+  events: NotifyEvent[]
+  services?: string[]
+  url_ref?: string
+  token_ref?: string
+  url_set: boolean
+  token_set: boolean
+  url_hint?: string
+  sent: number
+  failed: number
+  last_status?: number
+  last_error?: string
+  last_at?: string
+  updated_at: string
+  updated_by: string
+}
+
+export interface Delivery {
+  id: string
+  channel_id: string
+  channel: string
+  alert_id: string
+  event: string
+  ok: boolean
+  status: number
+  attempts: number
+  error?: string
+  at: string
+}
+
+// The CSRF token of the cookie session, sent on every changing request.
+let csrf = ''
+export function setCSRF(v: string) {
+  csrf = v
+}
+
+export class ApiError extends Error {
+  status: number
+  code?: string
+  constructor(message: string, status: number, code?: string) {
+    super(message)
+    this.status = status
+    this.code = code
+  }
+}
+
+// AUTH_EVENT fires when the server says the session is gone or the password
+// must be changed; the app then shows the sign-in screen.
+export const AUTH_EVENT = 'umb:auth'
+
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (method !== 'GET' && csrf) headers['X-Umbrella-CSRF'] = csrf
   const res = await fetch(url, {
     method,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Umbrella-User': encodeURIComponent(currentUser),
-    },
+    headers,
+    credentials: 'same-origin',
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (res.status === 204) return undefined as T
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  if (!res.ok) {
+    const auth = res.status === 401 || data.code === 'password_change_required'
+    if (auth && !url.startsWith('/api/auth/')) window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: data.code ?? 'unauthorized' }))
+    throw new ApiError(data.error || `HTTP ${res.status}`, res.status, data.code)
+  }
   return data as T
 }
 

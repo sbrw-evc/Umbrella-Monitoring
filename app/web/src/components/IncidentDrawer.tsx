@@ -16,7 +16,8 @@ type Tab = 'main' | 'events' | 'timeline' | 'pd' | 'comments'
 
 // IncidentDrawer is the "i" side panel: everything about one incident.
 export function IncidentDrawer({ id, onClose, onOpen }: { id: string; onClose: () => void; onOpen?: (id: string) => void }) {
-  const { toast } = useApp()
+  const { toast, can } = useApp()
+  const canAct = can('incidents.act')
   const { data, reload } = useFetch<Detail>(`/api/incidents/${id}`)
   const [tab, setTab] = useState<Tab>('main')
   const [comment, setComment] = useState('')
@@ -53,12 +54,12 @@ export function IncidentDrawer({ id, onClose, onOpen }: { id: string; onClose: (
             <a className="btn" href={data!.grafana_url} target="_blank" rel="noreferrer">
               <ExternalLink size={14} /> {t('incidents.drawer.grafana')}
             </a>
-            {inc.status === 'open' && (
+            {canAct && inc.status === 'open' && (
               <button className="btn" onClick={() => act('ack')}>
                 <CheckCheck size={14} /> {t('incidents.drawer.ack')}
               </button>
             )}
-            {inc.status !== 'resolved' && (
+            {canAct && inc.status !== 'resolved' && (
               <button className="btn btn-primary" onClick={() => act('resolve')}>
                 <CircleCheck size={14} /> {t('incidents.drawer.resolve')}
               </button>
@@ -147,7 +148,7 @@ export function IncidentDrawer({ id, onClose, onOpen }: { id: string; onClose: (
           {tab === 'comments' && (
             <div>
               <Timeline items={timeline.filter((t) => t.kind === 'comment')} empty={t('incidents.drawer.noComments')} />
-              {inc.status !== 'resolved' && (
+              {canAct && inc.status !== 'resolved' && (
                 <form
                   className="comment-form"
                   onSubmit={(e) => {

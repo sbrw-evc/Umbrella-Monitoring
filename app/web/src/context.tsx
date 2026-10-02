@@ -1,5 +1,6 @@
+import { flushSync } from 'react-dom'
 import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { api, setUser, type Meta } from './api'
+import { api, AUTH_EVENT, setCSRF, type Me, type Meta, type Perm } from './api'
 import {
   BUILT_IN_LOCALES,
   loadActiveLocale,
@@ -11,6 +12,8 @@ import {
   type Locale,
   type T,
 } from './i18n'
+import { transition } from './motion'
+import { SignIn } from './pages/SignIn'
 import { applyTheme, BUILT_IN_THEMES, loadActiveTheme, loadCustomThemes, saveActiveTheme, saveCustomThemes, type Theme } from './theme'
 
 // Live updates from /api/ws. Pages subscribe to message types and refetch.
@@ -20,8 +23,12 @@ interface AppState {
   meta: Meta | null
   team: string // "all" or team id: scopes what the user sees
   setTeam: (t: string) => void
-  user: string
-  setUserName: (u: string) => void
+  // signed-in user; null while signed out
+  me: Me | null
+  can: (p: Perm) => boolean
+  signedIn: (m: Me) => void
+  refreshMe: () => Promise<void>
+  logout: () => void
   connected: boolean
   subscribe: (l: Listener) => () => void
   toast: (text: string, kind?: 'ok' | 'error') => void
@@ -60,7 +67,8 @@ function save(key: string, v: string) {
 export function AppProvider({ children }: { children: ReactNode }) {
   const [meta, setMeta] = useState<Meta | null>(null)
   const [team, setTeamState] = useState(() => load('umb.team', 'all'))
-  const [user, setUserState] = useState(() => load('umb.user', 'Дежурный инженер'))
+  // undefined: still checking the session; null: signed out
+  const [me, setMe] = useState<Me | null | undefined>(undefined)
   const [connected, setConnected] = useState(false)
   const [toasts, setToasts] = useState<{ id: number; text: string; kind: string }[]>([])
   const listeners = useRef(new Set<Listener>())
@@ -82,13 +90,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const locale = locales.find((x) => x.id === localeId) ?? BUILT_IN_LOCALES[0]
   setActiveLocale(locale)
 
-  setUser(user)
-
-  useEffect(() => {
-    api.get<Meta>('/api/meta').then(setMeta).catch(() => setMeta(null))
+  const applyMe = useCallback((m: Me | null) => {
+    setCSRF(m?.csrf ?? '')
+    setMe(m)
   }, [])
+  const refreshMe = useCallback(
+    () =>
+      api
+        .get<Me>('/api/auth/me')
+        .then(applyMe)
+        .catch(() => applyMe(null)),
+    [applyMe],
+  )
+  useEffect(() => {
+    refreshMe()
+    // A 401 or "change your password" from any call re-checks the session.
+    const onAuth = () => refreshMe()
+    window.addEventListener(AUTH_EVENT, onAuth)
+    return () => window.removeEventListener(AUTH_EVENT, onAuth)
+  }, [refreshMe])
+  const logout = useCallback(() => {
+    api
+      .post('/api/auth/logout')
+      .catch(() => undefined)
+      .finally(() => applyMe(null))
+  }, [applyMe])
+  const perms = useMemo(() => new Set(me?.permissions ?? []), [me])
+  const can = useCallback((p: Perm) => perms.has(p), [perms])
+  const ready = !!me && !me.user.must_change_password
 
   useEffect(() => {
+    if (!ready) return
+    api.get<Meta>('/api/meta').then(setMeta).catch(() => setMeta(null))
+  }, [ready])
+
+  useEffect(() => {
+    if (!ready) return
     let ws: WebSocket | null = null
     let stopped = false
     let retry: number | undefined
@@ -114,8 +151,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       stopped = true
       window.clearTimeout(retry)
       ws?.close()
+      setConnected(false)
     }
-  }, [])
+  }, [ready])
 
   const subscribe = useCallback((l: Listener) => {
     listeners.current.add(l)
@@ -134,15 +172,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTeamState(t)
     save('umb.team', t)
   }
-  const setUserName = (u: string) => {
-    setUserState(u)
-    setUser(u)
-    save('umb.user', u)
-  }
 
   const setTheme = (id: string) => {
-    setThemeId(id)
+    if (id === themeId) return
+    const next = themes.find((x) => x.id === id)
     saveActiveTheme(id)
+    transition('theme', () => {
+      if (next) applyTheme(next)
+      flushSync(() => setThemeId(id))
+    })
   }
   const addTheme = (th: Theme) => {
     const next = [...customThemes.filter((x) => x.id !== th.id), th]
@@ -156,8 +194,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (themeId === id) setTheme('light')
   }
   const setLocale = (id: string) => {
-    setLocaleId(id)
+    if (id === localeId) return
     saveActiveLocale(id)
+    transition('locale', () => flushSync(() => setLocaleId(id)))
   }
   const addLocale = (l: Locale) => {
     const next = [...customLocales.filter((x) => x.id !== l.id), l]
@@ -177,8 +216,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     meta,
     team,
     setTeam,
-    user,
-    setUserName,
+    me: me ?? null,
+    can,
+    signedIn: applyMe,
+    refreshMe,
+    logout,
     connected,
     subscribe,
     toast,
@@ -199,7 +241,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // memoized list is rebuilt in the new language.
   return (
     <Ctx.Provider value={value}>
-      <Fragment key={`${locale.id}:${localeRev}`}>{children}</Fragment>
+      <Fragment key={`${locale.id}:${localeRev}`}>
+        {me === undefined ? <div className="boot" /> : ready ? children : <SignIn mustChange={!!me} />}
+      </Fragment>
       <div className="toasts">
         {toasts.map((t) => (
           <div key={t.id} className={`toast toast-${t.kind}`}>

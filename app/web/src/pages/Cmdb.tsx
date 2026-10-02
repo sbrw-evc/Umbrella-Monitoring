@@ -11,7 +11,7 @@ import { Empty, Field, Modal, PageHeader, SevBadge, SideList } from '../componen
 const CI_TYPES = ['business_service', 'it_service', 'host', 'database', 'cloud_group', 'deployment', 'network']
 
 export function CmdbPage() {
-  const { team, toast } = useApp()
+  const { team, toast, can } = useApp()
   const [filter, setFilter] = useState('all')
   const [q, setQ] = useState('')
   const [mode, setMode] = useState<'table' | 'graph'>('table')
@@ -61,9 +61,11 @@ export function CmdbPage() {
                   <Workflow size={14} /> {t('cmdb.header.graph')}
                 </button>
               </div>
-              <button className="btn btn-primary" onClick={() => setCreating(true)}>
-                <Plus size={14} /> {t('cmdb.header.create')}
-              </button>
+              {can('cmdb.edit') && (
+                <button className="btn btn-primary" onClick={() => setCreating(true)}>
+                  <Plus size={14} /> {t('cmdb.header.create')}
+                </button>
+              )}
             </>
           }
         />

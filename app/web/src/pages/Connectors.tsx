@@ -7,7 +7,7 @@ import { Empty, Field, Modal, PageHeader, SideList } from '../components/ui'
 import { t } from '../i18n'
 
 export function ConnectorsPage() {
-  const { team, toast } = useApp()
+  const { team, toast, can } = useApp()
   const nav = useNavigate()
   const [filter, setFilter] = useState('all')
   const [creating, setCreating] = useState(false)
@@ -51,9 +51,11 @@ export function ConnectorsPage() {
           title={t('connectors.header.title')}
           sub={t('connectors.header.sub')}
           actions={
-            <button className="btn btn-primary" onClick={() => setCreating(true)}>
-              <Plus size={14} /> {t('connectors.header.create')}
-            </button>
+            can('connectors.edit') && (
+              <button className="btn btn-primary" onClick={() => setCreating(true)}>
+                <Plus size={14} /> {t('connectors.header.create')}
+              </button>
+            )
           }
         />
         <div className="card card-flush">
@@ -99,7 +101,7 @@ export function ConnectorsPage() {
                       <div className="sub-line">{c.updated_by}</div>
                     </td>
                     <td onClick={(e) => e.stopPropagation()} className="menu-cell">
-                      <button className="icon-btn" onClick={() => setMenu(menu === c.id ? null : c.id)}>
+                      <button className="icon-btn" onClick={() => setMenu(menu === c.id ? null : c.id)} hidden={!can('connectors.edit')}>
                         <MoreVertical size={16} />
                       </button>
                       {menu === c.id && (

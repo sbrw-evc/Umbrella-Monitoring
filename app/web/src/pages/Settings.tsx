@@ -1,6 +1,7 @@
-import { Check, Download, Languages, Palette, Trash2, Upload } from 'lucide-react'
+import { Check, Download, Languages, Palette, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useApp } from '../context'
+import { loadMotion, saveMotion, type Motion } from '../motion'
 import { BUILT_IN_LOCALES, coverage, download, localeTemplate, parseLocale, t, type Dict } from '../i18n'
 import { PageHeader, Tabs } from '../components/ui'
 import { parseTheme, resolveColors, themeTemplate, THEME_GROUP_HELP, BUILT_IN_THEMES, type Theme } from '../theme'
@@ -25,8 +26,39 @@ export function SettingsPage() {
           }}
         />
         {tab === 'themes' ? <ThemesSection /> : <LanguagesSection />}
+        <MotionSection />
       </div>
     </div>
+  )
+}
+
+function MotionSection() {
+  const [motion, setMotion] = useState<Motion>(loadMotion)
+  return (
+    <section className="card">
+      <div className="card-head">
+        <div>
+          <h3>
+            <Sparkles size={16} /> {t('settings.motion.title')}
+          </h3>
+          <p className="hint">{t('settings.motion.intro')}</p>
+        </div>
+        <div className="seg">
+          {(['auto', 'on', 'off'] as Motion[]).map((m) => (
+            <button
+              key={m}
+              className={`seg-btn ${motion === m ? 'seg-active' : ''}`}
+              onClick={() => {
+                setMotion(m)
+                saveMotion(m)
+              }}
+            >
+              {t(`settings.motion.${m}`)}
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
   )
 }
 

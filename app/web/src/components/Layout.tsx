@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  BellRing,
   BookOpen,
   Cable,
   Check,
@@ -11,6 +12,8 @@ import {
   Gauge,
   Globe,
   Grid3x3,
+  KeyRound,
+  LogOut,
   Moon,
   Network,
   RadioTower,
@@ -19,18 +22,24 @@ import {
   ShieldCheck,
   Siren,
   Sun,
+  UserCog,
   Users,
   Wrench,
 } from 'lucide-react'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
+import { type Perm } from '../api'
 import { useApp } from '../context'
+import { TokensModal } from '../pages/Access'
+import { PasswordFields } from '../pages/SignIn'
+import { Modal } from './ui'
 import { t } from '../i18n'
 
 interface Item {
   to: string
   key: string
   icon: ReactNode
+  perm: Perm
 }
 interface Group {
   id: string
@@ -43,36 +52,41 @@ const GROUPS: Group[] = [
   {
     id: 'overview',
     items: [
-      { to: '/ops', key: 'ops', icon: <Gauge size={18} /> },
-      { to: '/incidents', key: 'incidents', icon: <Siren size={18} /> },
-      { to: '/heatmap', key: 'heatmap', icon: <Grid3x3 size={18} /> },
-      { to: '/cmdb', key: 'cmdb', icon: <Network size={18} /> },
+      { to: '/ops', key: 'ops', icon: <Gauge size={18} />, perm: 'incidents.view' },
+      { to: '/incidents', key: 'incidents', icon: <Siren size={18} />, perm: 'incidents.view' },
+      { to: '/heatmap', key: 'heatmap', icon: <Grid3x3 size={18} />, perm: 'incidents.view' },
+      { to: '/cmdb', key: 'cmdb', icon: <Network size={18} />, perm: 'cmdb.view' },
     ],
   },
   {
     id: 'collect',
     items: [
-      { to: '/connectors', key: 'connectors', icon: <Cable size={18} /> },
-      { to: '/events', key: 'events', icon: <RadioTower size={18} /> },
-      { to: '/parse-errors', key: 'parseErrors', icon: <AlertTriangle size={18} /> },
+      { to: '/connectors', key: 'connectors', icon: <Cable size={18} />, perm: 'connectors.view' },
+      { to: '/events', key: 'events', icon: <RadioTower size={18} />, perm: 'events.view' },
+      { to: '/parse-errors', key: 'parseErrors', icon: <AlertTriangle size={18} />, perm: 'events.view' },
     ],
   },
   {
     id: 'process',
     items: [
-      { to: '/rules', key: 'rules', icon: <BookOpen size={18} /> },
-      { to: '/maintenance', key: 'maintenance', icon: <Wrench size={18} /> },
+      { to: '/rules', key: 'rules', icon: <BookOpen size={18} />, perm: 'rules.view' },
+      { to: '/maintenance', key: 'maintenance', icon: <Wrench size={18} />, perm: 'incidents.view' },
     ],
   },
   {
     id: 'admin',
     items: [
-      { to: '/selfcheck', key: 'selfcheck', icon: <Activity size={18} /> },
-      { to: '/audit', key: 'audit', icon: <ClipboardList size={18} /> },
-      { to: '/roles', key: 'roles', icon: <ShieldCheck size={18} /> },
+      { to: '/selfcheck', key: 'selfcheck', icon: <Activity size={18} />, perm: 'selfcheck.view' },
+      { to: '/audit', key: 'audit', icon: <ClipboardList size={18} />, perm: 'audit.view' },
+      { to: '/notifications', key: 'notifications', icon: <BellRing size={18} />, perm: 'notify.edit' },
+      { to: '/users', key: 'users', icon: <UserCog size={18} />, perm: 'users.admin' },
+      { to: '/roles', key: 'roles', icon: <ShieldCheck size={18} />, perm: 'users.admin' },
     ],
   },
 ]
+
+// ROUTE_PERMS: which permission opens each page (the router uses it too).
+export const ROUTE_PERMS: Record<string, Perm> = Object.fromEntries(GROUPS.flatMap((g) => g.items.map((it) => [it.to, it.perm])))
 
 function loadBool(key: string, def: boolean) {
   try {
@@ -81,6 +95,12 @@ function loadBool(key: string, def: boolean) {
   } catch {
     return def
   }
+}
+
+// roleName shows built-in roles in the active language.
+export function roleName(id: string, fallback?: string) {
+  const v = t(`roles.names.${id}`)
+  return v === `roles.names.${id}` ? (fallback ?? id) : v
 }
 
 export function Logo({ size = 30 }: { size?: number }) {
@@ -114,12 +134,15 @@ function usePopup() {
 }
 
 export function Layout({ children }: { children: ReactNode }) {
-  const { meta, team, setTeam, user, setUserName, connected, theme, themes, setTheme, locale, locales, setLocale } = useApp()
+  const { meta, team, setTeam, me, can, logout, connected, theme, themes, setTheme, locale, locales, setLocale } = useApp()
   const [expanded, setExpanded] = useState(() => loadBool('umb.rail.expanded', false))
   const [search, setSearch] = useState('')
   const teamPop = usePopup()
   const langPop = usePopup()
   const userPop = usePopup()
+  const [dialog, setDialog] = useState<'' | 'password' | 'tokens'>('')
+  const user = me?.user.name || me?.user.username || ''
+  const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((it) => can(it.perm)) })).filter((g) => g.items.length > 0)
   const nav = useNavigate()
   const loc = useLocation()
   const editor = /^\/connectors\/[^/]+$/.test(loc.pathname)
@@ -154,7 +177,7 @@ export function Layout({ children }: { children: ReactNode }) {
         </button>
 
         <div className="rail-menu">
-          {GROUPS.map((g) => (
+          {groups.map((g) => (
             <div key={g.id} className="rail-group">
               {expanded ? <div className="rail-group-title">{t(`menu.groups.${g.id}`)}</div> : <div className="rail-sep" />}
               {g.items.map((it) => (
@@ -262,31 +285,54 @@ export function Layout({ children }: { children: ReactNode }) {
               <span className="avatar">{user.slice(0, 1)}</span>
             </button>
             {userPop.open && (
-              <div className="popup popup-right">
+              <div className="popup popup-right popup-account">
                 <div className="popup-user">
                   <b>{user}</b>
-                  <small>{t('common.layout.demoSignIn')}</small>
+                  <small>
+                    {me?.user.username} · {me?.user.roles.map((r) => roleName(r)).join(', ')}
+                  </small>
+                  <small>
+                    {t('account.scope')}: {me?.all_services ? t('account.allServices') : me?.business_services.map((x) => x.name).join(', ') || '—'}
+                  </small>
                 </div>
-                <div className="popup-title">{t('common.layout.signInAs')}</div>
-                {(meta?.users ?? []).map((u) => (
-                  <button
-                    key={u}
-                    className={`popup-item ${u === user ? 'active' : ''}`}
-                    onClick={() => {
-                      setUserName(u)
-                      userPop.setOpen(false)
-                    }}
-                  >
-                    <span>{u}</span>
-                    {u === user && <Check size={14} />}
-                  </button>
-                ))}
+                <button
+                  className="popup-item"
+                  onClick={() => {
+                    userPop.setOpen(false)
+                    setDialog('password')
+                  }}
+                >
+                  <span>{t('account.changePassword')}</span>
+                  <KeyRound size={14} />
+                </button>
+                <button
+                  className="popup-item"
+                  onClick={() => {
+                    userPop.setOpen(false)
+                    setDialog('tokens')
+                  }}
+                >
+                  <span>{t('account.tokens')}</span>
+                </button>
+                <button className="popup-item" onClick={logout}>
+                  <span>{t('account.logout')}</span>
+                  <LogOut size={14} />
+                </button>
               </div>
             )}
           </div>
         </header>
-        <main className={`main ${editor ? 'main-fixed' : ''}`}>{children}</main>
+        {/* The key replays the page entrance animation on each page change. */}
+        <main key={editor ? 'editor' : loc.pathname} className={`main page-enter ${editor ? 'main-fixed' : ''}`}>
+          {children}
+        </main>
       </div>
+      {dialog === 'password' && (
+        <Modal title={t('auth.changeTitle')} onClose={() => setDialog('')}>
+          <PasswordFields onDone={() => setDialog('')} />
+        </Modal>
+      )}
+      {dialog === 'tokens' && me && <TokensModal user={me.user} onClose={() => setDialog('')} />}
     </div>
   )
 }

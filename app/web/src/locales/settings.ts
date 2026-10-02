@@ -8,6 +8,13 @@ export const ru = {
     themes: 'Темы',
     languages: 'Языки',
   },
+  motion: {
+    title: 'Анимация интерфейса',
+    intro: 'Плавная смена темы и языка, появление блоков, строк и панелей. «Как в системе» выключает анимацию, если в ОС включено уменьшение движения.',
+    auto: 'Как в системе',
+    on: 'Включена',
+    off: 'Выключена',
+  },
   themes: {
     title: 'Цветовые темы',
     intro: 'Светлая и тёмная темы встроены. Свою тему можно собрать из шаблона: скачайте JSON, задайте цвета для нужных элементов и загрузите файл обратно.',
@@ -82,6 +89,13 @@ export const en: typeof ru = {
   tabs: {
     themes: 'Themes',
     languages: 'Languages',
+  },
+  motion: {
+    title: 'Interface motion',
+    intro: 'Smooth theme and language switches, blocks, rows and panels that ease in. "System" turns motion off when the OS asks for reduced motion.',
+    auto: 'System',
+    on: 'On',
+    off: 'Off',
   },
   themes: {
     title: 'Color themes',

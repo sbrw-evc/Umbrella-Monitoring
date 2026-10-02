@@ -37,7 +37,7 @@ function loadViews(): SavedView[] {
 }
 
 export function IncidentsPage() {
-  const { team, toast } = useApp()
+  const { team, toast, can } = useApp()
   const [params, setParams] = useSearchParams()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [views, setViews] = useState<SavedView[]>(loadViews)
@@ -262,7 +262,7 @@ export function IncidentsPage() {
         <div className="card card-flush">
           <IncidentTable
             items={data?.items ?? []}
-            selected={selected}
+            selected={can('incidents.act') ? selected : undefined}
             onSelect={setSelected}
             onOpen={openIncident}
             sort={(filters.sort as SortKey) ?? 'last_seen'}

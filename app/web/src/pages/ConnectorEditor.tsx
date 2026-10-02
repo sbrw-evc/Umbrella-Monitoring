@@ -122,7 +122,8 @@ type BottomTab = 'dry' | 'help'
 function Editor() {
   const { id = '' } = useParams()
   const nav = useNavigate()
-  const { toast } = useApp()
+  const { toast, can } = useApp()
+  const canEdit = can('connectors.edit')
   const rf = useReactFlow()
   const [connector, setConnector] = useState<Connector | null>(null)
   const [blocks, setBlocks] = useState<BlockSpec[]>([])
@@ -264,23 +265,27 @@ function Editor() {
           </span>
         )}
         <div className="filterbar-spacer" />
-        <button className="btn" onClick={() => save().then((ok) => ok && toast(t('editor.toasts.saved')))}>
-          <Save size={14} /> {t('editor.toolbar.save')}
-        </button>
-        <button className="btn" onClick={dryRun}>
-          <FlaskConical size={14} /> {t('editor.toolbar.dryRun')}
-        </button>
-        <button className="btn btn-primary" onClick={publish}>
-          <Upload size={14} /> {t('editor.toolbar.publish')}
-        </button>
-        {connector?.status === 'running' ? (
-          <button className="btn" onClick={() => setStatus('stop')}>
-            <Square size={14} /> {t('editor.toolbar.stop')}
-          </button>
-        ) : (
-          <button className="btn" onClick={() => setStatus('start')}>
-            <Play size={14} /> {t('editor.toolbar.start')}
-          </button>
+        {canEdit && (
+          <>
+            <button className="btn" onClick={() => save().then((ok) => ok && toast(t('editor.toasts.saved')))}>
+              <Save size={14} /> {t('editor.toolbar.save')}
+            </button>
+            <button className="btn" onClick={dryRun}>
+              <FlaskConical size={14} /> {t('editor.toolbar.dryRun')}
+            </button>
+            <button className="btn btn-primary" onClick={publish}>
+              <Upload size={14} /> {t('editor.toolbar.publish')}
+            </button>
+            {connector?.status === 'running' ? (
+              <button className="btn" onClick={() => setStatus('stop')}>
+                <Square size={14} /> {t('editor.toolbar.stop')}
+              </button>
+            ) : (
+              <button className="btn" onClick={() => setStatus('start')}>
+                <Play size={14} /> {t('editor.toolbar.start')}
+              </button>
+            )}
+          </>
         )}
       </div>
 

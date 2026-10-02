@@ -178,9 +178,9 @@ function localInput(d: Date) {
 }
 
 export function MaintenancePage() {
-  const { toast } = useApp()
+  const { toast, can } = useApp()
   const { data, reload } = useFetch<{ items: { maintenance: Maintenance; state: string }[] }>('/api/maintenance')
-  const cis = useFetch<{ items: CI[] }>('/api/cis')
+  const cis = useFetch<{ items: CI[] }>(can('cmdb.view') ? '/api/cis' : null)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState(() => ({ title: '', ci_id: '', start: localInput(new Date()), end: localInput(new Date(Date.now() + 3600e3)) }))
 
@@ -207,9 +207,11 @@ export function MaintenancePage() {
           title={t('maintenance.header.title')}
           sub={t('maintenance.header.sub')}
           actions={
-            <button className="btn btn-primary" onClick={() => setCreating(true)}>
-              <Plus size={14} /> {t('maintenance.header.create')}
-            </button>
+            can('maintenance.edit') && (
+              <button className="btn btn-primary" onClick={() => setCreating(true)}>
+                <Plus size={14} /> {t('maintenance.header.create')}
+              </button>
+            )
           }
         />
         <div className="card card-flush">
@@ -242,7 +244,7 @@ export function MaintenancePage() {
                     <td className="nowrap">{fmtTime(m.end)}</td>
                     <td>{m.author}</td>
                     <td>
-                      <button className="icon-btn" onClick={() => remove(m.id)}>
+                      <button className="icon-btn" onClick={() => remove(m.id)} hidden={!can('maintenance.edit')}>
                         <Trash2 size={15} />
                       </button>
                     </td>
@@ -320,7 +322,7 @@ interface SelfCheck {
 }
 
 export function SelfCheckPage() {
-  const { toast } = useApp()
+  const { toast, can } = useApp()
   const { data, reload } = useFetch<SelfCheck>('/api/selfcheck')
   useLive(['alert', 'event'], reload, 2000)
   if (!data) return <Empty>{t('common.words.loading')}</Empty>
@@ -360,7 +362,7 @@ export function SelfCheckPage() {
             <div>
               <b>{t('selfcheck.outage.title')}</b> {t('selfcheck.outage.text')}
             </div>
-            {pd.simulated_outage ? (
+            {!can('selfcheck.admin') ? null : pd.simulated_outage ? (
               <button className="btn btn-primary" onClick={() => outage(false)}>
                 {t('selfcheck.outage.restore')}
               </button>
@@ -408,48 +410,6 @@ export function AuditPage() {
               </tbody>
             </table>
           )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Role keys under roles.list; each has a matching "<key>Perms" entry.
-const ROLES = ['viewer', 'oncall', 'monitoring', 'owner', 'auditor', 'admin']
-
-export function RolesPage() {
-  const { meta } = useApp()
-  return (
-    <div className="page">
-      <div className="page-main">
-        <PageHeader title={t('roles.header.title')} sub={t('roles.header.sub')} />
-        <div className="card card-flush">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t('roles.table.role')}</th>
-                <th>{t('roles.table.perms')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ROLES.map((r) => (
-                <tr key={r}>
-                  <td>{t(`roles.list.${r}`)}</td>
-                  <td>{t(`roles.list.${r}Perms`)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="card">
-          <h3>{t('roles.teams.title')}</h3>
-          <div className="tags">
-            {meta?.teams.map((team) => (
-              <span key={team.id} className="tag">
-                {team.name} · <code>{team.id}</code>
-              </span>
-            ))}
-          </div>
         </div>
       </div>
     </div>

@@ -18,7 +18,9 @@ export const ru = {
     maintenance: 'Окна обслуживания',
     selfcheck: 'Самоконтроль',
     audit: 'Журнал аудита',
-    roles: 'Роли и группы',
+    users: 'Пользователи',
+    roles: 'Роли и права',
+    notifications: 'Уведомления',
     settings: 'Настройки',
   },
 }
@@ -42,7 +44,9 @@ export const en: typeof ru = {
     maintenance: 'Maintenance windows',
     selfcheck: 'Self-check',
     audit: 'Audit log',
-    roles: 'Roles and groups',
+    users: 'Users',
+    roles: 'Roles and permissions',
+    notifications: 'Notifications',
     settings: 'Settings',
   },
 }

@@ -1,5 +1,5 @@
 // Small pages; each top-level key (events, parseErrors, rules, maintenance,
-// selfcheck, audit, roles) becomes its own section.
+// selfcheck, audit) becomes its own section.
 export const ru = {
   events: {
     header: {
@@ -148,33 +148,6 @@ export const ru = {
       actor: 'Кто',
       action: 'Действие',
       object: 'Объект',
-    },
-  },
-  roles: {
-    header: {
-      title: 'Роли и группы',
-      sub: 'Группы приходят из корпоративного каталога; группа задаёт роль, область видимости и предустановку дашборда. Синхронизация с каталогом и OIDC — следующий шаг',
-    },
-    table: {
-      role: 'Роль',
-      perms: 'Разрешения',
-    },
-    list: {
-      viewer: 'Наблюдатель',
-      viewerPerms: 'просмотр дашборда и карты в своей области',
-      oncall: 'Дежурный инженер',
-      oncallPerms: 'incident.ack, incident.silence, комментарии',
-      monitoring: 'Инженер мониторинга',
-      monitoringPerms: 'коннекторы, шаблоны, правила RED/USE, окна обслуживания',
-      owner: 'Владелец сервиса',
-      ownerPerms: 'РСМ своих сервисов, резервные контакты, окна обслуживания',
-      auditor: 'Аудитор',
-      auditorPerms: 'журнал аудита, только чтение',
-      admin: 'Администратор ролей',
-      adminPerms: 'привязка групп каталога к ролям и предустановкам (в два ключа)',
-    },
-    teams: {
-      title: 'Области (команды)',
     },
   },
 }
@@ -327,33 +300,6 @@ export const en: typeof ru = {
       actor: 'Who',
       action: 'Action',
       object: 'Object',
-    },
-  },
-  roles: {
-    header: {
-      title: 'Roles and groups',
-      sub: 'Groups come from the corporate directory; a group sets the role, scope and dashboard preset. Directory sync and OIDC come next',
-    },
-    table: {
-      role: 'Role',
-      perms: 'Permissions',
-    },
-    list: {
-      viewer: 'Viewer',
-      viewerPerms: 'view the dashboard and map within own scope',
-      oncall: 'On-call engineer',
-      oncallPerms: 'incident.ack, incident.silence, comments',
-      monitoring: 'Monitoring engineer',
-      monitoringPerms: 'connectors, templates, RED/USE rules, maintenance windows',
-      owner: 'Service owner',
-      ownerPerms: 'resource-service model of own services, fallback contacts, maintenance windows',
-      auditor: 'Auditor',
-      auditorPerms: 'audit log, read-only',
-      admin: 'Role administrator',
-      adminPerms: 'map directory groups to roles and presets (two-person approval)',
-    },
-    teams: {
-      title: 'Scopes (teams)',
     },
   },
 }
