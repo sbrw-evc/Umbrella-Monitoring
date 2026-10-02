@@ -72,12 +72,16 @@ func (s *Server) heatmap(w http.ResponseWriter, r *http.Request) {
 	}
 	var hm Heatmap
 	s.st.Read(func(d *store.Data) {
-		hm = buildHeatmap(d, time.Now(), hours, group, q.Get("team"), splitList(q.Get("type")), q.Get("state") == "problem")
+		hm = buildHeatmap(d, time.Now(), hours, group, q.Get("team"), splitList(q.Get("type")), q.Get("state") == "problem", me(r).SeesCI)
 	})
 	writeJSON(w, 200, hm)
 }
 
-func buildHeatmap(d *store.Data, now time.Time, hours int, group, team string, types []string, problemsOnly bool) Heatmap {
+// sees filters CIs by the user's scope (nil: everything).
+func buildHeatmap(d *store.Data, now time.Time, hours int, group, team string, types []string, problemsOnly bool, sees func(string) bool) Heatmap {
+	if sees == nil {
+		sees = func(string) bool { return true }
+	}
 	bucket := time.Duration(hours) * time.Hour / heatmapColumns
 	to := now.Truncate(time.Minute).Add(time.Minute)
 	from := to.Add(-time.Duration(hours) * time.Hour)
@@ -152,12 +156,12 @@ func buildHeatmap(d *store.Data, now time.Time, hours int, group, team string, t
 	}
 
 	for _, ci := range d.CIs {
-		if inScope(ci.Team, ci.Type) {
+		if inScope(ci.Team, ci.Type) && sees(ci.ID) {
 			ensure(ci.ID, ci, nil)
 		}
 	}
 	for _, a := range d.Alerts {
-		if a.Suppressed {
+		if a.Suppressed || !sees(a.CIID) {
 			continue
 		}
 		end := now

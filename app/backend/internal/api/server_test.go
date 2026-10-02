@@ -6,10 +6,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/connector"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/demo"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pagerduty"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
@@ -18,21 +21,59 @@ type nopPD struct{}
 
 func (nopPD) Send(alert.PDCommand) {}
 
-func newServer(t *testing.T) *httptest.Server {
+const adminPassword = "Admin-pass-2026"
+
+func init() { auth.Iterations = 1000 }
+
+// token is the bearer token of the current test's administrator.
+var token string
+
+func newServerStore(t *testing.T) (*httptest.Server, *store.Store) {
 	t.Helper()
 	st := store.New()
 	demo.Seed(st)
-	eng := alert.New(st, nopPD{}, nil)
-	rt := connector.New(st, eng, connector.EnvSecrets{}, nil)
-	srv := New(Config{}, st, eng, rt, pagerduty.New(pagerduty.Config{}), NewHub())
+	auth.Bootstrap(st, auth.BootstrapConfig{AdminPassword: adminPassword})
+	n := notify.New(notify.Config{AllowHTTP: true, Backoff: time.Millisecond}, st, connector.EnvSecrets{})
+	eng := alert.New(st, nopPD{}, n.Observe)
+	rt := connector.New(st, eng, connector.EnvSecrets{}, n.Observe)
+	srv := New(Config{AllowHTTPWebhooks: true}, st, eng, rt, pagerduty.New(pagerduty.Config{}), NewHub())
+	srv.SetNotifier(n)
+	go n.Run(t.Context())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
+	token = login(t, ts, "admin", adminPassword)
+	return ts, st
+}
+
+func newServer(t *testing.T) *httptest.Server {
+	ts, _ := newServerStore(t)
 	return ts
+}
+
+func login(t *testing.T, ts *httptest.Server, user, password string) string {
+	t.Helper()
+	var out struct{ Token string }
+	saved := token
+	token = ""
+	code := do(t, "POST", ts.URL+"/api/auth/token", `{"username":"`+user+`","password":"`+password+`"}`, &out)
+	token = saved
+	if code != 200 || out.Token == "" {
+		t.Fatalf("login %s: code %d", user, code)
+	}
+	return out.Token
 }
 
 func do(t *testing.T, method, url, body string, out any) int {
 	t.Helper()
+	return doAs(t, token, method, url, body, out)
+}
+
+func doAs(t *testing.T, bearer, method, url, body string, out any) int {
+	t.Helper()
 	req, _ := http.NewRequest(method, url, strings.NewReader(body))
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)

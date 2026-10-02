@@ -12,12 +12,14 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/connector"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pagerduty"
@@ -30,6 +32,10 @@ type Config struct {
 	WebDir        string // built web UI (index.html); empty disables static
 	GrafanaURL    string // base URL of Grafana for /go/incidents/{id}/grafana
 	WebhookSecret string // PagerDuty Webhooks v3 signing secret
+	SecureCookies bool   // always mark the session cookie Secure (behind TLS)
+	MetricsToken  string // bearer token for /metrics; empty = open
+	// AllowHTTPWebhooks accepts http:// notification webhooks (lab only).
+	AllowHTTPWebhooks bool
 }
 
 // Server wires handlers.
@@ -39,51 +45,96 @@ type Server struct {
 	eng     *alert.Engine
 	rt      *connector.Runtime
 	pd      *pagerduty.Gateway
-	hub     *Hub
-	started time.Time
+	hub      *Hub
+	notify   Notifier
+	sessions *auth.Sessions
+	limiter  *ipLimiter
+	started  time.Time
+}
+
+// Notifier sends test messages to notification channels.
+type Notifier interface {
+	Test(ch model.Channel, actor string) model.Delivery
 }
 
 // New creates the server.
 func New(cfg Config, st *store.Store, eng *alert.Engine, rt *connector.Runtime, pd *pagerduty.Gateway, hub *Hub) *Server {
-	return &Server{cfg: cfg, st: st, eng: eng, rt: rt, pd: pd, hub: hub, started: time.Now()}
+	return &Server{cfg: cfg, st: st, eng: eng, rt: rt, pd: pd, hub: hub, sessions: auth.NewSessions(),
+		limiter: &ipLimiter{hits: map[string][]time.Time{}}, started: time.Now()}
 }
+
+// SetNotifier wires the notification sender (test messages).
+func (s *Server) SetNotifier(n Notifier) { s.notify = n }
 
 // Handler returns the HTTP handler.
 func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
-	m.HandleFunc("GET /api/meta", s.meta)
-	m.HandleFunc("GET /api/incidents", s.listIncidents)
-	m.HandleFunc("GET /api/incidents/{id}", s.getIncident)
-	m.HandleFunc("POST /api/incidents/{id}/{action}", s.actIncident)
-	m.HandleFunc("POST /api/incidents/bulk", s.bulkIncidents)
-	m.HandleFunc("GET /api/events", s.listEvents)
-	m.HandleFunc("GET /api/parse-errors", s.listParseErrors)
-	m.HandleFunc("GET /api/cis", s.listCIs)
-	m.HandleFunc("POST /api/cis", s.createCI)
-	m.HandleFunc("GET /api/cis/{id}", s.getCI)
-	m.HandleFunc("GET /api/cmdb/graph", s.graph)
-	m.HandleFunc("GET /api/heatmap", s.heatmap)
-	m.HandleFunc("GET /api/blocks", s.blocks)
-	m.HandleFunc("GET /api/connectors", s.listConnectors)
-	m.HandleFunc("POST /api/connectors", s.createConnector)
-	m.HandleFunc("GET /api/connectors/{id}", s.getConnector)
-	m.HandleFunc("PUT /api/connectors/{id}", s.updateConnector)
-	m.HandleFunc("DELETE /api/connectors/{id}", s.deleteConnector)
-	m.HandleFunc("POST /api/connectors/{id}/dry-run", s.dryRun)
-	m.HandleFunc("POST /api/connectors/{id}/publish", s.publish)
-	m.HandleFunc("POST /api/connectors/{id}/start", s.setConnectorStatus(model.ConnectorRunning))
-	m.HandleFunc("POST /api/connectors/{id}/stop", s.setConnectorStatus(model.ConnectorStopped))
-	m.HandleFunc("GET /api/maintenance", s.listMaintenance)
-	m.HandleFunc("POST /api/maintenance", s.createMaintenance)
-	m.HandleFunc("DELETE /api/maintenance/{id}", s.deleteMaintenance)
-	m.HandleFunc("GET /api/rules", s.listRules)
-	m.HandleFunc("GET /api/audit", s.listAudit)
-	m.HandleFunc("GET /api/selfcheck", s.selfcheck)
-	m.HandleFunc("POST /api/selfcheck/pd-outage", s.pdOutage)
-	m.HandleFunc("GET /api/ws", s.hub.serve)
+	// p registers a handler that needs a signed-in user with perm ("" = any).
+	p := func(pattern, perm string, h http.HandlerFunc) { m.HandleFunc(pattern, s.require(perm, h)) }
+
+	m.HandleFunc("POST /api/auth/login", s.authLogin)
+	m.HandleFunc("POST /api/auth/token", s.authToken)
+	p("GET /api/auth/me", "", s.authMe)
+	p("POST /api/auth/logout", "", s.authLogout)
+	p("POST /api/auth/password", "", s.authPassword)
+
+	p("GET /api/meta", "", s.meta)
+	p("GET /api/incidents", model.PermIncidentsView, s.listIncidents)
+	p("GET /api/incidents/{id}", model.PermIncidentsView, s.getIncident)
+	p("POST /api/incidents/{id}/{action}", model.PermIncidentsAct, s.actIncident)
+	p("POST /api/incidents/bulk", model.PermIncidentsAct, s.bulkIncidents)
+	p("GET /api/events", model.PermEventsView, s.listEvents)
+	p("GET /api/parse-errors", model.PermEventsView, s.listParseErrors)
+	p("GET /api/cis", model.PermCMDBView, s.listCIs)
+	p("POST /api/cis", model.PermCMDBEdit, s.createCI)
+	p("GET /api/cis/{id}", model.PermCMDBView, s.getCI)
+	p("GET /api/cmdb/graph", model.PermCMDBView, s.graph)
+	p("GET /api/heatmap", model.PermIncidentsView, s.heatmap)
+	p("GET /api/blocks", model.PermConnectorsView, s.blocks)
+	p("GET /api/connectors", model.PermConnectorsView, s.listConnectors)
+	p("POST /api/connectors", model.PermConnectorsEdit, s.createConnector)
+	p("GET /api/connectors/{id}", model.PermConnectorsView, s.getConnector)
+	p("PUT /api/connectors/{id}", model.PermConnectorsEdit, s.updateConnector)
+	p("DELETE /api/connectors/{id}", model.PermConnectorsEdit, s.deleteConnector)
+	p("POST /api/connectors/{id}/dry-run", model.PermConnectorsEdit, s.dryRun)
+	p("POST /api/connectors/{id}/publish", model.PermConnectorsEdit, s.publish)
+	p("POST /api/connectors/{id}/start", model.PermConnectorsEdit, s.setConnectorStatus(model.ConnectorRunning))
+	p("POST /api/connectors/{id}/stop", model.PermConnectorsEdit, s.setConnectorStatus(model.ConnectorStopped))
+	p("GET /api/maintenance", model.PermIncidentsView, s.listMaintenance)
+	p("POST /api/maintenance", model.PermMaintenanceEdit, s.createMaintenance)
+	p("DELETE /api/maintenance/{id}", model.PermMaintenanceEdit, s.deleteMaintenance)
+	p("GET /api/rules", model.PermRulesView, s.listRules)
+	p("GET /api/audit", model.PermAuditView, s.listAudit)
+	p("GET /api/selfcheck", model.PermSelfcheckView, s.selfcheck)
+	p("POST /api/selfcheck/pd-outage", model.PermSelfcheckAdmin, s.pdOutage)
+
+	p("GET /api/users", model.PermUsersAdmin, s.listUsers)
+	p("POST /api/users", model.PermUsersAdmin, s.createUser)
+	p("PUT /api/users/{id}", model.PermUsersAdmin, s.updateUser)
+	p("DELETE /api/users/{id}", model.PermUsersAdmin, s.deleteUser)
+	p("POST /api/users/{id}/password", model.PermUsersAdmin, s.resetPassword)
+	p("GET /api/users/{id}/tokens", "", s.listTokens)
+	p("POST /api/users/{id}/tokens", "", s.createToken)
+	p("DELETE /api/users/{id}/tokens/{tid}", "", s.deleteToken)
+	p("GET /api/roles", model.PermUsersAdmin, s.listRoles)
+	p("POST /api/roles", model.PermUsersAdmin, s.createRole)
+	p("PUT /api/roles/{id}", model.PermUsersAdmin, s.updateRole)
+	p("DELETE /api/roles/{id}", model.PermUsersAdmin, s.deleteRole)
+
+	p("GET /api/channels", model.PermNotifyEdit, s.listChannels)
+	p("POST /api/channels", model.PermNotifyEdit, s.createChannel)
+	p("PUT /api/channels/{id}", model.PermNotifyEdit, s.updateChannel)
+	p("DELETE /api/channels/{id}", model.PermNotifyEdit, s.deleteChannel)
+	p("POST /api/channels/{id}/test", model.PermNotifyEdit, s.testChannel)
+	p("GET /api/deliveries", model.PermNotifyEdit, s.listDeliveries)
+
+	p("GET /api/ws", "", s.serveWS)
+	p("GET /go/incidents/{id}/grafana", model.PermIncidentsView, s.grafana)
+
+	// Machine endpoints with their own authentication.
 	m.HandleFunc("POST /api/ingest/{id}", s.ingest)
 	m.HandleFunc("POST /api/pagerduty/webhook", s.pdWebhook)
-	m.HandleFunc("GET /go/incidents/{id}/grafana", s.grafana)
+	m.HandleFunc("GET /metrics", s.metrics)
 	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	if s.cfg.WebDir != "" {
 		m.Handle("/", spa(s.cfg.WebDir))
@@ -111,17 +162,8 @@ func readJSON(r *http.Request, v any) error {
 	return nil
 }
 
-// actor is the user name. Until OIDC is wired (next step) the UI sends the
-// selected demo user in X-Umbrella-User.
-func actor(r *http.Request) string {
-	if u := r.Header.Get("X-Umbrella-User"); u != "" {
-		if dec, err := url.QueryUnescape(u); err == nil {
-			return dec
-		}
-		return u
-	}
-	return "инженер"
-}
+// actor is the signed-in user name for timelines and the audit log.
+func actor(r *http.Request) string { return me(r).Name() }
 
 func splitList(v string) []string {
 	if v == "" {
@@ -148,15 +190,33 @@ func contains(list []string, v string) bool {
 // ---- meta ----
 
 func (s *Server) meta(w http.ResponseWriter, _ *http.Request) {
-	var teams []model.Team
-	s.st.Read(func(d *store.Data) { teams = append(teams, d.Teams...) })
+	// Teams come from the seed and from the CMDB, so a clean install without
+	// demo data still gets its team list from the CIs people create.
+	teams := []model.Team{}
+	s.st.Read(func(d *store.Data) {
+		seen := map[string]bool{}
+		for _, t := range d.Teams {
+			seen[t.ID] = true
+			teams = append(teams, t)
+		}
+		var extra []string
+		for _, ci := range d.CIs {
+			if ci.Team != "" && !seen[ci.Team] {
+				seen[ci.Team] = true
+				extra = append(extra, ci.Team)
+			}
+		}
+		sort.Strings(extra)
+		for _, id := range extra {
+			teams = append(teams, model.Team{ID: id, Name: id})
+		}
+	})
 	writeJSON(w, 200, map[string]any{
 		"teams":      teams,
 		"severities": []model.Severity{model.SevCritical, model.SevError, model.SevWarning, model.SevInfo},
-		"users":      []string{"Дежурный инженер", "Инженер мониторинга", "Владелец сервиса", "Наблюдатель"},
 		"grafana":    s.cfg.GrafanaURL != "",
 		"pd_mode":    s.pd.Status().Mode,
-		"version":    "0.1.0-mvp",
+		"version":    "0.2.0-mvp",
 	})
 }
 
@@ -299,7 +359,11 @@ func (s *Server) listIncidents(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		p := me(r)
 		for _, a := range d.Alerts {
+			if !p.SeesCI(a.CIID) {
+				continue
+			}
 			// Indicator tiles count active incidents in the team scope,
 			// independent of the other filters (like operational tiles).
 			if a.Status.Active() && (q.Team == "" || q.Team == "all" || a.Team == q.Team) {
@@ -338,7 +402,7 @@ func (s *Server) listIncidents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getIncident(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	a, ok := s.eng.Get(id)
-	if !ok {
+	if !ok || !me(r).SeesCI(a.CIID) {
 		writeErr(w, 404, alert.ErrNotFound)
 		return
 	}
@@ -351,7 +415,7 @@ func (s *Server) getIncident(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if a.RelatedID != "" {
-			if o := d.Alerts[a.RelatedID]; o != nil {
+			if o := d.Alerts[a.RelatedID]; o != nil && me(r).SeesCI(o.CIID) {
 				c := alert.Clone(o)
 				c.Timeline = nil
 				related = &c
@@ -374,6 +438,10 @@ func (s *Server) actIncident(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, 400, err)
 			return
 		}
+	}
+	if cur, ok := s.eng.Get(r.PathValue("id")); !ok || !me(r).SeesCI(cur.CIID) {
+		writeErr(w, 404, alert.ErrNotFound)
+		return
 	}
 	a, err := s.eng.Act(r.PathValue("id"), r.PathValue("action"), actor(r), body.Text)
 	if errors.Is(err, alert.ErrNotFound) {
@@ -402,6 +470,10 @@ func (s *Server) bulkIncidents(w http.ResponseWriter, r *http.Request) {
 	}
 	done, failed := 0, map[string]string{}
 	for _, id := range body.IDs {
+		if cur, ok := s.eng.Get(id); !ok || !me(r).SeesCI(cur.CIID) {
+			failed[id] = alert.ErrNotFound.Error()
+			continue
+		}
 		if _, err := s.eng.Act(id, body.Action, actor(r), ""); err != nil {
 			failed[id] = err.Error()
 		} else {
@@ -425,6 +497,9 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	s.st.Read(func(d *store.Data) {
 		for i := len(d.Events) - 1; i >= 0 && len(out) < limit; i-- {
 			ev := d.Events[i]
+			if !me(r).SeesCI(ev.CIID) {
+				continue
+			}
 			if conn != "" && ev.ConnectorID != conn {
 				continue
 			}
@@ -443,6 +518,10 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) listParseErrors(w http.ResponseWriter, r *http.Request) {
 	conn := r.URL.Query().Get("connector")
 	out := []model.ParseError{}
+	if !me(r).AllServices {
+		writeJSON(w, 200, map[string]any{"items": out})
+		return
+	}
 	s.st.Read(func(d *store.Data) {
 		for i := len(d.ParseErrors) - 1; i >= 0 && len(out) < 500; i-- {
 			if conn == "" || d.ParseErrors[i].ConnectorID == conn {
@@ -527,6 +606,9 @@ func (s *Server) listCIs(w http.ResponseWriter, r *http.Request) {
 	out := []CIView{}
 	s.st.Read(func(d *store.Data) {
 		for _, v := range ciViews(d, time.Now()) {
+			if !me(r).SeesCI(v.ID) {
+				continue
+			}
 			if len(types) > 0 && !contains(types, v.Type) {
 				continue
 			}
@@ -588,8 +670,13 @@ func (s *Server) getCI(w http.ResponseWriter, r *http.Request) {
 	s.st.Read(func(d *store.Data) {
 		views := ciViews(d, time.Now())
 		v := views[id]
-		if v == nil {
+		if v == nil || !me(r).SeesCI(id) {
 			return
+		}
+		for k := range views {
+			if !me(r).SeesCI(k) {
+				delete(views, k)
+			}
 		}
 		type rel struct {
 			model.Relation
@@ -682,6 +769,11 @@ func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				frontier = next
+			}
+		}
+		for id := range include {
+			if !me(r).SeesCI(id) {
+				delete(include, id)
 			}
 		}
 		for id := range include {
@@ -779,6 +871,7 @@ func starterGraph(kind string) model.Graph {
 func (s *Server) createConnector(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name     string `json:"name"`
+		Slug     string `json:"slug"`
 		Team     string `json:"team"`
 		Template string `json:"template"`
 	}
@@ -791,18 +884,28 @@ func (s *Server) createConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var c model.Connector
+	var err error
 	s.st.Write(func(d *store.Data) {
-		c = model.Connector{ID: d.NextID("CON"), Name: body.Name, Team: body.Team, Status: model.ConnectorStopped,
+		c = model.Connector{Name: body.Name, Team: body.Team, Status: model.ConnectorStopped,
 			Draft: starterGraph(body.Template), DraftDirty: true, UpdatedAt: time.Now(), UpdatedBy: actor(r)}
+		if err = setSlug(d, &c, body.Slug); err != nil {
+			return
+		}
+		c.ID = d.NextID("CON")
 		d.Connectors[c.ID] = &c
 		d.AddAudit(store.AuditEntry{At: time.Now().Format(time.RFC3339), Actor: actor(r), Action: "connector.create", Object: c.ID})
 	})
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
 	writeJSON(w, 201, c)
 }
 
 func (s *Server) updateConnector(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name        *string      `json:"name"`
+		Slug        *string      `json:"slug"`
 		Description *string      `json:"description"`
 		Draft       *model.Graph `json:"draft"`
 		SampleInput *string      `json:"sample_input"`
@@ -812,6 +915,7 @@ func (s *Server) updateConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var c *model.Connector
+	var slugErr error
 	s.st.Write(func(d *store.Data) {
 		p := d.Connectors[r.PathValue("id")]
 		if p == nil {
@@ -819,6 +923,11 @@ func (s *Server) updateConnector(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Name != nil {
 			p.Name = *body.Name
+		}
+		if body.Slug != nil {
+			if slugErr = setSlug(d, p, *body.Slug); slugErr != nil {
+				return
+			}
 		}
 		if body.Description != nil {
 			p.Description = *body.Description
@@ -835,6 +944,10 @@ func (s *Server) updateConnector(w http.ResponseWriter, r *http.Request) {
 		cc := *p
 		c = &cc
 	})
+	if slugErr != nil {
+		writeErr(w, 400, slugErr)
+		return
+	}
 	if c == nil {
 		writeErr(w, 404, connector.ErrNotFound)
 		return
@@ -948,11 +1061,14 @@ func (s *Server) setConnectorStatus(st model.ConnectorStatus) http.HandlerFunc {
 
 // ---- maintenance, rules, audit ----
 
-func (s *Server) listMaintenance(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) listMaintenance(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	out := []map[string]any{}
 	s.st.Read(func(d *store.Data) {
 		for _, m := range d.Maintenance {
+			if !me(r).SeesCI(m.CIID) {
+				continue
+			}
 			out = append(out, map[string]any{"maintenance": m, "state": m.State(now)})
 		}
 	})
@@ -975,7 +1091,7 @@ func (s *Server) createMaintenance(w http.ResponseWriter, r *http.Request) {
 	var err error
 	s.st.Write(func(d *store.Data) {
 		ci := d.CIs[body.CIID]
-		if ci == nil {
+		if ci == nil || !me(r).SeesCI(ci.ID) {
 			err = errors.New("КЕ не найдена")
 			return
 		}
@@ -996,6 +1112,9 @@ func (s *Server) createMaintenance(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteMaintenance(w http.ResponseWriter, r *http.Request) {
 	s.st.Write(func(d *store.Data) {
+		if m := d.Maintenance[r.PathValue("id")]; m == nil || !me(r).SeesCI(m.CIID) {
+			return
+		}
 		delete(d.Maintenance, r.PathValue("id"))
 		d.AddAudit(store.AuditEntry{At: time.Now().Format(time.RFC3339), Actor: actor(r), Action: "maintenance.delete", Object: r.PathValue("id")})
 	})
@@ -1077,7 +1196,7 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	if v, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 		token = v
 	}
-	n, err := s.rt.Webhook(r.PathValue("id"), string(body), token)
+	n, err := s.rt.Webhook(s.connectorRef(r.PathValue("id")), string(body), token)
 	switch {
 	case errors.Is(err, connector.ErrNotFound):
 		writeErr(w, 404, err)
@@ -1091,6 +1210,43 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, 202, map[string]int{"accepted": n})
 	}
+}
+
+// connectorRef maps a slug (/api/ingest/zabbix) to the connector id.
+func (s *Server) connectorRef(ref string) string {
+	id := ref
+	s.st.Read(func(d *store.Data) {
+		if d.Connectors[ref] != nil {
+			return
+		}
+		for _, c := range d.Connectors {
+			if c.Slug != "" && c.Slug == ref {
+				id = c.ID
+			}
+		}
+	})
+	return id
+}
+
+var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,40}$`)
+
+// setSlug validates a slug and checks it is free. Call inside a store write.
+func setSlug(d *store.Data, c *model.Connector, slug string) error {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		c.Slug = ""
+		return nil
+	}
+	if !slugRe.MatchString(slug) || strings.HasPrefix(strings.ToUpper(slug), "CON-") {
+		return errors.New("короткое имя: латиница в нижнем регистре, цифры и дефис")
+	}
+	for _, o := range d.Connectors {
+		if o.ID != c.ID && o.Slug == slug {
+			return errors.New("короткое имя уже занято коннектором " + o.ID)
+		}
+	}
+	c.Slug = slug
+	return nil
 }
 
 func (s *Server) pdWebhook(w http.ResponseWriter, r *http.Request) {
@@ -1127,7 +1283,7 @@ var grafanaStub = template.Must(template.New("g").Parse(`<!doctype html><meta ch
 
 func (s *Server) grafana(w http.ResponseWriter, r *http.Request) {
 	a, ok := s.eng.Get(r.PathValue("id"))
-	if !ok {
+	if !ok || !me(r).SeesCI(a.CIID) {
 		writeErr(w, 404, alert.ErrNotFound)
 		return
 	}

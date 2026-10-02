@@ -215,6 +215,7 @@ const (
 // Connector is a source connection assembled in the block builder.
 type Connector struct {
 	ID          string          `json:"id"`
+	Slug        string          `json:"slug,omitempty"` // stable ingest name: /api/ingest/<slug>
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Team        string          `json:"team"`

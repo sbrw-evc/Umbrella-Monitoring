@@ -47,6 +47,10 @@ type Engine struct {
 	// FallbackAfter: an error or critical alert not accepted by PagerDuty
 	// within this time from opening goes to the fallback channels.
 	FallbackAfter time.Duration
+	// AutoCMDB adds an unknown CI named by an event to the CMDB (origin
+	// "auto"): a host, linked under the IT service from the "service" label.
+	// It builds the map from monitoring data on a deployment without seed.
+	AutoCMDB bool
 }
 
 // New creates the engine. notify may be nil.
@@ -98,6 +102,9 @@ func (e *Engine) Ingest(src Source, drafts []pipeline.Draft) []model.Event {
 				continue
 			}
 			ci := ResolveCI(d, dr.CI, dr.Labels)
+			if ci == nil && e.AutoCMDB {
+				ci = autoCI(d, dr, now)
+			}
 			if ci != nil {
 				ev.CIID = ci.ID
 				ev.CIName = ci.Name
@@ -179,6 +186,42 @@ func ResolveCI(d *store.Data, name string, labels map[string]string) *model.CI {
 		}
 	}
 	return nil
+}
+
+// autoCI creates the CI an event names, and its IT service from the
+// "service" label. Call inside Write.
+func autoCI(d *store.Data, dr pipeline.Draft, now time.Time) *model.CI {
+	name := strings.TrimSpace(dr.CI)
+	if tag := dr.Labels["ci"]; tag != "" {
+		name = tag
+	}
+	if name == "" || len(name) > 200 || len(d.CIs) >= 100000 {
+		return nil
+	}
+	team := dr.Labels["team"]
+	add := func(name, typ string) *model.CI {
+		ci := &model.CI{ID: d.NextID("CI"), Name: name, Type: typ, Team: team, Origin: "auto", CreatedAt: now,
+			Identities: []model.Identity{}, Labels: map[string]string{}}
+		if typ == model.CIHost {
+			ci.Identities = append(ci.Identities, model.Identity{Kind: "hostname", Value: name, Since: now})
+			for _, k := range []string{"ip", "instance", "host"} {
+				if v := dr.Labels[k]; v != "" && !strings.EqualFold(v, name) {
+					ci.Identities = append(ci.Identities, model.Identity{Kind: k, Value: v, Since: now})
+				}
+			}
+		}
+		d.CIs[ci.ID] = ci
+		return ci
+	}
+	ci := add(name, model.CIHost)
+	if svc := strings.TrimSpace(dr.Labels["service"]); svc != "" && !strings.EqualFold(svc, name) {
+		s := ResolveCI(d, svc, nil)
+		if s == nil {
+			s = add(svc, model.CIITService)
+		}
+		d.Relations = append(d.Relations, model.Relation{From: s.ID, To: ci.ID, Type: "runs_on"})
+	}
+	return ci
 }
 
 // ServiceOf returns the nearest IT service above the CI (or the CI itself).

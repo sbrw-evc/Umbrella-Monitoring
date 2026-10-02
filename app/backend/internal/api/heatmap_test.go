@@ -28,7 +28,7 @@ func TestHeatmapBuckets(t *testing.T) {
 			// suppressed by maintenance: not shown
 			"A5": {ID: "A5", CIID: "CI-7", CIName: "pay-app-02", Severity: model.SevCritical, Status: model.AlertOpen, FirstSeen: now.Add(-10 * time.Minute), Suppressed: true},
 		}
-		hm = buildHeatmap(d, now, 24, "service", "", nil, true)
+		hm = buildHeatmap(d, now, 24, "service", "", nil, true, nil)
 	})
 	if hm.BucketMinutes != 60 || len(hm.Columns) != 24 {
 		t.Fatalf("bucket = %d, columns = %d", hm.BucketMinutes, len(hm.Columns))

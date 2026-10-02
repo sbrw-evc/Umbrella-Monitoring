@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 )
 
 // Hub fans out live updates (alerts.changed, events) to browsers.
@@ -16,13 +19,28 @@ type Hub struct {
 	// same origin (for the dev server), e.g. "localhost:5173".
 	Origins []string
 	mu      sync.Mutex
-	clients map[chan []byte]struct{}
+	clients map[chan []byte]*auth.Principal
 }
 
 // NewHub creates an empty hub.
-func NewHub() *Hub { return &Hub{clients: map[chan []byte]struct{}{}} }
+func NewHub() *Hub { return &Hub{clients: map[chan []byte]*auth.Principal{}} }
 
-// Publish sends {type, data} to every client; slow clients drop messages.
+// visible reports whether the user may receive the update: the same rules
+// as the REST API (permission and business-service scope).
+func visible(p *auth.Principal, kind string, v any) bool {
+	switch x := v.(type) {
+	case model.Alert:
+		return p.Can(model.PermIncidentsView) && p.SeesCI(x.CIID)
+	case model.Event:
+		return p.Can(model.PermEventsView) && p.SeesCI(x.CIID)
+	case model.ParseError:
+		return p.Can(model.PermEventsView) && p.AllServices
+	}
+	return kind != "" && p.AllServices
+}
+
+// Publish sends {type, data} to every client allowed to see it; slow
+// clients drop messages.
 func (h *Hub) Publish(kind string, v any) {
 	b, err := json.Marshal(map[string]any{"type": kind, "data": v})
 	if err != nil {
@@ -30,13 +48,19 @@ func (h *Hub) Publish(kind string, v any) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for c := range h.clients {
+	for c, p := range h.clients {
+		if !visible(p, kind, v) {
+			continue
+		}
 		select {
 		case c <- b:
 		default:
 		}
 	}
 }
+
+// serveWS is GET /api/ws behind require: the socket carries the user.
+func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) { s.hub.serve(w, r) }
 
 func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{OriginPatterns: h.Origins})
@@ -46,7 +70,7 @@ func (h *Hub) serve(w http.ResponseWriter, r *http.Request) {
 	defer conn.CloseNow()
 	ch := make(chan []byte, 256)
 	h.mu.Lock()
-	h.clients[ch] = struct{}{}
+	h.clients[ch] = auth.From(r.Context())
 	h.mu.Unlock()
 	defer func() {
 		h.mu.Lock()

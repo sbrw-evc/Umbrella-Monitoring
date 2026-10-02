@@ -30,6 +30,11 @@ type Data struct {
 	Maintenance map[string]*model.Maintenance
 	Rules       []model.Rule
 	Audit       []AuditEntry
+	Users       map[string]*model.User
+	Roles       map[string]*model.Role
+	Tokens      map[string]*model.APIToken
+	Channels    map[string]*model.Channel
+	Deliveries  []*model.Delivery // oldest first
 	seq         map[string]int
 }
 
@@ -54,6 +59,10 @@ func New() *Store {
 		Connectors:  map[string]*model.Connector{},
 		Alerts:      map[string]*model.Alert{},
 		Maintenance: map[string]*model.Maintenance{},
+		Users:       map[string]*model.User{},
+		Roles:       map[string]*model.Role{},
+		Tokens:      map[string]*model.APIToken{},
+		Channels:    map[string]*model.Channel{},
 		seq:         map[string]int{},
 	}}
 }
@@ -104,6 +113,24 @@ func (d *Data) AddParseError(p *model.ParseError) {
 	if len(d.ParseErrors) > MaxParseErrors {
 		d.ParseErrors = append([]*model.ParseError(nil), d.ParseErrors[len(d.ParseErrors)-MaxParseErrors:]...)
 	}
+}
+
+// AddDelivery appends to the notification delivery ring.
+func (d *Data) AddDelivery(x *model.Delivery) {
+	d.Deliveries = append(d.Deliveries, x)
+	if len(d.Deliveries) > 1000 {
+		d.Deliveries = append([]*model.Delivery(nil), d.Deliveries[len(d.Deliveries)-1000:]...)
+	}
+}
+
+// UserByName finds a user by login, ignoring case.
+func (d *Data) UserByName(username string) *model.User {
+	for _, u := range d.Users {
+		if strings.EqualFold(u.Username, username) {
+			return u
+		}
+	}
+	return nil
 }
 
 // AddAudit appends an audit line.

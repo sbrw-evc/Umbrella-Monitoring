@@ -37,7 +37,9 @@ func Seed(st *store.Store) {
 		host := func(name, ip string) []model.Identity {
 			return []model.Identity{{Kind: "hostname", Value: name + ".corp.local", Since: now.Add(-90 * 24 * time.Hour)}, {Kind: "ip", Value: ip, Since: now.Add(-90 * 24 * time.Hour)}}
 		}
-		rel := func(from, to, typ string) { d.Relations = append(d.Relations, model.Relation{From: from, To: to, Type: typ}) }
+		rel := func(from, to, typ string) {
+			d.Relations = append(d.Relations, model.Relation{From: from, To: to, Type: typ})
+		}
 
 		bsPay := add("Онлайн-платежи", model.CIBusinessService, "payments", "Бизнес-услуга: приём платежей клиентов")
 		bsBank := add("Интернет-банк", model.CIBusinessService, "web", "Бизнес-услуга: личный кабинет клиента")
@@ -80,14 +82,7 @@ func Seed(st *store.Store) {
 			d.Connectors[cc.ID] = &cc
 			d.UseID(cc.ID)
 		}
-		d.Rules = []model.Rule{
-			{ID: "R-1", Method: model.MethodRED, Signal: "red.rate", Name: "Падение трафика", Condition: "rate < 0.5 × baseline(10m)", AppliesTo: "ИТ-сервисы", Severity: model.SevError, Enabled: true},
-			{ID: "R-2", Method: model.MethodRED, Signal: "red.errors", Name: "Расход бюджета ошибок", Condition: "burn_rate(1h) > 14.4", AppliesTo: "ИТ-сервисы с SLO", Severity: model.SevCritical, Enabled: true},
-			{ID: "R-3", Method: model.MethodRED, Signal: "red.duration", Name: "Задержка выше цели", Condition: "p99 > slo.latency for 5m", AppliesTo: "ИТ-сервисы с SLO", Severity: model.SevError, Enabled: true},
-			{ID: "R-4", Method: model.MethodUSE, Signal: "use.cpu.utilization", Name: "Высокая загрузка", Condition: "utilization > 90% for 15m or disk_full_eta < 24h", AppliesTo: "хосты, БД, облачные группы", Severity: model.SevWarning, Enabled: true},
-			{ID: "R-5", Method: model.MethodUSE, Signal: "use.saturation", Name: "Насыщение", Condition: "load > 2 × cores or queue grows 10m", AppliesTo: "хосты, БД", Severity: model.SevError, Enabled: true},
-			{ID: "R-6", Method: model.MethodUSE, Signal: "use.errors", Name: "Ошибки ресурса", Condition: "increase(errors[5m]) > 0", AppliesTo: "все КЕ", Severity: model.SevWarning, Enabled: true},
-		}
+		d.Rules = alert.DefaultRules()
 		mw := d.NextID("MW")
 		d.Maintenance[mw] = &model.Maintenance{ID: mw, Title: "Обновление ядра на web-front-02", CIID: w2, CIName: "web-front-02",
 			Start: now.Add(20 * time.Hour), End: now.Add(22 * time.Hour), Author: "Инженер мониторинга", CreatedAt: now}
@@ -187,12 +182,16 @@ var scenarios = []scenario{
 				"labels":      map[string]string{"instance": h, "severity": sev, "signal": sig},
 				"annotations": map[string]string{"summary": titles[sig] + " на " + h, "value": fmt.Sprintf("%d%%", 85+rand.Intn(15))}}}})
 		},
-		clear: func(_, body string) string { return strings.Replace(body, `"status":"firing"`, `"status":"resolved"`, 1) }},
+		clear: func(_, body string) string {
+			return strings.Replace(body, `"status":"firing"`, `"status":"resolved"`, 1)
+		}},
 	{conn: "CON-2", weight: 2,
 		fire: func(id string) string {
 			return fmt.Sprintf(`host=core-sw-01 sev=%d id=%s msg="%s"`, 2+rand.Intn(3), id, []string{"Interface Te1/0/24 down", "BGP neighbor 10.0.0.9 down", "Fan tray 2 failure"}[rand.Intn(3)])
 		},
-		clear: func(id, _ string) string { return fmt.Sprintf(`host=core-sw-01 sev=5 id=%s state=ok msg="recovered"`, id) }},
+		clear: func(id, _ string) string {
+			return fmt.Sprintf(`host=core-sw-01 sev=5 id=%s state=ok msg="recovered"`, id)
+		}},
 	{conn: "CON-3", weight: 2,
 		fire: func(id string) string {
 			return js(map[string]any{"Records": []any{map[string]any{"AlarmName": "cpu-high", "AlarmArn": id, "NewStateValue": "ALARM", "Metric": "use.cpu.utilization",
