@@ -22,14 +22,42 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api, type BlockSpec, type Connector, type DryRunResult, type Graph, type StepTrace } from '../api'
 import { useApp } from '../context'
 import { Empty, Field, SevBadge, Tabs } from '../components/ui'
+import { t } from '../i18n'
 
+// Block palette texts come from the server in Russian; translate them on the
+// client by block kind and fall back to the server text when a key is missing.
+function tr(key: string, fallback: string): string {
+  const v = t(key)
+  return v === key ? fallback : v
+}
+const blockKey = (kind: string) => `blocks.${kind.replace(/\./g, '_')}`
+function blockTitle(spec: BlockSpec): string {
+  return tr(`${blockKey(spec.kind)}.title`, spec.title)
+}
+function blockDescription(spec: BlockSpec): string {
+  return tr(`${blockKey(spec.kind)}.description`, spec.description)
+}
+function fieldLabel(spec: BlockSpec, f: BlockSpec['fields'][number]): string {
+  return tr(`${blockKey(spec.kind)}.fields.${f.key}.label`, f.label)
+}
+function fieldHelp(spec: BlockSpec, f: BlockSpec['fields'][number]): string | undefined {
+  return f.help ? tr(`${blockKey(spec.kind)}.fields.${f.key}.help`, f.help) : undefined
+}
+function fieldPlaceholder(spec: BlockSpec, f: BlockSpec['fields'][number]): string | undefined {
+  return f.placeholder ? tr(`${blockKey(spec.kind)}.fields.${f.key}.placeholder`, f.placeholder) : undefined
+}
+function categoryTitle(c: { id: string; title: string }): string {
+  return tr(`blocks.categories.${c.id}`, c.title)
+}
+
+// Block category colors come from the theme (--blocks-<category>).
 const CAT_COLOR: Record<string, string> = {
-  trigger: '#7c5cff',
-  fetch: '#2f80ed',
-  parse: '#00a3a3',
-  transform: '#f2994a',
-  ack: '#27ae60',
-  output: '#d4a106',
+  trigger: 'var(--blocks-trigger)',
+  fetch: 'var(--blocks-fetch)',
+  parse: 'var(--blocks-parse)',
+  transform: 'var(--blocks-transform)',
+  ack: 'var(--blocks-ack)',
+  output: 'var(--blocks-output)',
 }
 
 type BlockData = { spec?: BlockSpec; config: Record<string, string>; trace?: StepTrace }
@@ -37,14 +65,14 @@ type BlockData = { spec?: BlockSpec; config: Record<string, string>; trace?: Ste
 function summary(spec: BlockSpec | undefined, config: Record<string, string>): string {
   if (!spec) return ''
   const main = spec.fields.find((f) => config[f.key])
-  if (!main) return spec.description
+  if (!main) return blockDescription(spec)
   const v = config[main.key]
-  return `${main.label}: ${v.length > 40 ? v.slice(0, 40) + '…' : v}`
+  return `${fieldLabel(spec, main)}: ${v.length > 40 ? v.slice(0, 40) + '…' : v}`
 }
 
 function BlockNode({ data, selected }: NodeProps<Node<BlockData>>) {
   const spec = data.spec
-  const color = CAT_COLOR[spec?.category ?? ''] ?? '#888'
+  const color = CAT_COLOR[spec?.category ?? ''] ?? 'var(--app-border)'
   const isTrigger = spec?.category === 'trigger'
   return (
     <div className={`block ${selected ? 'block-selected' : ''} ${data.trace?.error ? 'block-error' : ''}`} style={{ borderTopColor: color }}>
@@ -52,12 +80,12 @@ function BlockNode({ data, selected }: NodeProps<Node<BlockData>>) {
       <div className="block-cat" style={{ color }}>
         {spec?.category ?? '?'}
       </div>
-      <div className="block-title">{spec?.title ?? 'Неизвестный блок'}</div>
+      <div className="block-title">{spec ? blockTitle(spec) : t('editor.block.unknown')}</div>
       <div className="block-sum">{summary(spec, data.config)}</div>
       {data.trace && (
         <div className={`block-trace ${data.trace.error ? 'block-trace-err' : ''}`} title={data.trace.error}>
           {data.trace.in} → {data.trace.out}
-          {data.trace.error && ' · ошибка'}
+          {data.trace.error && ` · ${t('editor.block.error')}`}
         </div>
       )}
       <Handle type="source" position={Position.Right} />
@@ -197,7 +225,7 @@ function Editor() {
     try {
       const c = await api.post<Connector>(`/api/connectors/${id}/publish`)
       setConnector(c)
-      toast(`Опубликована версия v${c.version}`)
+      toast(t('editor.toasts.published', { version: c.version }))
     } catch (e) {
       toast((e as Error).message, 'error')
     }
@@ -218,7 +246,7 @@ function Editor() {
   return (
     <div className="editor">
       <div className="editor-bar">
-        <button className="icon-btn" onClick={() => nav('/connectors')} title="К списку">
+        <button className="icon-btn" onClick={() => nav('/connectors')} title={t('editor.toolbar.back')}>
           <ArrowLeft size={18} />
         </button>
         <input
@@ -229,40 +257,40 @@ function Editor() {
             markDirty()
           }}
         />
-        <span className="tag">{connector?.version ? `опубликована v${connector.version}` : 'не опубликован'}</span>
+        <span className="tag">{connector?.version ? t('editor.toolbar.published', { version: connector.version }) : t('editor.toolbar.notPublished')}</span>
         {unpublished && (
           <span className="unsaved">
-            <span className="dirty-dot" /> {dirty ? 'есть несохранённые изменения' : 'черновик отличается от опубликованной версии'}
+            <span className="dirty-dot" /> {dirty ? t('editor.toolbar.unsaved') : t('editor.toolbar.draftDiffers')}
           </span>
         )}
         <div className="filterbar-spacer" />
-        <button className="btn" onClick={() => save().then((ok) => ok && toast('Черновик сохранён'))}>
-          <Save size={14} /> Сохранить
+        <button className="btn" onClick={() => save().then((ok) => ok && toast(t('editor.toasts.saved')))}>
+          <Save size={14} /> {t('editor.toolbar.save')}
         </button>
         <button className="btn" onClick={dryRun}>
-          <FlaskConical size={14} /> Проверить (dry-run)
+          <FlaskConical size={14} /> {t('editor.toolbar.dryRun')}
         </button>
         <button className="btn btn-primary" onClick={publish}>
-          <Upload size={14} /> Опубликовать
+          <Upload size={14} /> {t('editor.toolbar.publish')}
         </button>
         {connector?.status === 'running' ? (
           <button className="btn" onClick={() => setStatus('stop')}>
-            <Square size={14} /> Остановить
+            <Square size={14} /> {t('editor.toolbar.stop')}
           </button>
         ) : (
           <button className="btn" onClick={() => setStatus('start')}>
-            <Play size={14} /> Запустить
+            <Play size={14} /> {t('editor.toolbar.start')}
           </button>
         )}
       </div>
 
       <div className="editor-body">
         <aside className="palette">
-          <div className="palette-title">Блоки</div>
+          <div className="palette-title">{t('editor.palette.title')}</div>
           {cats.map((c) => (
             <div key={c.id} className="palette-group">
               <div className="palette-cat" style={{ color: CAT_COLOR[c.id] }}>
-                {c.title}
+                {categoryTitle(c)}
               </div>
               {blocks
                 .filter((b) => b.category === c.id)
@@ -273,10 +301,10 @@ function Editor() {
                     draggable
                     onDragStart={(e) => e.dataTransfer.setData('application/umbrella-block', b.kind)}
                     onDoubleClick={() => addBlock(b.kind)}
-                    title={`${b.description}\nПеретащите на холст или дважды щёлкните`}
+                    title={`${blockDescription(b)}\n${t('editor.palette.dragHint')}`}
                     style={{ borderLeftColor: CAT_COLOR[c.id] }}
                   >
-                    {b.title}
+                    {blockTitle(b)}
                   </div>
                 ))}
             </div>
@@ -304,7 +332,7 @@ function Editor() {
             proOptions={{ hideAttribution: true }}
             deleteKeyCode={['Delete']}
           >
-            <Background gap={16} color="#dfe3e8" />
+            <Background gap={16} color="var(--graph-grid)" />
             <Controls />
           </ReactFlow>
         </div>
@@ -317,15 +345,15 @@ function Editor() {
                   <div className="block-cat" style={{ color: CAT_COLOR[sel.data.spec?.category ?? ''] }}>
                     {sel.data.spec?.category}
                   </div>
-                  <h3>{sel.data.spec?.title}</h3>
+                  <h3>{sel.data.spec && blockTitle(sel.data.spec)}</h3>
                 </div>
-                <button className="icon-btn" onClick={removeSelected} title="Удалить блок">
+                <button className="icon-btn" onClick={removeSelected} title={t('editor.inspector.deleteBlock')}>
                   <Trash2 size={16} />
                 </button>
               </div>
-              <p className="hint">{sel.data.spec?.description}</p>
+              <p className="hint">{sel.data.spec && blockDescription(sel.data.spec)}</p>
               {sel.data.spec?.fields.map((f) => (
-                <Field key={f.key} label={f.label} help={f.help}>
+                <Field key={f.key} label={fieldLabel(sel.data.spec!, f)} help={fieldHelp(sel.data.spec!, f)}>
                   {f.type === 'select' ? (
                     <select value={sel.data.config[f.key] ?? f.default ?? ''} onChange={(e) => updateConfig(f.key, e.target.value)}>
                       {f.options?.map((o) => (
@@ -333,17 +361,17 @@ function Editor() {
                       ))}
                     </select>
                   ) : f.type === 'textarea' ? (
-                    <textarea rows={4} className="mono" value={sel.data.config[f.key] ?? ''} placeholder={f.placeholder} onChange={(e) => updateConfig(f.key, e.target.value)} />
+                    <textarea rows={4} className="mono" value={sel.data.config[f.key] ?? ''} placeholder={fieldPlaceholder(sel.data.spec!, f)} onChange={(e) => updateConfig(f.key, e.target.value)} />
                   ) : (
-                    <input className={f.type === 'secret' ? 'mono' : ''} value={sel.data.config[f.key] ?? ''} placeholder={f.placeholder} onChange={(e) => updateConfig(f.key, e.target.value)} />
+                    <input className={f.type === 'secret' ? 'mono' : ''} value={sel.data.config[f.key] ?? ''} placeholder={fieldPlaceholder(sel.data.spec!, f)} onChange={(e) => updateConfig(f.key, e.target.value)} />
                   )}
                 </Field>
               ))}
               {sel.data.trace && (
                 <div className="trace-box">
-                  <div className="section-title">Последняя проверка</div>
+                  <div className="section-title">{t('editor.inspector.lastCheck')}</div>
                   <div>
-                    вход {sel.data.trace.in} → выход {sel.data.trace.out}, {sel.data.trace.ms} мс
+                    {t('editor.inspector.trace', { in: sel.data.trace.in, out: sel.data.trace.out, ms: sel.data.trace.ms })}
                   </div>
                   {sel.data.trace.error && <div className="text-danger">{sel.data.trace.error}</div>}
                   {sel.data.trace.sample !== undefined && <pre className="json">{JSON.stringify(sel.data.trace.sample, null, 2)}</pre>}
@@ -361,14 +389,14 @@ function Editor() {
           value={bottom}
           onChange={setBottom}
           tabs={[
-            { id: 'dry', title: 'Проверка на данных' },
-            { id: 'help', title: 'Подсказка' },
+            { id: 'dry', title: t('editor.tabs.dry') },
+            { id: 'help', title: t('editor.tabs.help') },
           ]}
         />
         {bottom === 'dry' ? (
           <div className="dry">
             <div className="dry-input">
-              <div className="section-title">Пример входящих данных</div>
+              <div className="section-title">{t('editor.dry.sampleTitle')}</div>
               <textarea
                 className="mono"
                 value={sample}
@@ -376,34 +404,34 @@ function Editor() {
                   setSample(e.target.value)
                   markDirty()
                 }}
-                placeholder="Вставьте тело webhook или ответ API источника"
+                placeholder={t('editor.dry.samplePlaceholder')}
               />
             </div>
             <div className="dry-result">
               {!result ? (
-                <Empty>Нажмите «Проверить»: блоки выполнятся на примере без записи событий</Empty>
+                <Empty>{t('editor.dry.empty')}</Empty>
               ) : result.error ? (
                 <div className="text-danger">{result.error}</div>
               ) : (
                 <>
                   <div className="section-title">
-                    <CheckCircle2 size={14} /> Событий: {result.events.length}, ошибок: {result.errors.length}
+                    <CheckCircle2 size={14} /> {t('editor.dry.summary', { events: result.events.length, errors: result.errors.length })}
                   </div>
                   {result.errors.map((e, i) => (
                     <div key={i} className="text-danger">
-                      {specs.get(e.kind)?.title ?? e.kind}: {e.error}
+                      {(() => { const sp = specs.get(e.kind); return sp ? blockTitle(sp) : e.kind })()}: {e.error}
                     </div>
                   ))}
                   <table className="table table-compact">
                     <thead>
                       <tr>
-                        <th>Severity</th>
-                        <th>Заголовок</th>
-                        <th>КЕ из события</th>
-                        <th>КЕ в карте</th>
-                        <th>Сигнал</th>
-                        <th>Статус</th>
-                        <th>ID</th>
+                        <th>{t('editor.columns.severity')}</th>
+                        <th>{t('editor.columns.title')}</th>
+                        <th>{t('editor.columns.ciFromEvent')}</th>
+                        <th>{t('editor.columns.ciInMap')}</th>
+                        <th>{t('editor.columns.signal')}</th>
+                        <th>{t('editor.columns.status')}</th>
+                        <th>{t('editor.columns.id')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -414,7 +442,7 @@ function Editor() {
                           </td>
                           <td>{ev.title}</td>
                           <td className="mono">{ev.ci || '—'}</td>
-                          <td>{result.cis[i]?.found ? result.cis[i].ci_name : <span className="tag tag-warn">не найдена</span>}</td>
+                          <td>{result.cis[i]?.found ? result.cis[i].ci_name : <span className="tag tag-warn">{t('editor.dry.notFound')}</span>}</td>
                           <td className="mono">
                             {ev.signal} <span className="tag">{ev.method}</span>
                           </td>
@@ -430,11 +458,11 @@ function Editor() {
           </div>
         ) : (
           <div className="help">
-            <p>Соберите цепочку слева направо: триггер → (получение) → парсинг → преобразования → «Событие» → «Подтверждение получения». Блок можно перетащить из палитры или добавить двойным щелчком; связь тянется от правой точки блока к левой точке следующего.</p>
+            <p>{t('editor.help.chain')}</p>
             <p>
-              В шаблоне источника <code>${'{'}путь{'}'}</code> подставляет поле разобранного события (через точку: <code>${'{'}labels.instance{'}'}</code>), <code>${'{'}поле|значение{'}'}</code> задаёт значение по умолчанию, <code>${'{'}поле|$другое{'}'}</code> берёт другое поле.
+              {t('editor.help.tplIntro')} <code>${'{'}{t('editor.help.pathWord')}{'}'}</code> {t('editor.help.tplPath')} <code>${'{'}labels.instance{'}'}</code>), <code>${'{'}{t('editor.help.fieldWord')}|{t('editor.help.valueWord')}{'}'}</code> {t('editor.help.tplDefaultText')} <code>${'{'}{t('editor.help.fieldWord')}|${t('editor.help.otherWord')}{'}'}</code> {t('editor.help.tplOther')}
             </p>
-            <p>Секреты (токены, пароли) не хранятся в коннекторе: в блоке указывается только ссылка на хранилище секретов.</p>
+            <p>{t('editor.help.secrets')}</p>
           </div>
         )}
       </div>
@@ -443,33 +471,33 @@ function Editor() {
 }
 
 function ConnectorInfo({ connector }: { connector: Connector | null }) {
-  if (!connector) return <Empty>Загрузка…</Empty>
+  if (!connector) return <Empty>{t('common.words.loading')}</Empty>
   const url = `${location.origin}/api/ingest/${connector.id}`
   return (
     <div>
       <h3>{connector.name}</h3>
-      <p className="hint">Выберите блок на холсте, чтобы настроить его.</p>
+      <p className="hint">{t('editor.info.selectHint')}</p>
       <div className="props">
         <div className="prop">
-          <div className="prop-k">Состояние</div>
-          <div className="prop-v">{connector.status === 'running' ? 'Запущен' : 'Остановлен'}</div>
+          <div className="prop-k">{t('editor.info.status')}</div>
+          <div className="prop-v">{connector.status === 'running' ? t('editor.info.running') : t('editor.info.stopped')}</div>
         </div>
         <div className="prop">
-          <div className="prop-k">Событий</div>
+          <div className="prop-k">{t('editor.info.events')}</div>
           <div className="prop-v">{connector.events_total}</div>
         </div>
         <div className="prop">
-          <div className="prop-k">Ошибок разбора</div>
+          <div className="prop-k">{t('editor.info.errors')}</div>
           <div className="prop-v">{connector.errors_total}</div>
         </div>
       </div>
-      <div className="section-title">Адрес приёма (push)</div>
+      <div className="section-title">{t('editor.info.ingestUrl')}</div>
       <pre className="json">{url}</pre>
-      <div className="section-title">Пример отправки</div>
+      <div className="section-title">{t('editor.info.example')}</div>
       <pre className="json">{`curl -X POST ${url} \\
-  -H "Authorization: Bearer <токен>" \\
+  -H "Authorization: Bearer <${t('editor.info.token')}>" \\
   -d @event.json`}</pre>
-      <p className="hint">Umbrella отвечает 202 только после записи событий; при ошибке источник должен повторить отправку.</p>
+      <p className="hint">{t('editor.info.retryHint')}</p>
     </div>
   )
 }

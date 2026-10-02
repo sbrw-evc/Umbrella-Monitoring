@@ -1,5 +1,17 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, setUser, type Meta } from './api'
+import {
+  BUILT_IN_LOCALES,
+  loadActiveLocale,
+  loadCustomLocales,
+  saveActiveLocale,
+  saveCustomLocales,
+  setActiveLocale,
+  t as translate,
+  type Locale,
+  type T,
+} from './i18n'
+import { applyTheme, BUILT_IN_THEMES, loadActiveTheme, loadCustomThemes, saveActiveTheme, saveCustomThemes, type Theme } from './theme'
 
 // Live updates from /api/ws. Pages subscribe to message types and refetch.
 type Listener = (type: string, data: unknown) => void
@@ -13,6 +25,18 @@ interface AppState {
   connected: boolean
   subscribe: (l: Listener) => () => void
   toast: (text: string, kind?: 'ok' | 'error') => void
+  // appearance and language
+  themes: Theme[]
+  theme: Theme
+  setTheme: (id: string) => void
+  addTheme: (t: Theme) => void
+  removeTheme: (id: string) => void
+  locales: Locale[]
+  locale: Locale
+  setLocale: (id: string) => void
+  addLocale: (l: Locale) => void
+  removeLocale: (id: string) => void
+  t: T
 }
 
 const Ctx = createContext<AppState | null>(null)
@@ -40,6 +64,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false)
   const [toasts, setToasts] = useState<{ id: number; text: string; kind: string }[]>([])
   const listeners = useRef(new Set<Listener>())
+
+  const [customThemes, setCustomThemes] = useState(loadCustomThemes)
+  const [themeId, setThemeId] = useState(loadActiveTheme)
+  const themes = useMemo(() => [...BUILT_IN_THEMES, ...customThemes], [customThemes])
+  const theme = themes.find((x) => x.id === themeId) ?? BUILT_IN_THEMES[0]
+  useEffect(() => applyTheme(theme), [theme])
+
+  const [customLocales, setCustomLocales] = useState(loadCustomLocales)
+  const [localeId, setLocaleId] = useState(loadActiveLocale)
+  const [localeRev, setLocaleRev] = useState(0)
+  const locales = useMemo(() => {
+    // An uploaded file with a built-in id (ru, en) overrides that language.
+    const ids = new Set(customLocales.map((l) => l.id))
+    return [...BUILT_IN_LOCALES.filter((l) => !ids.has(l.id)), ...customLocales]
+  }, [customLocales])
+  const locale = locales.find((x) => x.id === localeId) ?? BUILT_IN_LOCALES[0]
+  setActiveLocale(locale)
 
   setUser(user)
 
@@ -99,9 +140,66 @@ export function AppProvider({ children }: { children: ReactNode }) {
     save('umb.user', u)
   }
 
+  const setTheme = (id: string) => {
+    setThemeId(id)
+    saveActiveTheme(id)
+  }
+  const addTheme = (th: Theme) => {
+    const next = [...customThemes.filter((x) => x.id !== th.id), th]
+    setCustomThemes(next)
+    saveCustomThemes(next)
+  }
+  const removeTheme = (id: string) => {
+    const next = customThemes.filter((x) => x.id !== id)
+    setCustomThemes(next)
+    saveCustomThemes(next)
+    if (themeId === id) setTheme('light')
+  }
+  const setLocale = (id: string) => {
+    setLocaleId(id)
+    saveActiveLocale(id)
+  }
+  const addLocale = (l: Locale) => {
+    const next = [...customLocales.filter((x) => x.id !== l.id), l]
+    setCustomLocales(next)
+    saveCustomLocales(next)
+    setLocaleRev((r) => r + 1)
+  }
+  const removeLocale = (id: string) => {
+    const next = customLocales.filter((x) => x.id !== id)
+    setCustomLocales(next)
+    saveCustomLocales(next)
+    setLocaleRev((r) => r + 1)
+    if (localeId === id && !BUILT_IN_LOCALES.some((l) => l.id === id)) setLocale('ru')
+  }
+
+  const value: AppState = {
+    meta,
+    team,
+    setTeam,
+    user,
+    setUserName,
+    connected,
+    subscribe,
+    toast,
+    themes,
+    theme,
+    setTheme,
+    addTheme,
+    removeTheme,
+    locales,
+    locale,
+    setLocale,
+    addLocale,
+    removeLocale,
+    t: translate,
+  }
+
+  // The key remounts the tree on a language change so every label, date and
+  // memoized list is rebuilt in the new language.
   return (
-    <Ctx.Provider value={{ meta, team, setTeam, user, setUserName, connected, subscribe, toast }}>
-      {children}
+    <Ctx.Provider value={value}>
+      <Fragment key={`${locale.id}:${localeRev}`}>{children}</Fragment>
       <div className="toasts">
         {toasts.map((t) => (
           <div key={t.id} className={`toast toast-${t.kind}`}>

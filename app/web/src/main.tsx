@@ -9,7 +9,15 @@ import { ConnectorsPage } from './pages/Connectors'
 import { IncidentsPage } from './pages/Incidents'
 import { AuditPage, EventsPage, MaintenancePage, ParseErrorsPage, RolesPage, RulesPage, SelfCheckPage } from './pages/Misc'
 import { OpsPage } from './pages/Ops'
+import { SettingsPage } from './pages/Settings'
+import { applyTheme, BUILT_IN_THEMES, loadActiveTheme, loadCustomThemes } from './theme'
 import './styles.css'
+
+// Paint the saved theme before the first render so the page does not flash.
+{
+  const id = loadActiveTheme()
+  applyTheme([...BUILT_IN_THEMES, ...loadCustomThemes()].find((x) => x.id === id) ?? BUILT_IN_THEMES[0])
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -30,6 +38,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/selfcheck" element={<SelfCheckPage />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/roles" element={<RolesPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/incidents" replace />} />
           </Routes>
         </Layout>

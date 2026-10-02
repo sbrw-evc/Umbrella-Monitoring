@@ -1,21 +1,23 @@
 import { BellOff, Bookmark, CheckCheck, CircleCheck, Download, RefreshCw, Search, Trash2 } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { api, qs, SEV_LABEL, SEVERITIES, type IncidentList, type Severity } from '../api'
+import { api, qs, sevLabel, SEVERITIES, type IncidentList, type Severity } from '../api'
 import { useApp, useFetch, useLive } from '../context'
 import { IncidentDrawer } from '../components/IncidentDrawer'
 import { IncidentTable, type SortKey } from '../components/IncidentTable'
 import { PageHeader, SideList } from '../components/ui'
+import { t } from '../i18n'
 
 // System maps: saved filters that cannot be edited, like "open" / "closed".
-const SYSTEM_VIEWS: { id: string; title: string; params: Record<string, string> }[] = [
-  { id: 'open', title: 'Открытые', params: { view: 'open' } },
-  { id: 'closed', title: 'Закрытые', params: { view: 'closed' } },
-  { id: 'all', title: 'Все за 24 часа', params: { view: 'all', hours: '24' } },
-  { id: 'pd', title: 'Не приняты PagerDuty', params: { view: 'open', pd: 'pending,failed' } },
-  { id: 'fallback', title: 'Резервное оповещение', params: { view: 'all', fallback: 'yes' } },
-  { id: 'red', title: 'RED: сервисы', params: { view: 'open', method: 'red' } },
-  { id: 'use', title: 'USE: ресурсы', params: { view: 'open', method: 'use' } },
+// Titles are translated at render time: incidents.views.<id>.
+const SYSTEM_VIEWS: { id: string; params: Record<string, string> }[] = [
+  { id: 'open', params: { view: 'open' } },
+  { id: 'closed', params: { view: 'closed' } },
+  { id: 'all', params: { view: 'all', hours: '24' } },
+  { id: 'pd', params: { view: 'open', pd: 'pending,failed' } },
+  { id: 'fallback', params: { view: 'all', fallback: 'yes' } },
+  { id: 'red', params: { view: 'open', method: 'red' } },
+  { id: 'use', params: { view: 'open', method: 'use' } },
 ]
 
 const FILTER_KEYS = ['view', 'q', 'severity', 'method', 'pd', 'fallback', 'hours', 'sort', 'order', 'service']
@@ -92,7 +94,7 @@ export function IncidentsPage() {
   }
 
   const saveView = () => {
-    const title = window.prompt('Название представления')
+    const title = window.prompt(t('incidents.views.prompt'))
     if (!title) return
     const p = { ...filters }
     delete p.sort
@@ -104,7 +106,7 @@ export function IncidentsPage() {
     } catch {
       /* ignore */
     }
-    toast('Представление сохранено')
+    toast(t('incidents.toasts.viewSaved'))
   }
 
   const removeView = (id: string) => {
@@ -121,7 +123,7 @@ export function IncidentsPage() {
     try {
       const r = await api.post<{ done: number; failed: Record<string, string> }>('/api/incidents/bulk', { ids: [...selected], action })
       const failed = Object.keys(r.failed).length
-      toast(`${action === 'ack' ? 'Подтверждено' : 'Решено'}: ${r.done}${failed ? `, пропущено: ${failed}` : ''}`)
+      toast(t(action === 'ack' ? 'incidents.toasts.bulkAck' : 'incidents.toasts.bulkResolve', { n: r.done }) + (failed ? t('incidents.toasts.bulkSkipped', { n: failed }) : ''))
       setSelected(new Set())
       reload()
     } catch (e) {
@@ -131,7 +133,7 @@ export function IncidentsPage() {
 
   const exportCsv = () => {
     if (!data) return
-    const rows = [['id', 'severity', 'status', 'title', 'ci', 'service', 'signal', 'method', 'pagerduty', 'fallback', 'count', 'first_seen', 'last_seen']]
+    const rows = [['id', 'severity', 'status', 'title', 'ci', 'service', 'signal', 'method', 'pagerduty', 'fallback', 'count', 'firstSeen', 'lastSeen'].map((k) => t(`incidents.csv.${k}`))]
     for (const a of data.items) rows.push([a.id, a.severity, a.status, a.title, a.ci_name, a.service ?? '', a.signal, a.method, a.pd_state, String(a.fallback), String(a.count), a.first_seen, a.last_seen])
     const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
@@ -150,22 +152,22 @@ export function IncidentsPage() {
   return (
     <div className="page page-with-side">
       <SideList
-        title="Карты"
+        title={t('incidents.views.title')}
         value={activeView}
         onChange={applyView}
         items={[
-          ...SYSTEM_VIEWS.map((v) => ({ id: v.id, title: v.title, count: v.id === 'open' ? counts.total : v.id === 'pd' ? counts.pd_not_accepted : undefined })),
+          ...SYSTEM_VIEWS.map((v) => ({ id: v.id, title: t(`incidents.views.${v.id}`), count: v.id === 'open' ? counts.total : v.id === 'pd' ? counts.pd_not_accepted : undefined })),
         ]}
         footer={
           <>
-            <div className="side-list-title side-list-sub">Мои представления</div>
-            {views.length === 0 && <div className="side-hint">Настройте фильтры и нажмите «Сохранить представление»</div>}
+            <div className="side-list-title side-list-sub">{t('incidents.views.mine')}</div>
+            {views.length === 0 && <div className="side-hint">{t('incidents.views.hint')}</div>}
             {views.map((v) => (
               <div key={v.id} className={`side-item side-item-row ${activeView === v.id ? 'side-item-active' : ''}`}>
                 <button className="side-item-text" onClick={() => applyView(v.id)}>
                   <Bookmark size={13} /> {v.title}
                 </button>
-                <button className="icon-btn icon-btn-sm" onClick={() => removeView(v.id)} title="Удалить">
+                <button className="icon-btn icon-btn-sm" onClick={() => removeView(v.id)} title={t('common.actions.delete')}>
                   <Trash2 size={13} />
                 </button>
               </div>
@@ -175,17 +177,17 @@ export function IncidentsPage() {
       />
       <div className="page-main">
         <PageHeader
-          title="Инциденты"
-          sub="Тревоги, переданные в PagerDuty: одна на проблему после схлопывания дублей"
+          title={t('incidents.header.title')}
+          sub={t('incidents.header.sub')}
           actions={
             <>
               <button className="btn" onClick={saveView}>
-                <Bookmark size={14} /> Сохранить представление
+                <Bookmark size={14} /> {t('incidents.header.saveView')}
               </button>
               <button className="btn" onClick={exportCsv}>
                 <Download size={14} /> CSV
               </button>
-              <button className="btn" onClick={reload} title="Обновить">
+              <button className="btn" onClick={reload} title={t('common.actions.refresh')}>
                 <RefreshCw size={14} className={loading ? 'spin' : ''} />
               </button>
             </>
@@ -195,15 +197,15 @@ export function IncidentsPage() {
         <div className="indicators">
           {SEVERITIES.map((s) => (
             <button key={s} className={`indicator ind-${s} ${sevFilter.has(s) ? 'ind-active' : ''}`} onClick={() => toggleSev(s)}>
-              <span className="ind-label">{SEV_LABEL[s]}</span>
+              <span className="ind-label">{sevLabel(s)}</span>
               <span className="ind-value">{counts[s] ?? 0}</span>
-              <span className="ind-hint">открыто</span>
+              <span className="ind-hint">{t('incidents.indicators.open')}</span>
             </button>
           ))}
           <button className={`indicator ind-pd ${filters.pd ? 'ind-active' : ''}`} onClick={() => update({ pd: filters.pd ? null : 'pending,failed', view: 'open' })}>
-            <span className="ind-label">Не принято PagerDuty</span>
+            <span className="ind-label">{t('incidents.indicators.pdNotAccepted')}</span>
             <span className="ind-value">{counts.pd_not_accepted ?? 0}</span>
-            <span className="ind-hint">в очереди или ошибка</span>
+            <span className="ind-hint">{t('incidents.indicators.pdHint')}</span>
           </button>
           <HourlyStrip hourly={data?.hourly ?? []} />
         </div>
@@ -217,44 +219,44 @@ export function IncidentsPage() {
             }}
           >
             <Search size={15} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Поиск: заголовок, КЕ, сервис, текст событий" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('incidents.filters.searchPlaceholder')} />
           </form>
           <select value={filters.method ?? ''} onChange={(e) => update({ method: e.target.value })}>
-            <option value="">Метод: все</option>
+            <option value="">{t('incidents.filters.methodAll')}</option>
             <option value="red">RED</option>
             <option value="use">USE</option>
-            <option value="other">Прочие</option>
+            <option value="other">{t('incidents.filters.methodOther')}</option>
           </select>
           <select value={filters.pd ?? ''} onChange={(e) => update({ pd: e.target.value })}>
-            <option value="">PagerDuty: все</option>
-            <option value="accepted">Принят</option>
-            <option value="acked">Ack</option>
-            <option value="pending,failed">Не принят</option>
-            <option value="skipped">Не отправлялся</option>
+            <option value="">{t('incidents.filters.pdAll')}</option>
+            <option value="accepted">{t('common.pd.accepted')}</option>
+            <option value="acked">{t('common.pd.acked')}</option>
+            <option value="pending,failed">{t('common.pd.failed')}</option>
+            <option value="skipped">{t('common.pd.skipped')}</option>
           </select>
           <select value={filters.hours ?? ''} onChange={(e) => update({ hours: e.target.value })}>
-            <option value="">Период: всё</option>
-            <option value="1">1 час</option>
-            <option value="6">6 часов</option>
-            <option value="24">24 часа</option>
-            <option value="168">7 дней</option>
+            <option value="">{t('incidents.filters.periodAll')}</option>
+            <option value="1">{t('incidents.filters.hour1')}</option>
+            <option value="6">{t('incidents.filters.hours6')}</option>
+            <option value="24">{t('incidents.filters.hours24')}</option>
+            <option value="168">{t('incidents.filters.days7')}</option>
           </select>
           <div className="filterbar-spacer" />
           {selected.size > 0 && (
             <div className="bulk">
-              <span>Выбрано: {selected.size}</span>
+              <span>{t('incidents.bulk.selected', { n: selected.size })}</span>
               <button className="btn" onClick={() => bulk('ack')}>
-                <CheckCheck size={14} /> Подтвердить
+                <CheckCheck size={14} /> {t('incidents.bulk.ack')}
               </button>
               <button className="btn" onClick={() => bulk('resolve')}>
-                <CircleCheck size={14} /> Решить
+                <CircleCheck size={14} /> {t('incidents.bulk.resolve')}
               </button>
               <button className="btn btn-ghost" onClick={() => setSelected(new Set())}>
-                <BellOff size={14} /> Снять выбор
+                <BellOff size={14} /> {t('incidents.bulk.clear')}
               </button>
             </div>
           )}
-          <span className="muted">{data ? `${data.total} инц.` : ''}</span>
+          <span className="muted">{data ? t('incidents.filters.total', { n: data.total }) : ''}</span>
         </div>
 
         <div className="card card-flush">
@@ -279,8 +281,8 @@ function HourlyStrip({ hourly }: { hourly: Record<string, number>[] }) {
   const max = Math.max(1, ...hourly.map((h) => SEVERITIES.reduce((s, k) => s + (h[k] ?? 0), 0)))
   const now = new Date()
   return (
-    <div className="hourly" title="Новые инциденты по часам за 24 часа">
-      <div className="ind-label">Новые за 24 ч</div>
+    <div className="hourly" title={t('incidents.indicators.hourlyTitle')}>
+      <div className="ind-label">{t('incidents.indicators.hourlyLabel')}</div>
       <div className="hourly-bars">
         {hourly.map((h, i) => {
           const hour = (now.getHours() - 23 + i + 24) % 24
@@ -297,9 +299,9 @@ function HourlyStrip({ hourly }: { hourly: Record<string, number>[] }) {
         })}
       </div>
       <div className="hourly-axis">
-        <span>−24 ч</span>
-        <span>−12 ч</span>
-        <span>сейчас</span>
+        <span>{t('incidents.indicators.minus24')}</span>
+        <span>{t('incidents.indicators.minus12')}</span>
+        <span>{t('incidents.indicators.now')}</span>
       </div>
     </div>
   )

@@ -1,7 +1,8 @@
 import { CheckCheck, CircleCheck, ExternalLink, Link2 } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
-import { api, CI_TYPE_LABEL, fmtDuration, fmtTime, METHOD_LABEL, type EventItem, type Incident } from '../api'
+import { api, ciTypeLabel, fmtDuration, fmtTime, methodLabel, type EventItem, type Incident } from '../api'
 import { useApp, useFetch, useLive } from '../context'
+import { t } from '../i18n'
 import { Drawer, Empty, PDPill, SevBadge, StatusPill, Tabs } from './ui'
 
 interface Detail {
@@ -26,7 +27,7 @@ export function IncidentDrawer({ id, onClose, onOpen }: { id: string; onClose: (
       await api.post(`/api/incidents/${id}/${action}`, text ? { text } : {})
       reload()
       if (action === 'comment') setComment('')
-      else toast(action === 'ack' ? 'Инцидент подтверждён' : 'Инцидент решён')
+      else toast(t(action === 'ack' ? 'incidents.toasts.acked' : 'incidents.toasts.resolved'))
     } catch (e) {
       toast((e as Error).message, 'error')
     }
@@ -50,16 +51,16 @@ export function IncidentDrawer({ id, onClose, onOpen }: { id: string; onClose: (
         inc && (
           <>
             <a className="btn" href={data!.grafana_url} target="_blank" rel="noreferrer">
-              <ExternalLink size={14} /> Контекст в Grafana
+              <ExternalLink size={14} /> {t('incidents.drawer.grafana')}
             </a>
             {inc.status === 'open' && (
               <button className="btn" onClick={() => act('ack')}>
-                <CheckCheck size={14} /> Подтвердить
+                <CheckCheck size={14} /> {t('incidents.drawer.ack')}
               </button>
             )}
             {inc.status !== 'resolved' && (
               <button className="btn btn-primary" onClick={() => act('resolve')}>
-                <CircleCheck size={14} /> Решить
+                <CircleCheck size={14} /> {t('incidents.drawer.resolve')}
               </button>
             )}
           </>
@@ -67,37 +68,37 @@ export function IncidentDrawer({ id, onClose, onOpen }: { id: string; onClose: (
       }
     >
       {!inc ? (
-        <Empty>Загрузка…</Empty>
+        <Empty>{t('common.words.loading')}</Empty>
       ) : (
         <>
           <Tabs<Tab>
             value={tab}
             onChange={setTab}
             tabs={[
-              { id: 'main', title: 'Основное' },
-              { id: 'events', title: `События · ${data!.events.length}` },
-              { id: 'timeline', title: 'Хронология' },
-              { id: 'pd', title: 'PagerDuty и резерв' },
-              { id: 'comments', title: `Комментарии · ${timeline.filter((t) => t.kind === 'comment').length}` },
+              { id: 'main', title: t('incidents.tabs.main') },
+              { id: 'events', title: t('incidents.tabs.events', { n: data!.events.length }) },
+              { id: 'timeline', title: t('incidents.tabs.timeline') },
+              { id: 'pd', title: t('incidents.tabs.pd') },
+              { id: 'comments', title: t('incidents.tabs.comments', { n: timeline.filter((x) => x.kind === 'comment').length }) },
             ]}
           />
           {tab === 'main' && (
             <div className="props">
-              <Prop k="Статус"><StatusPill status={inc.status} />{inc.suppressed && <span className="pill pill-muted">Подавлен окном</span>}</Prop>
-              <Prop k="Severity"><SevBadge sev={inc.severity} /></Prop>
-              <Prop k="КЕ">{inc.ci_name} {inc.ci_type && <span className="muted">· {CI_TYPE_LABEL[inc.ci_type] ?? inc.ci_type}</span>}{!inc.ci_id && <span className="pill pill-muted">без КЕ</span>}</Prop>
-              <Prop k="ИТ-сервис">{inc.service || '—'}</Prop>
-              <Prop k="Команда">{inc.team || '—'}</Prop>
-              <Prop k="Сигнал"><code>{inc.signal}</code> <span className="tag">{METHOD_LABEL[inc.method]}</span></Prop>
-              <Prop k="Источники">{Object.entries(inc.sources).map(([s, st]) => <span key={s} className={`tag ${st === 'resolved' ? 'tag-ok' : ''}`}>{s}: {st === 'resolved' ? 'норма' : 'активно'}</span>)}</Prop>
-              <Prop k="Событий">{inc.count}</Prop>
-              <Prop k="Открыт">{fmtTime(inc.first_seen)}</Prop>
-              <Prop k="Последнее событие">{fmtTime(inc.last_seen)}</Prop>
-              <Prop k="Длительность">{fmtDuration(inc.first_seen, inc.resolved_at)}</Prop>
-              {inc.acked_by && <Prop k="Подтвердил">{inc.acked_by}</Prop>}
-              <Prop k="Ключ схлопывания"><code>{inc.dedup_key}</code></Prop>
+              <Prop k={t('common.words.status')}><StatusPill status={inc.status} />{inc.suppressed && <span className="pill pill-muted">{t('incidents.drawer.suppressed')}</span>}</Prop>
+              <Prop k={t('incidents.drawer.severity')}><SevBadge sev={inc.severity} /></Prop>
+              <Prop k={t('incidents.drawer.ci')}>{inc.ci_name} {inc.ci_type && <span className="muted">· {ciTypeLabel(inc.ci_type)}</span>}{!inc.ci_id && <span className="pill pill-muted">{t('incidents.drawer.noCi')}</span>}</Prop>
+              <Prop k={t('incidents.drawer.service')}>{inc.service || '—'}</Prop>
+              <Prop k={t('common.words.team')}>{inc.team || '—'}</Prop>
+              <Prop k={t('incidents.drawer.signal')}><code>{inc.signal}</code> <span className="tag">{methodLabel(inc.method)}</span></Prop>
+              <Prop k={t('incidents.drawer.sources')}>{Object.entries(inc.sources).map(([s, st]) => <span key={s} className={`tag ${st === 'resolved' ? 'tag-ok' : ''}`}>{s}: {st === 'resolved' ? t('incidents.drawer.sourceOk') : t('incidents.drawer.sourceActive')}</span>)}</Prop>
+              <Prop k={t('incidents.drawer.events')}>{inc.count}</Prop>
+              <Prop k={t('incidents.drawer.opened')}>{fmtTime(inc.first_seen)}</Prop>
+              <Prop k={t('incidents.drawer.lastEvent')}>{fmtTime(inc.last_seen)}</Prop>
+              <Prop k={t('incidents.drawer.duration')}>{fmtDuration(inc.first_seen, inc.resolved_at)}</Prop>
+              {inc.acked_by && <Prop k={t('incidents.drawer.ackedBy')}>{inc.acked_by}</Prop>}
+              <Prop k={t('incidents.drawer.dedupKey')}><code>{inc.dedup_key}</code></Prop>
               {data!.related && (
-                <Prop k={inc.method === 'red' ? 'Вероятная причина' : 'Влияет на'}>
+                <Prop k={inc.method === 'red' ? t('incidents.drawer.probableCause') : t('incidents.drawer.affects')}>
                   <button className="link" onClick={() => onOpen?.(data!.related!.id)}>
                     <Link2 size={13} /> {data!.related.id} · {data!.related.title}
                   </button>
@@ -109,11 +110,11 @@ export function IncidentDrawer({ id, onClose, onOpen }: { id: string; onClose: (
             <table className="table table-compact">
               <thead>
                 <tr>
-                  <th>Время</th>
-                  <th>Источник</th>
-                  <th>Severity</th>
-                  <th>Статус</th>
-                  <th>Событие</th>
+                  <th>{t('common.words.time')}</th>
+                  <th>{t('common.words.source')}</th>
+                  <th>{t('incidents.drawer.severity')}</th>
+                  <th>{t('common.words.status')}</th>
+                  <th>{t('incidents.drawer.event')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -122,7 +123,7 @@ export function IncidentDrawer({ id, onClose, onOpen }: { id: string; onClose: (
                     <td className="nowrap">{fmtTime(e.received_at)}</td>
                     <td>{e.source}</td>
                     <td><SevBadge sev={e.severity} /></td>
-                    <td>{e.status === 'resolved' ? 'норма' : 'активно'}</td>
+                    <td>{e.status === 'resolved' ? t('incidents.drawer.sourceOk') : t('incidents.drawer.sourceActive')}</td>
                     <td>
                       {e.title}
                       <div className="raw">{e.raw}</div>
@@ -135,17 +136,17 @@ export function IncidentDrawer({ id, onClose, onOpen }: { id: string; onClose: (
           {tab === 'timeline' && <Timeline items={timeline} />}
           {tab === 'pd' && (
             <div className="props">
-              <Prop k="Состояние в PagerDuty"><PDPill state={inc.pd_state} fallback={inc.fallback} /></Prop>
+              <Prop k={t('incidents.drawer.pdState')}><PDPill state={inc.pd_state} fallback={inc.fallback} /></Prop>
               <Prop k="dedup_key"><code>{inc.pd_dedup_key}</code></Prop>
-              {inc.pd_error && <Prop k="Последняя ошибка"><span className="text-danger">{inc.pd_error}</span></Prop>}
-              <Prop k="Резервное оповещение">{inc.fallback ? 'было: почта и webhook дежурным' : 'не требовалось'}</Prop>
-              <div className="section-title">Отправки</div>
+              {inc.pd_error && <Prop k={t('incidents.drawer.lastError')}><span className="text-danger">{inc.pd_error}</span></Prop>}
+              <Prop k={t('incidents.drawer.fallback')}>{inc.fallback ? t('incidents.drawer.fallbackYes') : t('incidents.drawer.fallbackNo')}</Prop>
+              <div className="section-title">{t('incidents.drawer.deliveries')}</div>
               <Timeline items={timeline.filter((t) => t.kind === 'pagerduty' || t.kind === 'fallback')} />
             </div>
           )}
           {tab === 'comments' && (
             <div>
-              <Timeline items={timeline.filter((t) => t.kind === 'comment')} empty="Комментариев пока нет" />
+              <Timeline items={timeline.filter((t) => t.kind === 'comment')} empty={t('incidents.drawer.noComments')} />
               {inc.status !== 'resolved' && (
                 <form
                   className="comment-form"
@@ -154,9 +155,9 @@ export function IncidentDrawer({ id, onClose, onOpen }: { id: string; onClose: (
                     if (comment.trim()) act('comment', comment)
                   }}
                 >
-                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Комментарий для смены" rows={3} />
+                  <textarea value={comment} onChange={(e) => setComment(e.target.value)} placeholder={t('incidents.drawer.commentPlaceholder')} rows={3} />
                   <button className="btn btn-primary" type="submit">
-                    Добавить
+                    {t('incidents.drawer.addComment')}
                   </button>
                 </form>
               )}
@@ -177,26 +178,20 @@ function Prop({ k, children }: { k: string; children: ReactNode }) {
   )
 }
 
-const KIND_LABEL: Record<string, string> = {
-  event: 'событие',
-  status: 'статус',
-  pagerduty: 'PagerDuty',
-  fallback: 'резерв',
-  comment: 'комментарий',
-  maintenance: 'обслуживание',
-}
+// Timeline entry kinds with a label in incidents.kinds; others show as is.
+const KINDS = new Set(['event', 'status', 'pagerduty', 'fallback', 'comment', 'maintenance'])
 
-function Timeline({ items, empty = 'Записей нет' }: { items: { at: string; kind: string; text: string; author?: string }[]; empty?: string }) {
-  if (items.length === 0) return <Empty>{empty}</Empty>
+function Timeline({ items, empty }: { items: { at: string; kind: string; text: string; author?: string }[]; empty?: string }) {
+  if (items.length === 0) return <Empty>{empty ?? t('incidents.drawer.noRecords')}</Empty>
   return (
     <ul className="timeline">
-      {[...items].reverse().map((t, i) => (
-        <li key={i} className={`tl tl-${t.kind}`}>
-          <span className="tl-time">{fmtTime(t.at)}</span>
-          <span className="tl-kind">{KIND_LABEL[t.kind] ?? t.kind}</span>
+      {[...items].reverse().map((it, i) => (
+        <li key={i} className={`tl tl-${it.kind}`}>
+          <span className="tl-time">{fmtTime(it.at)}</span>
+          <span className="tl-kind">{KINDS.has(it.kind) ? t(`incidents.kinds.${it.kind}`) : it.kind}</span>
           <span className="tl-text">
-            {t.text}
-            {t.author && <span className="muted"> · {t.author}</span>}
+            {it.text}
+            {it.author && <span className="muted"> · {it.author}</span>}
           </span>
         </li>
       ))}

@@ -1,5 +1,5 @@
-import { Info } from 'lucide-react'
-import { fmtDuration, fmtTime, METHOD_LABEL, type Incident } from '../api'
+import { fmtDuration, fmtTime, methodLabel, type Incident } from '../api'
+import { t } from '../i18n'
 import { Empty, PDPill, SevBadge, StatusPill } from './ui'
 
 export type SortKey = 'severity' | 'id' | 'ci' | 'service' | 'first_seen' | 'last_seen' | 'count'
@@ -23,7 +23,7 @@ export function IncidentTable({
   onSort?: (k: SortKey) => void
   compact?: boolean
 }) {
-  if (items.length === 0) return <Empty>Инцидентов по этим условиям нет</Empty>
+  if (items.length === 0) return <Empty>{t('incidents.table.empty')}</Empty>
   const allChecked = !!selected && items.length > 0 && items.every((i) => selected.has(i.id))
   const th = (k: SortKey, title: string) => (
     <th className={onSort ? 'sortable' : ''} onClick={() => onSort?.(k)}>
@@ -44,18 +44,14 @@ export function IncidentTable({
               />
             </th>
           )}
-          {th('severity', 'Severity')}
+          {th('severity', t('incidents.table.severity'))}
           {th('id', 'ID')}
-          <th>Инцидент</th>
-          {th('ci', 'КЕ')}
-          {!compact && th('service', 'ИТ-сервис')}
-          <th>Метод</th>
-          <th>Статус</th>
+          <th>{t('incidents.table.incident')}</th>
+          {th('ci', t('incidents.table.ci'))}
+          <th>{t('common.words.status')}</th>
           <th>PagerDuty</th>
-          {th('count', 'Событий')}
-          {th('first_seen', 'Открыт')}
-          {!compact && <th>Длительность</th>}
-          <th />
+          {th('count', t('incidents.table.events'))}
+          {th('first_seen', t('incidents.table.opened'))}
         </tr>
       </thead>
       <tbody>
@@ -85,20 +81,25 @@ export function IncidentTable({
                 href={`/go/incidents/${a.id}/grafana`}
                 target="_blank"
                 rel="noreferrer"
-                title="Открыть контекст инцидента в Grafana"
+                title={t('incidents.table.grafanaTitle')}
                 onClick={(e) => e.stopPropagation()}
               >
                 {a.title}
               </a>
               <div className="sub-line">
                 <code>{a.signal}</code>
-                {a.related_id && <span className="tag tag-link">связан с {a.related_id}</span>}
-                {a.suppressed && <span className="tag">подавлен</span>}
+                {a.method !== 'other' && <span className={`tag tag-${a.method}`}>{methodLabel(a.method)}</span>}
+                {a.related_id && <span className="tag tag-link">{t('incidents.table.relatedTo', { id: a.related_id })}</span>}
+                {a.suppressed && <span className="tag">{t('incidents.table.suppressed')}</span>}
               </div>
             </td>
-            <td className="nowrap">{a.ci_name || '—'}{!a.ci_id && <span className="tag tag-warn">без КЕ</span>}</td>
-            {!compact && <td>{a.service || '—'}</td>}
-            <td>{METHOD_LABEL[a.method]}</td>
+            <td className="cell-ci">
+              <div className="title-line">
+                {a.ci_name || '—'}
+                {!a.ci_id && <span className="tag tag-warn">{t('incidents.table.noCi')}</span>}
+              </div>
+              {!compact && a.service && <div className="sub-line" title={t('incidents.table.service')}>{a.service}</div>}
+            </td>
             <td>
               <StatusPill status={a.status} />
             </td>
@@ -106,19 +107,9 @@ export function IncidentTable({
               <PDPill state={a.pd_state} fallback={a.fallback} />
             </td>
             <td className="num">{a.count}</td>
-            <td className="nowrap">{fmtTime(a.first_seen)}</td>
-            {!compact && <td className="nowrap">{fmtDuration(a.first_seen, a.resolved_at)}</td>}
-            <td>
-              <button
-                className="icon-btn"
-                title="Подробнее"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onOpen(a.id)
-                }}
-              >
-                <Info size={16} />
-              </button>
+            <td className="nowrap">
+              {fmtTime(a.first_seen)}
+              {!compact && <div className="sub-line" title={t('incidents.table.duration')}>{fmtDuration(a.first_seen, a.resolved_at)}</div>}
             </td>
           </tr>
         ))}

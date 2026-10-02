@@ -1,8 +1,9 @@
 import { Pause, Play, Plus, Search, Trash2 } from 'lucide-react'
 import { Fragment, type ReactNode, useState } from 'react'
-import { api, fmtTime, METHOD_LABEL, qs, type CI, type EventItem, type Maintenance, type ParseError, type Rule } from '../api'
+import { api, fmtTime, methodLabel, qs, type CI, type EventItem, type Maintenance, type ParseError, type Rule } from '../api'
 import { useApp, useFetch, useLive } from '../context'
-import { MAINT_STATE } from '../components/CiDrawer'
+import { maintStateLabel } from '../components/CiDrawer'
+import { t } from '../i18n'
 import { Empty, Field, Modal, PageHeader, SevBadge } from '../components/ui'
 
 export function EventsPage() {
@@ -15,32 +16,32 @@ export function EventsPage() {
     <div className="page">
       <div className="page-main">
         <PageHeader
-          title="События"
-          sub="Нормализованные события всех коннекторов, новые сверху"
+          title={t('events.header.title')}
+          sub={t('events.header.sub')}
           actions={
             <button className="btn" onClick={() => setPaused((p) => !p)}>
-              {paused ? <Play size={14} /> : <Pause size={14} />} {paused ? 'Продолжить' : 'Пауза'}
+              {paused ? <Play size={14} /> : <Pause size={14} />} {paused ? t('events.header.resume') : t('events.header.pause')}
             </button>
           }
         />
         <div className="filterbar">
           <div className="search">
             <Search size={15} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Заголовок, КЕ, сигнал, источник" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('events.filters.search')} />
           </div>
         </div>
         <div className="card card-flush">
           <table className="table table-compact">
             <thead>
               <tr>
-                <th>Время</th>
-                <th>Severity</th>
-                <th>Статус</th>
-                <th>Событие</th>
-                <th>КЕ</th>
-                <th>Сигнал</th>
-                <th>Источник</th>
-                <th>Инцидент</th>
+                <th>{t('events.table.time')}</th>
+                <th>{t('events.table.severity')}</th>
+                <th>{t('events.table.status')}</th>
+                <th>{t('events.table.event')}</th>
+                <th>{t('events.table.ci')}</th>
+                <th>{t('events.table.signal')}</th>
+                <th>{t('events.table.source')}</th>
+                <th>{t('events.table.incident')}</th>
               </tr>
             </thead>
             <tbody>
@@ -51,17 +52,17 @@ export function EventsPage() {
                     <td>
                       <SevBadge sev={e.severity} />
                     </td>
-                    <td>{e.status === 'resolved' ? 'норма' : 'активно'}</td>
+                    <td>{e.status === 'resolved' ? t('events.row.resolved') : t('events.row.active')}</td>
                     <td>
                       {e.title}
-                      {e.suppressed && <span className="tag">подавлено</span>}
+                      {e.suppressed && <span className="tag">{t('events.row.suppressed')}</span>}
                     </td>
                     <td className="nowrap">
                       {e.ci_name || '—'}
-                      {!e.ci_id && <span className="tag tag-warn">без КЕ</span>}
+                      {!e.ci_id && <span className="tag tag-warn">{t('events.row.noCi')}</span>}
                     </td>
                     <td className="mono">
-                      {e.signal} <span className="tag">{METHOD_LABEL[e.method]}</span>
+                      {e.signal} <span className="tag">{methodLabel(e.method)}</span>
                     </td>
                     <td>{e.source}</td>
                     <td className="mono">{e.alert_id ? <a href={`/incidents?id=${e.alert_id}&view=all`}>{e.alert_id}</a> : '—'}</td>
@@ -90,19 +91,19 @@ export function ParseErrorsPage() {
   return (
     <div className="page">
       <div className="page-main">
-        <PageHeader title="Ошибки разбора" sub="События, которые коннектор не смог разобрать (events.dlq), с исходным телом" />
+        <PageHeader title={t('parseErrors.header.title')} sub={t('parseErrors.header.sub')} />
         <div className="card card-flush">
           {items.length === 0 ? (
-            <Empty>Ошибок нет</Empty>
+            <Empty>{t('parseErrors.empty.none')}</Empty>
           ) : (
             <table className="table table-compact">
               <thead>
                 <tr>
-                  <th>Время</th>
-                  <th>Коннектор</th>
-                  <th>Блок</th>
-                  <th>Ошибка</th>
-                  <th>Исходные данные</th>
+                  <th>{t('parseErrors.table.time')}</th>
+                  <th>{t('parseErrors.table.connector')}</th>
+                  <th>{t('parseErrors.table.block')}</th>
+                  <th>{t('parseErrors.table.error')}</th>
+                  <th>{t('parseErrors.table.raw')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -133,25 +134,25 @@ export function RulesPage() {
   return (
     <div className="page">
       <div className="page-main">
-        <PageHeader title="Правила RED/USE" sub="RED формирует тревоги по ИТ-сервисам, USE — по ресурсам. В этом шаге правила только просматриваются; редактор правил — следующий шаг" />
+        <PageHeader title={t('rules.header.title')} sub={t('rules.header.sub')} />
         <div className="card card-flush">
           <table className="table">
             <thead>
               <tr>
-                <th>Метод</th>
-                <th>Сигнал</th>
-                <th>Правило</th>
-                <th>Условие по умолчанию</th>
-                <th>Применяется к</th>
-                <th>Severity</th>
-                <th>Включено</th>
+                <th>{t('rules.table.method')}</th>
+                <th>{t('rules.table.signal')}</th>
+                <th>{t('rules.table.rule')}</th>
+                <th>{t('rules.table.condition')}</th>
+                <th>{t('rules.table.appliesTo')}</th>
+                <th>{t('rules.table.severity')}</th>
+                <th>{t('rules.table.enabled')}</th>
               </tr>
             </thead>
             <tbody>
               {(data?.items ?? []).map((r) => (
                 <tr key={r.id}>
                   <td>
-                    <span className={`tag tag-${r.method}`}>{METHOD_LABEL[r.method]}</span>
+                    <span className={`tag tag-${r.method}`}>{methodLabel(r.method)}</span>
                   </td>
                   <td className="mono">{r.signal}</td>
                   <td>{r.name}</td>
@@ -160,7 +161,7 @@ export function RulesPage() {
                   <td>
                     <SevBadge sev={r.severity} />
                   </td>
-                  <td>{r.enabled ? 'да' : 'нет'}</td>
+                  <td>{r.enabled ? t('common.words.yes') : t('common.words.no')}</td>
                 </tr>
               ))}
             </tbody>
@@ -188,13 +189,13 @@ export function MaintenancePage() {
       await api.post('/api/maintenance', { ...form, start: new Date(form.start).toISOString(), end: new Date(form.end).toISOString() })
       setCreating(false)
       reload()
-      toast('Окно обслуживания создано')
+      toast(t('maintenance.toasts.created'))
     } catch (e) {
       toast((e as Error).message, 'error')
     }
   }
   const remove = async (id: string) => {
-    if (!window.confirm('Удалить окно обслуживания?')) return
+    if (!window.confirm(t('maintenance.confirm.delete'))) return
     await api.del(`/api/maintenance/${id}`)
     reload()
   }
@@ -203,28 +204,28 @@ export function MaintenancePage() {
     <div className="page">
       <div className="page-main">
         <PageHeader
-          title="Окна обслуживания"
-          sub="Во время окна тревоги по КЕ и её сервису не отправляются в PagerDuty; после окончания активные тревоги уходят дежурным"
+          title={t('maintenance.header.title')}
+          sub={t('maintenance.header.sub')}
           actions={
             <button className="btn btn-primary" onClick={() => setCreating(true)}>
-              <Plus size={14} /> Создать окно
+              <Plus size={14} /> {t('maintenance.header.create')}
             </button>
           }
         />
         <div className="card card-flush">
           {items.length === 0 ? (
-            <Empty>Окон нет</Empty>
+            <Empty>{t('maintenance.empty.none')}</Empty>
           ) : (
             <table className="table">
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Окно</th>
-                  <th>КЕ</th>
-                  <th>Состояние</th>
-                  <th>Начало</th>
-                  <th>Конец</th>
-                  <th>Автор</th>
+                  <th>{t('maintenance.table.id')}</th>
+                  <th>{t('maintenance.table.window')}</th>
+                  <th>{t('maintenance.table.ci')}</th>
+                  <th>{t('maintenance.table.state')}</th>
+                  <th>{t('maintenance.table.start')}</th>
+                  <th>{t('maintenance.table.end')}</th>
+                  <th>{t('maintenance.table.author')}</th>
                   <th />
                 </tr>
               </thead>
@@ -235,7 +236,7 @@ export function MaintenancePage() {
                     <td>{m.title}</td>
                     <td>{m.ci_name}</td>
                     <td>
-                      <span className={`pill ${state === 'active' ? 'pill-acknowledged' : state === 'planned' ? 'pill-open' : 'pill-muted'}`}>{MAINT_STATE[state]}</span>
+                      <span className={`pill ${state === 'active' ? 'pill-acknowledged' : state === 'planned' ? 'pill-open' : 'pill-muted'}`}>{maintStateLabel(state)}</span>
                     </td>
                     <td className="nowrap">{fmtTime(m.start)}</td>
                     <td className="nowrap">{fmtTime(m.end)}</td>
@@ -254,25 +255,25 @@ export function MaintenancePage() {
       </div>
       {creating && (
         <Modal
-          title="Новое окно обслуживания"
+          title={t('maintenance.modal.title')}
           onClose={() => setCreating(false)}
           footer={
             <>
               <button className="btn" onClick={() => setCreating(false)}>
-                Отмена
+                {t('common.actions.cancel')}
               </button>
               <button className="btn btn-primary" disabled={!form.title || !form.ci_id} onClick={submit}>
-                Создать
+                {t('common.actions.create')}
               </button>
             </>
           }
         >
-          <Field label="Название">
-            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Обновление ПО" />
+          <Field label={t('maintenance.modal.name')}>
+            <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder={t('maintenance.modal.namePlaceholder')} />
           </Field>
-          <Field label="КЕ" help="Для ИТ-сервиса окно подавляет тревоги всех его КЕ">
+          <Field label={t('maintenance.modal.ci')} help={t('maintenance.modal.ciHelp')}>
             <select value={form.ci_id} onChange={(e) => setForm({ ...form, ci_id: e.target.value })}>
-              <option value="">Выберите КЕ</option>
+              <option value="">{t('maintenance.modal.ciPlaceholder')}</option>
               {(cis.data?.items ?? []).map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -281,10 +282,10 @@ export function MaintenancePage() {
             </select>
           </Field>
           <div className="row2">
-            <Field label="Начало">
+            <Field label={t('maintenance.modal.start')}>
               <input type="datetime-local" value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} />
             </Field>
-            <Field label="Конец">
+            <Field label={t('maintenance.modal.end')}>
               <input type="datetime-local" value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} />
             </Field>
           </div>
@@ -322,11 +323,11 @@ export function SelfCheckPage() {
   const { toast } = useApp()
   const { data, reload } = useFetch<SelfCheck>('/api/selfcheck')
   useLive(['alert', 'event'], reload, 2000)
-  if (!data) return <Empty>Загрузка…</Empty>
+  if (!data) return <Empty>{t('common.words.loading')}</Empty>
   const pd = data.pagerduty
   const outage = async (on: boolean) => {
     await api.post('/api/selfcheck/pd-outage', { on })
-    toast(on ? 'Симуляция: PagerDuty недоступен' : 'PagerDuty снова принимает события')
+    toast(on ? t('selfcheck.toasts.outageOn') : t('selfcheck.toasts.outageOff'))
     reload()
   }
   const tile = (title: string, value: ReactNode, sub?: string, cls = '') => (
@@ -339,33 +340,33 @@ export function SelfCheckPage() {
   return (
     <div className="page">
       <div className="page-main">
-        <PageHeader title="Самоконтроль" sub="Состояние конвейера: приём, обработка, передача в PagerDuty" />
+        <PageHeader title={t('selfcheck.header.title')} sub={t('selfcheck.header.sub')} />
         <div className="stats">
-          {tile('Работает', `${Math.floor(data.uptime_s / 60)} мин`, `хранилище: ${data.store}, шина: ${data.bus}`)}
-          {tile('Коннекторы', `${data.connectors_running} / ${data.connectors}`, 'запущено / всего')}
-          {tile('События', data.events, `последнее: ${fmtTime(data.last_event_at)}`)}
-          {tile('Ошибки разбора', data.parse_errors, undefined, data.parse_errors ? 'stat-warn' : '')}
-          {tile('Тревоги', `${data.active_alerts} / ${data.alerts}`, 'активные / всего')}
+          {tile(t('selfcheck.tiles.uptime'), t('selfcheck.tiles.uptimeValue', { m: Math.floor(data.uptime_s / 60) }), t('selfcheck.tiles.uptimeSub', { store: data.store, bus: data.bus }))}
+          {tile(t('selfcheck.tiles.connectors'), `${data.connectors_running} / ${data.connectors}`, t('selfcheck.tiles.connectorsSub'))}
+          {tile(t('selfcheck.tiles.events'), data.events, t('selfcheck.tiles.eventsSub', { time: fmtTime(data.last_event_at) }))}
+          {tile(t('selfcheck.tiles.parseErrors'), data.parse_errors, undefined, data.parse_errors ? 'stat-warn' : '')}
+          {tile(t('selfcheck.tiles.alerts'), `${data.active_alerts} / ${data.alerts}`, t('selfcheck.tiles.alertsSub'))}
         </div>
         <div className="card">
           <h3>PagerDuty Gateway</h3>
           <div className="stats">
-            {tile('Режим', pd.mode === 'live' ? 'Events API v2' : 'dry-run', pd.mode === 'live' ? 'отправка в PagerDuty' : 'ключ интеграции не задан: события не уходят наружу')}
-            {tile('Circuit breaker', pd.breaker_open ? 'открыт' : 'закрыт', `ошибок подряд: ${pd.consecutive_failures}`, pd.breaker_open ? 'stat-bad' : '')}
-            {tile('Отправлено', pd.sent, `ошибок: ${pd.failed}, в очереди: ${pd.queue}`)}
-            {tile('Последний успех', fmtTime(pd.last_success_at), pd.last_error ? `ошибка: ${pd.last_error}` : undefined)}
+            {tile(t('selfcheck.pd.mode'), pd.mode === 'live' ? 'Events API v2' : 'dry-run', pd.mode === 'live' ? t('selfcheck.pd.modeLive') : t('selfcheck.pd.modeDry'))}
+            {tile(t('selfcheck.pd.breaker'), pd.breaker_open ? t('selfcheck.pd.breakerOpen') : t('selfcheck.pd.breakerClosed'), t('selfcheck.pd.breakerSub', { n: pd.consecutive_failures }), pd.breaker_open ? 'stat-bad' : '')}
+            {tile(t('selfcheck.pd.sent'), pd.sent, t('selfcheck.pd.sentSub', { failed: pd.failed, queue: pd.queue }))}
+            {tile(t('selfcheck.pd.lastSuccess'), fmtTime(pd.last_success_at), pd.last_error ? t('selfcheck.pd.lastError', { error: pd.last_error }) : undefined)}
           </div>
           <div className="outage">
             <div>
-              <b>Проверка резервного оповещения.</b> Симуляция недоступности PagerDuty: отправки начнут падать, откроется circuit breaker, а тревоги error и critical, не принятые за 2 минуты, получат отметку «Резерв».
+              <b>{t('selfcheck.outage.title')}</b> {t('selfcheck.outage.text')}
             </div>
             {pd.simulated_outage ? (
               <button className="btn btn-primary" onClick={() => outage(false)}>
-                Вернуть PagerDuty
+                {t('selfcheck.outage.restore')}
               </button>
             ) : (
               <button className="btn btn-danger" onClick={() => outage(true)}>
-                Симулировать недоступность
+                {t('selfcheck.outage.simulate')}
               </button>
             )}
           </div>
@@ -381,18 +382,18 @@ export function AuditPage() {
   return (
     <div className="page">
       <div className="page-main">
-        <PageHeader title="Журнал аудита" sub="Все изменения конфигурации и действия с инцидентами" />
+        <PageHeader title={t('audit.header.title')} sub={t('audit.header.sub')} />
         <div className="card card-flush">
           {items.length === 0 ? (
-            <Empty>Записей пока нет</Empty>
+            <Empty>{t('audit.empty.none')}</Empty>
           ) : (
             <table className="table table-compact">
               <thead>
                 <tr>
-                  <th>Время</th>
-                  <th>Кто</th>
-                  <th>Действие</th>
-                  <th>Объект</th>
+                  <th>{t('audit.table.time')}</th>
+                  <th>{t('audit.table.actor')}</th>
+                  <th>{t('audit.table.action')}</th>
+                  <th>{t('audit.table.object')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -413,45 +414,39 @@ export function AuditPage() {
   )
 }
 
-const ROLES = [
-  { role: 'Наблюдатель', perms: 'просмотр дашборда и карты в своей области' },
-  { role: 'Дежурный инженер', perms: 'incident.ack, incident.silence, комментарии' },
-  { role: 'Инженер мониторинга', perms: 'коннекторы, шаблоны, правила RED/USE, окна обслуживания' },
-  { role: 'Владелец сервиса', perms: 'РСМ своих сервисов, резервные контакты, окна обслуживания' },
-  { role: 'Аудитор', perms: 'журнал аудита, только чтение' },
-  { role: 'Администратор ролей', perms: 'привязка групп каталога к ролям и предустановкам (в два ключа)' },
-]
+// Role keys under roles.list; each has a matching "<key>Perms" entry.
+const ROLES = ['viewer', 'oncall', 'monitoring', 'owner', 'auditor', 'admin']
 
 export function RolesPage() {
   const { meta } = useApp()
   return (
     <div className="page">
       <div className="page-main">
-        <PageHeader title="Роли и группы" sub="Группы приходят из корпоративного каталога; группа задаёт роль, область видимости и предустановку дашборда. Синхронизация с каталогом и OIDC — следующий шаг" />
+        <PageHeader title={t('roles.header.title')} sub={t('roles.header.sub')} />
         <div className="card card-flush">
           <table className="table">
             <thead>
               <tr>
-                <th>Роль</th>
-                <th>Разрешения</th>
+                <th>{t('roles.table.role')}</th>
+                <th>{t('roles.table.perms')}</th>
               </tr>
             </thead>
             <tbody>
               {ROLES.map((r) => (
-                <tr key={r.role}>
-                  <td>{r.role}</td>
-                  <td>{r.perms}</td>
+                <tr key={r}>
+                  <td>{t(`roles.list.${r}`)}</td>
+                  <td>{t(`roles.list.${r}Perms`)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
         <div className="card">
-          <h3>Области (команды)</h3>
+          <h3>{t('roles.teams.title')}</h3>
           <div className="tags">
-            {meta?.teams.map((t) => (
-              <span key={t.id} className="tag">
-                {t.name} · <code>{t.id}</code>
+            {meta?.teams.map((team) => (
+              <span key={team.id} className="tag">
+                {team.name} · <code>{team.id}</code>
               </span>
             ))}
           </div>

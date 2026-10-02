@@ -1,5 +1,7 @@
 // Typed client for the Umbrella Core API.
 
+import { dateLocale, t } from './i18n'
+
 export type Severity = 'critical' | 'error' | 'warning' | 'info'
 export const SEVERITIES: Severity[] = ['critical', 'error', 'warning', 'info']
 export type AlertStatus = 'open' | 'acknowledged' | 'resolved'
@@ -268,55 +270,39 @@ export function qs(params: Record<string, string | number | undefined | null>): 
 }
 
 // ---- formatting ----
+// Labels and time formats follow the active language (see i18n.ts).
 
-export const SEV_LABEL: Record<Severity, string> = {
-  critical: 'Critical',
-  error: 'Error',
-  warning: 'Warning',
-  info: 'Info',
+export const sevLabel = (s: Severity | '' | 'ok') => t(`common.severity.${s || 'ok'}`)
+export const statusLabel = (s: AlertStatus) => t(`common.status.${s}`)
+export const pdLabel = (s: PDState) => t(`common.pd.${s}`)
+export const methodLabel = (m: Method) => t(`common.method.${m}`)
+export function ciTypeLabel(type?: string): string {
+  if (!type) return ''
+  const v = t(`common.ciType.${type}`)
+  return v === `common.ciType.${type}` ? type : v
 }
-
-export const STATUS_LABEL: Record<AlertStatus, string> = {
-  open: 'Открыта',
-  acknowledged: 'Подтверждена',
-  resolved: 'Решена',
-}
-
-export const PD_LABEL: Record<PDState, string> = {
-  pending: 'В очереди',
-  accepted: 'Принят',
-  acked: 'Ack',
-  failed: 'Не принят',
-  skipped: 'Не отправлялся',
-}
-
-export const CI_TYPE_LABEL: Record<string, string> = {
-  business_service: 'Бизнес-услуга',
-  it_service: 'ИТ-сервис',
-  host: 'Хост',
-  database: 'База данных',
-  cloud_group: 'Облачная группа',
-  deployment: 'Deployment',
-  network: 'Сетевое устройство',
-}
-
-export const METHOD_LABEL: Record<Method, string> = { red: 'RED', use: 'USE', other: '—' }
 
 export function fmtTime(s?: string): string {
   if (!s) return '—'
   const d = new Date(s)
   const now = new Date()
+  const loc = dateLocale()
   const sameDay = d.toDateString() === now.toDateString()
-  const t = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  return sameDay ? t : `${d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })} ${t}`
+  const tm = d.toLocaleTimeString(loc, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return sameDay ? tm : `${d.toLocaleDateString(loc, { day: '2-digit', month: '2-digit' })} ${tm}`
+}
+
+export function fmtDateTime(s?: string): string {
+  if (!s) return '—'
+  return new Date(s).toLocaleString(dateLocale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 export function fmtDuration(from: string, to?: string): string {
   const ms = (to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime()
   const m = Math.max(0, Math.floor(ms / 60000))
-  if (m < 1) return '< 1 мин'
-  if (m < 60) return `${m} мин`
+  if (m < 1) return t('common.time.lessMinute')
+  if (m < 60) return t('common.time.min', { m })
   const h = Math.floor(m / 60)
-  if (h < 24) return `${h} ч ${m % 60} мин`
-  return `${Math.floor(h / 24)} д ${h % 24} ч`
+  if (h < 24) return t('common.time.hourMin', { h, m: m % 60 })
+  return t('common.time.dayHour', { d: Math.floor(h / 24), h: h % 24 })
 }

@@ -1,7 +1,8 @@
 import { ExternalLink, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { CI_TYPE_LABEL, qs, type CI, type IncidentList, type Relation } from '../api'
+import { ciTypeLabel, qs, type CI, type IncidentList, type Relation } from '../api'
 import { useApp, useFetch, useLive } from '../context'
+import { t } from '../i18n'
 import { CiDrawer } from '../components/CiDrawer'
 import { CiIcon, CmdbGraph } from '../components/CmdbGraph'
 import { IncidentDrawer } from '../components/IncidentDrawer'
@@ -54,20 +55,20 @@ export function OpsPage() {
   return (
     <div className="page page-with-side">
       <div className="side-list side-list-wide">
-        <div className="side-list-title">Конфигурационные единицы</div>
+        <div className="side-list-title">{t('ops.side.title')}</div>
         <div className="seg">
           {(['problem', 'all', 'services'] as Filter[]).map((f) => (
             <button key={f} className={`seg-btn ${filter === f ? 'seg-active' : ''}`} onClick={() => setFilter(f)}>
-              {f === 'problem' ? `Проблемные · ${problems}` : f === 'all' ? `Все · ${items.length}` : 'Сервисы'}
+              {f === 'problem' ? t('ops.side.problem', { n: problems }) : f === 'all' ? t('ops.side.all', { n: items.length }) : t('ops.side.services')}
             </button>
           ))}
         </div>
         <div className="search search-sm">
           <Search size={14} />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Название КЕ" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('ops.side.searchPlaceholder')} />
         </div>
         <button className={`ci-row ${sel === '' ? 'ci-row-active' : ''}`} onClick={() => setSel('')}>
-          <span className="ci-row-name">Вся модель</span>
+          <span className="ci-row-name">{t('ops.side.wholeModel')}</span>
         </button>
         {list.map((c) => (
           <button key={c.id} className={`ci-row ${sel === c.id ? 'ci-row-active' : ''}`} onClick={() => setSel(c.id)} onDoubleClick={() => setOpenCi(c.id)}>
@@ -77,23 +78,23 @@ export function OpsPage() {
             {c.open_alerts > 0 && <span className="side-count">{c.open_alerts}</span>}
           </button>
         ))}
-        {list.length === 0 && <div className="side-hint">Нет КЕ по фильтру</div>}
+        {list.length === 0 && <div className="side-hint">{t('ops.side.emptyFilter')}</div>}
       </div>
 
       <div className="page-main">
         <div className="page-header">
           <div>
-            <h1>{selCi ? selCi.name : 'Оперативный центр'}</h1>
+            <h1>{selCi ? selCi.name : t('ops.header.title')}</h1>
             <div className="page-sub">
               {selCi ? (
                 <>
-                  {CI_TYPE_LABEL[selCi.type]} · <SevBadge sev={selCi.status} />{' '}
+                  {ciTypeLabel(selCi.type)} · <SevBadge sev={selCi.status} />{' '}
                   <button className="link" onClick={() => setOpenCi(selCi.id)}>
-                    карточка КЕ <ExternalLink size={12} />
+                    {t('ops.header.ciCard')} <ExternalLink size={12} />
                   </button>
                 </>
               ) : (
-                'Состояние бизнес-услуг и ИТ-сервисов по открытым тревогам'
+                t('ops.header.sub')
               )}
             </div>
           </div>
@@ -104,12 +105,12 @@ export function OpsPage() {
             {services.map((s) => (
               <button key={s.id} className={`svc-tile svc-${s.status || 'ok'}`} onClick={() => setSel(s.id)}>
                 <div className="svc-tile-name">{s.name}</div>
-                <div className="svc-tile-state">{s.status ? `проблема: ${s.status}` : 'работает штатно'}</div>
+                <div className="svc-tile-state">{s.status ? t('ops.tiles.problem', { status: s.status }) : t('ops.tiles.ok')}</div>
               </button>
             ))}
             <div className="svc-tile svc-summary">
               <div className="svc-tile-name">{incidents.data?.counts.total ?? 0}</div>
-              <div className="svc-tile-state">открытых инцидентов</div>
+              <div className="svc-tile-state">{t('ops.tiles.openIncidents')}</div>
             </div>
           </div>
         )}
@@ -118,8 +119,8 @@ export function OpsPage() {
           value={tab}
           onChange={setTab}
           tabs={[
-            { id: 'graph', title: 'Граф РСМ' },
-            { id: 'incidents', title: `Инциденты · ${incidents.data?.total ?? 0}` },
+            { id: 'graph', title: t('ops.tabs.graph') },
+            { id: 'incidents', title: t('ops.tabs.incidents', { n: incidents.data?.total ?? 0 }) },
           ]}
         />
         {tab === 'graph' &&
@@ -128,7 +129,7 @@ export function OpsPage() {
               <CmdbGraph nodes={graph.data.nodes} edges={graph.data.edges} selected={sel} onSelect={setSel} />
             </div>
           ) : (
-            <Empty>Нет данных карты</Empty>
+            <Empty>{t('ops.empty.graph')}</Empty>
           ))}
         {tab === 'incidents' && (
           <div className="card card-flush">

@@ -2,7 +2,7 @@ import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edg
 import '@xyflow/react/dist/style.css'
 import { Box, Building2, Cloud, Database, Layers, Router, Server } from 'lucide-react'
 import { useMemo } from 'react'
-import { CI_TYPE_LABEL, type CI, type Relation } from '../api'
+import { ciTypeLabel, type CI, type Relation } from '../api'
 
 export function CiIcon({ type, size = 16 }: { type: string; size?: number }) {
   switch (type) {
@@ -38,7 +38,7 @@ function CiNode({ data }: NodeProps<Node<CiNodeData>>) {
       <div className="ci-node-text">
         <div className="ci-node-name">{ci.name}</div>
         <div className="ci-node-type">
-          {CI_TYPE_LABEL[ci.type] ?? ci.type}
+          {ciTypeLabel(ci.type)}
           {ci.open_alerts > 0 && <span className="ci-node-count">{ci.open_alerts}</span>}
         </div>
       </div>
@@ -79,7 +79,7 @@ export function CmdbGraph({
       const l = level.get(n.id) ?? 2
       rows.set(l, [...(rows.get(l) ?? []), n])
     }
-    const W = 185
+    const W = 208
     const maxRow = Math.max(1, ...[...rows.values()].map((r) => r.length))
     const fn: Node<CiNodeData>[] = []
     for (const [l, row] of rows) {
@@ -94,8 +94,8 @@ export function CmdbGraph({
       source: e.from,
       target: e.to,
       data: { kind: e.type },
-      markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: '#9aa5b1' },
-      style: { stroke: '#9aa5b1' },
+      markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: 'var(--graph-edge)' },
+      style: { stroke: 'var(--graph-edge)' },
     }))
     return { fn, fe }
   }, [nodes, edges, selected])
@@ -114,7 +114,7 @@ export function CmdbGraph({
         proOptions={{ hideAttribution: true }}
         minZoom={0.2}
       >
-        <Background gap={20} color="#e3e7eb" />
+        <Background gap={20} color="var(--graph-grid)" />
         <Controls showInteractive={false} />
       </ReactFlow>
     </div>

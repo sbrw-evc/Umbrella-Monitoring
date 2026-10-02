@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { api, fmtTime, qs, type Connector } from '../api'
 import { useApp, useFetch, useLive } from '../context'
 import { Empty, Field, Modal, PageHeader, SideList } from '../components/ui'
+import { t } from '../i18n'
 
 export function ConnectorsPage() {
   const { team, toast } = useApp()
@@ -21,7 +22,7 @@ export function ConnectorsPage() {
     setMenu(null)
     try {
       if (action === 'delete') {
-        if (!window.confirm(`Удалить коннектор «${c.name}»?`)) return
+        if (!window.confirm(t('connectors.confirm.delete', { name: c.name }))) return
         await api.del(`/api/connectors/${c.id}`)
       } else {
         await api.post(`/api/connectors/${c.id}/${action}`)
@@ -35,42 +36,42 @@ export function ConnectorsPage() {
   return (
     <div className="page page-with-side">
       <SideList
-        title="Состояние"
+        title={t('connectors.side.title')}
         value={filter}
         onChange={setFilter}
         items={[
-          { id: 'all', title: 'Все', count: all.length },
-          { id: 'running', title: 'Запущены', count: all.filter((c) => c.status === 'running').length },
-          { id: 'stopped', title: 'Остановлены', count: all.filter((c) => c.status === 'stopped').length },
-          { id: 'draft', title: 'Есть неопубликованные изменения', count: all.filter((c) => c.draft_dirty).length },
+          { id: 'all', title: t('connectors.side.all'), count: all.length },
+          { id: 'running', title: t('connectors.side.running'), count: all.filter((c) => c.status === 'running').length },
+          { id: 'stopped', title: t('connectors.side.stopped'), count: all.filter((c) => c.status === 'stopped').length },
+          { id: 'draft', title: t('connectors.side.draft'), count: all.filter((c) => c.draft_dirty).length },
         ]}
       />
       <div className="page-main">
         <PageHeader
-          title="Коннекторы"
-          sub="Подключения к источникам собираются из блоков в конструкторе: получение, парсинг, шаблон, подтверждение"
+          title={t('connectors.header.title')}
+          sub={t('connectors.header.sub')}
           actions={
             <button className="btn btn-primary" onClick={() => setCreating(true)}>
-              <Plus size={14} /> Создать коннектор
+              <Plus size={14} /> {t('connectors.header.create')}
             </button>
           }
         />
         <div className="card card-flush">
           {items.length === 0 ? (
-            <Empty>Коннекторов нет</Empty>
+            <Empty>{t('connectors.table.empty')}</Empty>
           ) : (
             <table className="table">
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Название</th>
-                  <th>Состояние</th>
-                  <th>Версия</th>
-                  <th>Событий</th>
-                  <th>Ошибок разбора</th>
-                  <th>Последнее событие</th>
-                  <th>Команда</th>
-                  <th>Изменён</th>
+                  <th>{t('connectors.columns.id')}</th>
+                  <th>{t('connectors.columns.name')}</th>
+                  <th>{t('connectors.columns.status')}</th>
+                  <th>{t('connectors.columns.version')}</th>
+                  <th>{t('connectors.columns.events')}</th>
+                  <th>{t('connectors.columns.errors')}</th>
+                  <th>{t('connectors.columns.lastEvent')}</th>
+                  <th>{t('connectors.columns.team')}</th>
+                  <th>{t('connectors.columns.updated')}</th>
                   <th />
                 </tr>
               </thead>
@@ -83,11 +84,11 @@ export function ConnectorsPage() {
                       {c.description && <div className="sub-line">{c.description}</div>}
                     </td>
                     <td>
-                      <span className={`pill ${c.status === 'running' ? 'pill-run' : 'pill-muted'}`}>{c.status === 'running' ? 'Запущен' : 'Остановлен'}</span>
+                      <span className={`pill ${c.status === 'running' ? 'pill-run' : 'pill-muted'}`}>{c.status === 'running' ? t('connectors.status.running') : t('connectors.status.stopped')}</span>
                     </td>
                     <td className="nowrap">
                       {c.version ? `v${c.version}` : '—'}
-                      {c.draft_dirty && <span className="dirty-dot" title="Есть неопубликованные изменения" />}
+                      {c.draft_dirty && <span className="dirty-dot" title={t('connectors.table.unpublished')} />}
                     </td>
                     <td className="num">{c.events_total}</td>
                     <td className={`num ${c.errors_total ? 'text-danger' : ''}`}>{c.errors_total}</td>
@@ -105,24 +106,24 @@ export function ConnectorsPage() {
                         <div className="row-menu">
                           {c.status === 'running' ? (
                             <button onClick={() => act(c, 'stop')}>
-                              <Square size={13} /> Остановить
+                              <Square size={13} /> {t('connectors.actions.stop')}
                             </button>
                           ) : (
                             <button onClick={() => act(c, 'start')}>
-                              <Play size={13} /> Запустить
+                              <Play size={13} /> {t('connectors.actions.start')}
                             </button>
                           )}
                           <button
                             onClick={() => {
                               navigator.clipboard?.writeText(`${location.origin}/api/ingest/${c.id}`)
                               setMenu(null)
-                              toast('Адрес приёма скопирован')
+                              toast(t('connectors.toasts.ingestCopied'))
                             }}
                           >
-                            Копировать адрес приёма
+                            {t('connectors.actions.copyIngest')}
                           </button>
                           <button className="danger" onClick={() => act(c, 'delete')}>
-                            <Trash2 size={13} /> Удалить
+                            <Trash2 size={13} /> {t('connectors.actions.delete')}
                           </button>
                         </div>
                       )}
@@ -154,42 +155,42 @@ function CreateConnector({ onClose, onDone }: { onClose: () => void; onDone: (id
   }
   return (
     <Modal
-      title="Новый коннектор"
+      title={t('connectors.create.title')}
       onClose={onClose}
       footer={
         <>
           <button className="btn" onClick={onClose}>
-            Отмена
+            {t('common.actions.cancel')}
           </button>
           <button className="btn btn-primary" disabled={!name} onClick={submit}>
-            Создать и открыть конструктор
+            {t('connectors.create.submit')}
           </button>
         </>
       }
     >
-      <Field label="Название">
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Например: Webhook сетевого мониторинга" autoFocus />
+      <Field label={t('connectors.create.name')}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('connectors.create.namePlaceholder')} autoFocus />
       </Field>
-      <Field label="Команда-владелец">
+      <Field label={t('connectors.create.team')}>
         <select value={team} onChange={(e) => setTeam(e.target.value)}>
-          {meta?.teams.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
+          {meta?.teams.map((tm) => (
+            <option key={tm.id} value={tm.id}>
+              {tm.name}
             </option>
           ))}
         </select>
       </Field>
-      <Field label="Заготовка">
+      <Field label={t('connectors.create.template')}>
         <div className="choice">
           <label className={`choice-item ${template === 'webhook-json' ? 'choice-active' : ''}`}>
             <input type="radio" checked={template === 'webhook-json'} onChange={() => setTemplate('webhook-json')} />
-            <b>Push: входящий webhook</b>
-            <span>Источник сам присылает события в Umbrella</span>
+            <b>{t('connectors.create.pushTitle')}</b>
+            <span>{t('connectors.create.pushSub')}</span>
           </label>
           <label className={`choice-item ${template === 'pull-http' ? 'choice-active' : ''}`}>
             <input type="radio" checked={template === 'pull-http'} onChange={() => setTemplate('pull-http')} />
-            <b>Pull: опрос API по расписанию</b>
-            <span>Umbrella сама забирает события по HTTP</span>
+            <b>{t('connectors.create.pullTitle')}</b>
+            <span>{t('connectors.create.pullSub')}</span>
           </label>
         </div>
       </Field>

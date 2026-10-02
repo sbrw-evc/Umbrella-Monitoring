@@ -1,11 +1,14 @@
 import { Plus, Search, Table2, Workflow } from 'lucide-react'
 import { useState } from 'react'
-import { api, CI_TYPE_LABEL, fmtTime, qs, type CI, type Relation } from '../api'
+import { api, ciTypeLabel, fmtTime, qs, type CI, type Relation } from '../api'
 import { useApp, useFetch, useLive } from '../context'
+import { t } from '../i18n'
 import { CiDrawer } from '../components/CiDrawer'
 import { CiIcon, CmdbGraph } from '../components/CmdbGraph'
 import { IncidentDrawer } from '../components/IncidentDrawer'
 import { Empty, Field, Modal, PageHeader, SevBadge, SideList } from '../components/ui'
+
+const CI_TYPES = ['business_service', 'it_service', 'host', 'database', 'cloud_group', 'deployment', 'network']
 
 export function CmdbPage() {
   const { team, toast } = useApp()
@@ -29,37 +32,37 @@ export function CmdbPage() {
 
   const items = data?.items ?? []
   const allItems = all.data?.items ?? []
-  const types = Object.keys(CI_TYPE_LABEL).filter((t) => allItems.some((c) => c.type === t))
+  const types = CI_TYPES.filter((ty) => allItems.some((c) => c.type === ty))
 
   return (
     <div className="page page-with-side">
       <SideList
-        title="Фильтры CMDB"
+        title={t('cmdb.filters.title')}
         value={filter}
         onChange={setFilter}
         items={[
-          { id: 'all', title: 'Все', count: allItems.length },
-          { id: 'problem', title: 'Проблемные', count: allItems.filter((c) => c.status).length },
-          { id: 'ok', title: 'OK', count: allItems.filter((c) => !c.status).length },
-          ...types.map((t) => ({ id: `type:${t}`, title: CI_TYPE_LABEL[t], count: allItems.filter((c) => c.type === t).length, icon: <CiIcon type={t} size={14} /> })),
+          { id: 'all', title: t('common.words.all'), count: allItems.length },
+          { id: 'problem', title: t('cmdb.filters.problem'), count: allItems.filter((c) => c.status).length },
+          { id: 'ok', title: t('cmdb.filters.ok'), count: allItems.filter((c) => !c.status).length },
+          ...types.map((ty) => ({ id: `type:${ty}`, title: ciTypeLabel(ty), count: allItems.filter((c) => c.type === ty).length, icon: <CiIcon type={ty} size={14} /> })),
         ]}
       />
       <div className="page-main">
         <PageHeader
-          title="Карта CMDB"
-          sub="КЕ и связи строит CMDB Discovery по данным мониторинга; бизнес-услуги задаются вручную"
+          title={t('cmdb.header.title')}
+          sub={t('cmdb.header.sub')}
           actions={
             <>
               <div className="seg">
                 <button className={`seg-btn ${mode === 'table' ? 'seg-active' : ''}`} onClick={() => setMode('table')}>
-                  <Table2 size={14} /> Таблица
+                  <Table2 size={14} /> {t('cmdb.header.table')}
                 </button>
                 <button className={`seg-btn ${mode === 'graph' ? 'seg-active' : ''}`} onClick={() => setMode('graph')}>
-                  <Workflow size={14} /> Граф
+                  <Workflow size={14} /> {t('cmdb.header.graph')}
                 </button>
               </div>
               <button className="btn btn-primary" onClick={() => setCreating(true)}>
-                <Plus size={14} /> Создать КЕ
+                <Plus size={14} /> {t('cmdb.header.create')}
               </button>
             </>
           }
@@ -69,28 +72,28 @@ export function CmdbPage() {
             <div className="filterbar">
               <div className="search">
                 <Search size={15} />
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ID, название, описание, группа" />
+                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('cmdb.filters.searchPlaceholder')} />
               </div>
               <div className="filterbar-spacer" />
-              <span className="muted">{items.length} КЕ</span>
+              <span className="muted">{t('cmdb.filters.count', { n: items.length })}</span>
             </div>
             <div className="card card-flush">
               {items.length === 0 ? (
-                <Empty>КЕ не найдены</Empty>
+                <Empty>{t('cmdb.table.empty')}</Empty>
               ) : (
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>ID</th>
-                      <th>Название</th>
-                      <th>Тип</th>
-                      <th>Состояние</th>
-                      <th>Открытые тревоги</th>
-                      <th>Команда</th>
-                      <th>Идентификаторы</th>
-                      <th>Связи</th>
-                      <th>Источник</th>
-                      <th>Создана</th>
+                      <th>{t('cmdb.table.id')}</th>
+                      <th>{t('cmdb.table.name')}</th>
+                      <th>{t('cmdb.table.type')}</th>
+                      <th>{t('cmdb.table.state')}</th>
+                      <th>{t('cmdb.table.openAlerts')}</th>
+                      <th>{t('cmdb.table.team')}</th>
+                      <th>{t('cmdb.table.identities')}</th>
+                      <th>{t('cmdb.table.relations')}</th>
+                      <th>{t('cmdb.table.source')}</th>
+                      <th>{t('cmdb.table.created')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -103,12 +106,12 @@ export function CmdbPage() {
                         </td>
                         <td className="nowrap">
                           <span className="type-cell">
-                            <CiIcon type={c.type} size={14} /> {CI_TYPE_LABEL[c.type] ?? c.type}
+                            <CiIcon type={c.type} size={14} /> {ciTypeLabel(c.type)}
                           </span>
                         </td>
                         <td>
                           <SevBadge sev={c.status} />
-                          {c.maintenance && <span className="tag">обслуживание</span>}
+                          {c.maintenance && <span className="tag">{t('cmdb.table.maintenance')}</span>}
                         </td>
                         <td className="num">{c.open_alerts || ''}</td>
                         <td>{c.team}</td>
@@ -116,7 +119,7 @@ export function CmdbPage() {
                         <td className="num">
                           ↑{c.parents} ↓{c.children}
                         </td>
-                        <td>{c.origin === 'discovery' ? 'Discovery' : 'вручную'}</td>
+                        <td>{c.origin === 'discovery' ? t('cmdb.table.discovery') : t('cmdb.table.manual')}</td>
                         <td className="nowrap">{fmtTime(c.created_at)}</td>
                       </tr>
                     ))}
@@ -151,7 +154,7 @@ export function CmdbPage() {
             setCreating(false)
             reload()
             all.reload()
-            toast('КЕ создана')
+            toast(t('cmdb.create.done'))
           }}
         />
       )}
@@ -176,41 +179,41 @@ function CreateCi({ all, onClose, onDone }: { all: CI[]; onClose: () => void; on
   }
   return (
     <Modal
-      title="Новая КЕ"
+      title={t('cmdb.create.title')}
       onClose={onClose}
       footer={
         <>
           <button className="btn" onClick={onClose}>
-            Отмена
+            {t('common.actions.cancel')}
           </button>
           <button className="btn btn-primary" onClick={submit} disabled={!name}>
-            Создать
+            {t('common.actions.create')}
           </button>
         </>
       }
     >
-      <Field label="Название">
+      <Field label={t('cmdb.create.name')}>
         <input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
       </Field>
-      <Field label="Тип">
+      <Field label={t('cmdb.create.type')}>
         <select value={type} onChange={(e) => setType(e.target.value)}>
-          {Object.entries(CI_TYPE_LABEL).map(([k, v]) => (
+          {CI_TYPES.map((k) => (
             <option key={k} value={k}>
-              {v}
+              {ciTypeLabel(k)}
             </option>
           ))}
         </select>
       </Field>
-      <Field label="Команда">
+      <Field label={t('cmdb.create.team')}>
         <select value={team} onChange={(e) => setTeam(e.target.value)}>
-          {meta?.teams.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
+          {meta?.teams.map((tm) => (
+            <option key={tm.id} value={tm.id}>
+              {tm.name}
             </option>
           ))}
         </select>
       </Field>
-      <Field label="Родительская КЕ" help="Новая КЕ станет зависимостью выбранной">
+      <Field label={t('cmdb.create.parent')} help={t('cmdb.create.parentHelp')}>
         <select value={parent} onChange={(e) => setParent(e.target.value)}>
           <option value="">—</option>
           {all.map((c) => (
@@ -220,7 +223,7 @@ function CreateCi({ all, onClose, onDone }: { all: CI[]; onClose: () => void; on
           ))}
         </select>
       </Field>
-      <Field label="Описание">
+      <Field label={t('cmdb.create.description')}>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
       </Field>
     </Modal>

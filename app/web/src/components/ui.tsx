@@ -1,27 +1,27 @@
 import { X } from 'lucide-react'
 import { type ReactNode, useEffect } from 'react'
-import { PD_LABEL, SEV_LABEL, STATUS_LABEL, type AlertStatus, type PDState, type Severity } from '../api'
+import { pdLabel, sevLabel, statusLabel, type AlertStatus, type PDState, type Severity } from '../api'
+import { t } from '../i18n'
 
 export function SevBadge({ sev }: { sev: Severity | '' }) {
-  if (!sev) return <span className="sev sev-ok">OK</span>
-  return <span className={`sev sev-${sev}`}>{SEV_LABEL[sev]}</span>
+  return <span className={`sev sev-${sev || 'ok'}`}>{sevLabel(sev)}</span>
 }
 
 export function SevDot({ sev, title }: { sev: Severity | ''; title?: string }) {
-  return <span className={`dot dot-${sev || 'ok'}`} title={title ?? (sev ? SEV_LABEL[sev] : 'OK')} />
+  return <span className={`dot dot-${sev || 'ok'}`} title={title ?? sevLabel(sev)} />
 }
 
 export function StatusPill({ status }: { status: AlertStatus }) {
-  return <span className={`pill pill-${status}`}>{STATUS_LABEL[status]}</span>
+  return <span className={`pill pill-${status}`}>{statusLabel(status)}</span>
 }
 
 export function PDPill({ state, fallback }: { state: PDState; fallback?: boolean }) {
   return (
     <span className="pd-cell">
-      <span className={`pd pd-${state}`}>{PD_LABEL[state]}</span>
+      <span className={`pd pd-${state}`}>{pdLabel(state)}</span>
       {fallback && (
-        <span className="pd pd-fallback" title="Отправлено по резервным каналам">
-          Резерв
+        <span className="pd pd-fallback" title={t('common.pd.fallbackHint')}>
+          {t('common.pd.fallback')}
         </span>
       )}
     </span>
@@ -45,15 +45,16 @@ export function Tabs<T extends string>({
   value,
   onChange,
 }: {
-  tabs: { id: T; title: ReactNode }[]
+  tabs: { id: T; title: ReactNode; icon?: ReactNode }[]
   value: T
   onChange: (v: T) => void
 }) {
   return (
     <div className="tabs">
-      {tabs.map((t) => (
-        <button key={t.id} className={`tab ${value === t.id ? 'tab-active' : ''}`} onClick={() => onChange(t.id)}>
-          {t.title}
+      {tabs.map((x) => (
+        <button key={x.id} className={`tab ${value === x.id ? 'tab-active' : ''}`} onClick={() => onChange(x.id)}>
+          {x.icon}
+          {x.title}
         </button>
       ))}
     </div>
@@ -91,13 +92,11 @@ export function Drawer({
             {title}
             {sub && <div className="drawer-sub">{sub}</div>}
           </div>
-          <div className="drawer-actions">
-            {actions}
-            <button className="icon-btn" onClick={onClose} title="Закрыть">
-              <X size={18} />
-            </button>
-          </div>
+          <button className="icon-btn" onClick={onClose} title={t('common.actions.close')}>
+            <X size={18} />
+          </button>
         </div>
+        {actions && <div className="drawer-actions">{actions}</div>}
         <div className="drawer-body">{children}</div>
       </aside>
     </div>
@@ -110,7 +109,7 @@ export function Modal({ title, onClose, children, footer }: { title: string; onC
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>{title}</h3>
-          <button className="icon-btn" onClick={onClose}>
+          <button className="icon-btn" onClick={onClose} title={t('common.actions.close')}>
             <X size={18} />
           </button>
         </div>
