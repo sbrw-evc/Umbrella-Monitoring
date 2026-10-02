@@ -4,10 +4,12 @@
 .DESCRIPTION
   Needs Docker Desktop (or Docker Engine with the compose plugin). Runs in
   ConstrainedLanguage mode (AppLocker / WDAC): only cmdlets, no .NET calls. Fetches the
-  repository, writes .env with random secrets, starts Umbrella + Zabbix 7.0
-  (server, web, agent 2), connects Zabbix to Umbrella (configure.ps1) and runs
-  the MVP test (smoke-test.ps1 -Zabbix). Running it again updates the code and
-  restarts the containers; the passwords in .env are kept.
+  repository, writes .env with random secrets, starts Umbrella, Zabbix 7.0
+  (server, web, agent 2), Prometheus + Alertmanager + node-exporter, OpenSearch
+  + Dashboards, Grafana and the notification sink, connects the sources to
+  Umbrella (configure.ps1) and runs the MVP test (smoke-test.ps1 -All).
+  Running it again updates the code and restarts the containers; the secrets
+  in .env are kept, missing ones are added.
 
   One line, in PowerShell:
     irm https://raw.githubusercontent.com/sbrw-evc/Umbrella-Monitoring/feature/mvp-app/deploy/zabbix-lab/install.ps1 -OutFile $env:TEMP\umbrella-install.ps1; powershell -ExecutionPolicy Bypass -File $env:TEMP\umbrella-install.ps1
@@ -17,7 +19,7 @@
 
   Settings come from parameters or environment variables with the same names:
   UMB_DIR, UMB_BRANCH, PUBLIC_HOST, UMBRELLA_PORT, ZABBIX_WEB_PORT,
-  UMBRELLA_DEMO, UMBRELLA_PD_ROUTING_KEY.
+  GRAFANA_PORT, PROMETHEUS_PORT, OSD_PORT, UMBRELLA_DEMO, UMBRELLA_PD_ROUTING_KEY.
 #>
 param(
   [string]$Dir = $(if ($env:UMB_DIR) { $env:UMB_DIR } else { Join-Path $HOME 'umbrella-monitoring' }),
@@ -107,15 +109,19 @@ if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot 'docker-compose.yml')
 Set-Location $lab
 
 $envPath = Join-Path $lab '.env'
+# New-Guid draws from the system crypto RNG; two GUIDs give 64 hex chars.
+function New-Secret { ((New-Guid).Guid + (New-Guid).Guid) -replace '-', '' }
+# Umbrella password policy: 10+ characters, letters and digits.
+function New-Password { 'Lab' + ((New-Guid).Guid -replace '-', '').Substring(0, 24) + '7' }
+function Pick([string]$Name, [string]$Default) {
+  $item = Get-Item -Path "Env:$Name" -ErrorAction SilentlyContinue
+  if ($item -and $item.Value) { return $item.Value }
+  return $Default
+}
+$newEnv = $false
 if (-not (Test-Path $envPath)) {
   Write-Step 'Writing .env with random secrets'
-  # New-Guid draws from the system crypto RNG; two GUIDs give 64 hex chars.
-  function New-Secret { ((New-Guid).Guid + (New-Guid).Guid) -replace '-', '' }
-  function Pick([string]$Name, [string]$Default) {
-    $item = Get-Item -Path "Env:$Name" -ErrorAction SilentlyContinue
-    if ($item -and $item.Value) { return $item.Value }
-    return $Default
-  }
+  $newEnv = $true
   $ip = Pick 'PUBLIC_HOST' ''
   if (-not $ip -and (Get-Command Get-NetIPAddress -ErrorAction SilentlyContinue)) {
     $ip = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
@@ -131,7 +137,7 @@ if (-not (Test-Path $envPath)) {
     "PUBLIC_HOST=$ip",
     "UMBRELLA_PORT=$(Pick 'UMBRELLA_PORT' '8080')",
     "ZABBIX_WEB_PORT=$(Pick 'ZABBIX_WEB_PORT' '8081')",
-    "UMBRELLA_DEMO=$(Pick 'UMBRELLA_DEMO' 'true')",
+    "UMBRELLA_DEMO=$(Pick 'UMBRELLA_DEMO' 'false')",
     "UMBRELLA_PD_ROUTING_KEY=$(Pick 'UMBRELLA_PD_ROUTING_KEY' '')",
     "ZABBIX_DB_PASSWORD=$(New-Secret)",
     "ZABBIX_ADMIN_PASSWORD=$(New-Secret)",
@@ -141,11 +147,62 @@ if (-not (Test-Path $envPath)) {
   )
   # LF line endings and no BOM, as docker compose expects.
   Set-Content -Path $envPath -Value (($lines -join "`n") + "`n") -NoNewline -Encoding ascii
+}
+# Settings added after the first version of the lab: appended when missing,
+# so an existing .env keeps its passwords.
+$text = Get-Content $envPath -Raw
+if (-not $text) { $text = '' }
+if ($text.Length -gt 0 -and -not $text.EndsWith("`n")) { $text += "`n" }
+$added = @()
+$want = @(
+  @('GRAFANA_PORT', (Pick 'GRAFANA_PORT' '3000')),
+  @('PROMETHEUS_PORT', (Pick 'PROMETHEUS_PORT' '9090')),
+  @('OSD_PORT', (Pick 'OSD_PORT' '5601')),
+  @('UMBRELLA_ADMIN_USER', (Pick 'UMBRELLA_ADMIN_USER' 'admin')),
+  @('UMBRELLA_ADMIN_PASSWORD', (New-Password)),
+  @('LAB_OWNER_PASSWORD', (New-Password)),
+  @('GRAFANA_ADMIN_PASSWORD', (New-Secret).Substring(0, 32)),
+  @('UMBRELLA_GRAFANA_TOKEN', ('umb_' + (New-Secret).Substring(0, 48))),
+  @('UMBRELLA_METRICS_TOKEN', (New-Secret).Substring(0, 32)),
+  @('PROMETHEUS_WEBHOOK_TOKEN', (New-Secret).Substring(0, 32)),
+  @('LAB_ZOOM_TOKEN', (New-Secret).Substring(0, 32))
+)
+foreach ($kv in $want) {
+  if ($text -notmatch ('(?m)^' + $kv[0] + '=')) {
+    $text += $kv[0] + '=' + $kv[1] + "`n"
+    $added += $kv[0]
+  }
+}
+if ($added.Count -gt 0) {
+  Set-Content -Path $envPath -Value $text -NoNewline -Encoding ascii
+  Write-Step ('.env: added ' + ($added -join ', '))
+}
+if ($newEnv) {
   if ($IsWindows -or $env:OS -eq 'Windows_NT') {
     [void](Test-Native icacls @($envPath, '/inheritance:r', '/grant:r', "$($env:USERNAME):(R,W)"))
   } else {
     & chmod 600 $envPath
   }
+}
+
+# OpenSearch wants vm.max_map_count >= 262144. On Linux (pwsh) it is set and
+# kept across reboots; Docker Desktop runs containers in a WSL2 VM that
+# Windows cannot configure from here, so only a hint is printed.
+if ($IsLinux) {
+  $cur = 0
+  $mmc = '/proc/sys/vm/max_map_count'
+  if (Test-Path $mmc) { $cur = [int](Get-Content $mmc -Raw).Trim() }
+  if ($cur -lt 262144) {
+    Write-Step 'sysctl vm.max_map_count=262144 (OpenSearch)'
+    if (-not (Test-Native sysctl @('-q', '-w', 'vm.max_map_count=262144'))) { Write-Host '  could not set it (run as root); OpenSearch may refuse to start' }
+  }
+  if ((Test-Path '/etc/sysctl.d') -and -not (Test-Path '/etc/sysctl.d/99-umbrella-opensearch.conf')) {
+    try { Set-Content -Path '/etc/sysctl.d/99-umbrella-opensearch.conf' -Value "vm.max_map_count = 262144`n" -NoNewline -Encoding ascii } catch { }
+  }
+} else {
+  Write-Host 'OpenSearch needs vm.max_map_count=262144 in the Docker VM. If the opensearch container stops, run:'
+  Write-Host '  wsl -d docker-desktop sysctl -w vm.max_map_count=262144'
+  Write-Host '  (to keep it after a restart, add "kernelCommandLine = sysctl.vm.max_map_count=262144" under [wsl2] in %USERPROFILE%\.wslconfig)'
 }
 
 if ($NoBuild) {
@@ -157,7 +214,7 @@ if ($NoBuild) {
 }
 & docker compose ps
 
-Write-Step 'Connecting Zabbix to Umbrella'
+Write-Step 'Connecting the lab sources to Umbrella'
 $global:LASTEXITCODE = 0
 & (Join-Path $lab 'configure.ps1')
 if ($LASTEXITCODE -ne 0) { Stop-Lab 'configure.ps1 failed' }
@@ -165,7 +222,7 @@ if ($LASTEXITCODE -ne 0) { Stop-Lab 'configure.ps1 failed' }
 $test = 0
 if (-not $SkipTest) {
   Write-Step 'Testing MVP functions'
-  & (Join-Path $lab 'smoke-test.ps1') -Zabbix
+  & (Join-Path $lab 'smoke-test.ps1') -All
   $test = $LASTEXITCODE
 }
 
@@ -173,9 +230,14 @@ if (-not $SkipTest) {
 Read-DotEnv $envPath
 $h = Get-Setting 'PUBLIC_HOST' 'localhost'
 Write-Host ''
-Write-Host "Umbrella:  http://${h}:$(Get-Setting 'UMBRELLA_PORT' '8080')"
-Write-Host "Zabbix:    http://${h}:$(Get-Setting 'ZABBIX_WEB_PORT' '8081')   login Admin, password: ZABBIX_ADMIN_PASSWORD in $envPath"
-Write-Host "Re-run the test:  $(Join-Path $lab 'smoke-test.ps1') -Zabbix"
+Write-Host "Umbrella:    http://${h}:$(Get-Setting 'UMBRELLA_PORT' '8080')   login $(Get-Setting 'UMBRELLA_ADMIN_USER' 'admin'), password UMBRELLA_ADMIN_PASSWORD"
+Write-Host '             owner of lab-shop: lab-owner, password LAB_OWNER_PASSWORD'
+Write-Host "Grafana:     http://${h}:$(Get-Setting 'GRAFANA_PORT' '3000')   login admin, password GRAFANA_ADMIN_PASSWORD"
+Write-Host "Zabbix:      http://${h}:$(Get-Setting 'ZABBIX_WEB_PORT' '8081')   login Admin, password ZABBIX_ADMIN_PASSWORD"
+Write-Host "Prometheus:  http://${h}:$(Get-Setting 'PROMETHEUS_PORT' '9090')   (no login)"
+Write-Host "OpenSearch Dashboards:  http://${h}:$(Get-Setting 'OSD_PORT' '5601')   (no login)"
+Write-Host "All passwords and tokens are in $envPath"
+Write-Host "Re-run the test:  $(Join-Path $lab 'smoke-test.ps1') -All"
 Write-Host "After a restart of the umbrella container (data is in memory):  $(Join-Path $lab 'configure.ps1')"
-Write-Host 'The lab API has no login: open the ports only to your own addresses.'
+Write-Host 'Prometheus and OpenSearch Dashboards have no login: open the ports only to your own addresses.'
 exit $test
