@@ -78,6 +78,7 @@ func Seed(st *store.Store) {
 		for _, c := range connectors(now) {
 			cc := c
 			d.Connectors[cc.ID] = &cc
+			d.UseID(cc.ID)
 		}
 		d.Rules = []model.Rule{
 			{ID: "R-1", Method: model.MethodRED, Signal: "red.rate", Name: "Падение трафика", Condition: "rate < 0.5 × baseline(10m)", AppliesTo: "ИТ-сервисы", Severity: model.SevError, Enabled: true},

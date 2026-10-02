@@ -5,6 +5,8 @@ package store
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
@@ -74,6 +76,18 @@ func (s *Store) Write(f func(d *Data)) {
 func (d *Data) NextID(prefix string) string {
 	d.seq[prefix]++
 	return fmt.Sprintf("%s-%d", prefix, d.seq[prefix])
+}
+
+// UseID records an id assigned outside NextID (seed data), so NextID never
+// hands it out again.
+func (d *Data) UseID(id string) {
+	i := strings.LastIndex(id, "-")
+	if i < 0 {
+		return
+	}
+	if n, err := strconv.Atoi(id[i+1:]); err == nil && n > d.seq[id[:i]] {
+		d.seq[id[:i]] = n
+	}
 }
 
 // AddEvent appends to the ring.

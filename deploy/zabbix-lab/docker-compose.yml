@@ -1,0 +1,82 @@
+# Umbrella lab: Umbrella MVP + Zabbix 7.0 (server, web, agent 2) on one host.
+# Secrets come from .env, which install.sh generates; see .env.example.
+name: umbrella-lab
+
+services:
+  umbrella:
+    build:
+      context: ../../app
+    image: umbrella-mvp:lab
+    restart: unless-stopped
+    environment:
+      UMBRELLA_DEMO: ${UMBRELLA_DEMO:-true}
+      UMBRELLA_PUBLIC_URL: http://${PUBLIC_HOST:-localhost}:${UMBRELLA_PORT:-8080}
+      UMBRELLA_WS_ORIGINS: ${PUBLIC_HOST:-localhost}:*,localhost:*,127.0.0.1:*
+      UMBRELLA_PD_ROUTING_KEY: ${UMBRELLA_PD_ROUTING_KEY:-}
+      # Webhook tokens of the lab connectors (openbao://lab/zabbix, openbao://lab/smoke).
+      UMB_SECRET_LAB_ZABBIX: ${ZABBIX_WEBHOOK_TOKEN:?run install.sh or fill .env}
+      UMB_SECRET_LAB_SMOKE: ${SMOKE_WEBHOOK_TOKEN:?run install.sh or fill .env}
+    ports:
+      - "${UMBRELLA_PORT:-8080}:8080"
+    networks: [lab]
+
+  zabbix-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: ${ZABBIX_DB_PASSWORD:?run install.sh or fill .env}
+      POSTGRES_DB: zabbix
+    volumes:
+      - zabbix-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zabbix -d zabbix"]
+      interval: 5s
+      retries: 30
+    networks: [lab]
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:alpine-7.0-latest
+    restart: unless-stopped
+    environment:
+      DB_SERVER_HOST: zabbix-db
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: ${ZABBIX_DB_PASSWORD}
+      POSTGRES_DB: zabbix
+      ZBX_STARTALERTERS: "3"
+    depends_on:
+      zabbix-db:
+        condition: service_healthy
+    networks: [lab]
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:alpine-7.0-latest
+    restart: unless-stopped
+    environment:
+      ZBX_SERVER_HOST: zabbix-server
+      DB_SERVER_HOST: zabbix-db
+      POSTGRES_USER: zabbix
+      POSTGRES_PASSWORD: ${ZABBIX_DB_PASSWORD}
+      POSTGRES_DB: zabbix
+      PHP_TZ: ${TZ:-Europe/Moscow}
+    ports:
+      - "${ZABBIX_WEB_PORT:-8081}:8080"
+    depends_on: [zabbix-server]
+    networks: [lab]
+
+  zabbix-agent:
+    image: zabbix/zabbix-agent2:alpine-7.0-latest
+    restart: unless-stopped
+    hostname: umbrella-lab-agent
+    environment:
+      ZBX_HOSTNAME: umbrella-lab-agent
+      ZBX_SERVER_HOST: zabbix-server
+      ZBX_SERVER_ACTIVE: zabbix-server
+    depends_on: [zabbix-server]
+    networks: [lab]
+
+volumes:
+  zabbix-db:
+
+networks:
+  lab:
