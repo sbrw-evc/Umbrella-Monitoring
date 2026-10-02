@@ -6,6 +6,7 @@ import * as cmdb from './cmdb'
 import * as common from './common'
 import * as connectors from './connectors'
 import * as editor from './editor'
+import * as heatmap from './heatmap'
 import * as incidents from './incidents'
 import * as menu from './menu'
 import * as misc from './misc'
@@ -25,6 +26,7 @@ export const sections: Record<string, Pair> = {
   common,
   menu,
   incidents,
+  heatmap,
   ops,
   cmdb,
   connectors,

@@ -297,6 +297,13 @@ export function fmtDateTime(s?: string): string {
   return new Date(s).toLocaleString(dateLocale(), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
+// dateLocaleTime is a short axis label: "14:00", or "02.10 14:00" with the day.
+export function dateLocaleTime(s: string, withDay: boolean): string {
+  const d = new Date(s)
+  const tm = d.toLocaleTimeString(dateLocale(), { hour: '2-digit', minute: '2-digit' })
+  return withDay ? `${d.toLocaleDateString(dateLocale(), { day: '2-digit', month: '2-digit' })} ${tm}` : tm
+}
+
 export function fmtDuration(from: string, to?: string): string {
   const ms = (to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime()
   const m = Math.max(0, Math.floor(ms / 60000))

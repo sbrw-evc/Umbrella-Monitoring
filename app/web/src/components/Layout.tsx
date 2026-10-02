@@ -10,6 +10,7 @@ import {
   ClipboardList,
   Gauge,
   Globe,
+  Grid3x3,
   Moon,
   Network,
   RadioTower,
@@ -44,6 +45,7 @@ const GROUPS: Group[] = [
     items: [
       { to: '/ops', key: 'ops', icon: <Gauge size={18} /> },
       { to: '/incidents', key: 'incidents', icon: <Siren size={18} /> },
+      { to: '/heatmap', key: 'heatmap', icon: <Grid3x3 size={18} /> },
       { to: '/cmdb', key: 'cmdb', icon: <Network size={18} /> },
     ],
   },

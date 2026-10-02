@@ -20,7 +20,7 @@ const SYSTEM_VIEWS: { id: string; params: Record<string, string> }[] = [
   { id: 'use', params: { view: 'open', method: 'use' } },
 ]
 
-const FILTER_KEYS = ['view', 'q', 'severity', 'method', 'pd', 'fallback', 'hours', 'sort', 'order', 'service']
+const FILTER_KEYS = ['view', 'q', 'severity', 'method', 'pd', 'fallback', 'hours', 'sort', 'order', 'service', 'ci']
 
 interface SavedView {
   id: string

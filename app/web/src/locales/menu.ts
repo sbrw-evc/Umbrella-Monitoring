@@ -9,6 +9,7 @@ export const ru = {
   items: {
     ops: 'Оперативный центр',
     incidents: 'Инциденты',
+    heatmap: 'Тепловая карта',
     cmdb: 'Карта CMDB',
     connectors: 'Коннекторы',
     events: 'События',
@@ -32,6 +33,7 @@ export const en: typeof ru = {
   items: {
     ops: 'Operations center',
     incidents: 'Incidents',
+    heatmap: 'Heatmap',
     cmdb: 'CMDB map',
     connectors: 'Connectors',
     events: 'Events',

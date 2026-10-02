@@ -6,6 +6,7 @@ import { AppProvider } from './context'
 import { CmdbPage } from './pages/Cmdb'
 import { ConnectorEditorPage } from './pages/ConnectorEditor'
 import { ConnectorsPage } from './pages/Connectors'
+import { HeatmapPage } from './pages/Heatmap'
 import { IncidentsPage } from './pages/Incidents'
 import { AuditPage, EventsPage, MaintenancePage, ParseErrorsPage, RolesPage, RulesPage, SelfCheckPage } from './pages/Misc'
 import { OpsPage } from './pages/Ops'
@@ -29,6 +30,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="/ops" element={<OpsPage />} />
             <Route path="/incidents" element={<IncidentsPage />} />
             <Route path="/cmdb" element={<CmdbPage />} />
+            <Route path="/heatmap" element={<HeatmapPage />} />
             <Route path="/connectors" element={<ConnectorsPage />} />
             <Route path="/connectors/:id" element={<ConnectorEditorPage />} />
             <Route path="/events" element={<EventsPage />} />

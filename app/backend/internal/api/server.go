@@ -62,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/cis", s.createCI)
 	m.HandleFunc("GET /api/cis/{id}", s.getCI)
 	m.HandleFunc("GET /api/cmdb/graph", s.graph)
+	m.HandleFunc("GET /api/heatmap", s.heatmap)
 	m.HandleFunc("GET /api/blocks", s.blocks)
 	m.HandleFunc("GET /api/connectors", s.listConnectors)
 	m.HandleFunc("POST /api/connectors", s.createConnector)
