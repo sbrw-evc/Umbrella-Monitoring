@@ -1,16 +1,24 @@
 <#
 .SYNOPSIS
-  Connects Zabbix to Umbrella (PowerShell version of configure.sh).
+  Connects the lab sources to Umbrella (PowerShell version of configure.sh).
 .DESCRIPTION
   Safe to run again: finds what it created before and updates it. Umbrella MVP
   keeps its data in memory, so run it again after the umbrella container restarts.
 
-  Umbrella: CMDB entries for the lab, the "Zabbix" webhook connector
-  (parse.json -> map.severity -> enrich.labels -> map.event -> out.event ->
-  ack.response), published and running.
+  Umbrella (signed in as UMBRELLA_ADMIN_USER):
+    CMDB: business services lab-shop and lab-billing, their IT services and hosts;
+    user lab-owner (role owner, bound to lab-shop) to show service scope;
+    connectors (published and running), ingest URL /api/ingest/<slug>:
+      zabbix      Zabbix webhook media type
+      prometheus  Alertmanager webhook (alerts[] with labels, annotations, status, fingerprint)
+      opensearch  pull: every 15 s searches lab-logs for recent error entries
+    notification channels "Lab Teams" and "Lab Zoom" (the notify-sink container,
+    or real webhooks from TEAMS_WEBHOOK_URL / ZOOM_WEBHOOK_URL).
   Zabbix: Admin password from .env, the "Umbrella" webhook media type, media for
   Admin, the "Send problems to Umbrella" action, the lab agent host with the
   Linux template and a trapper item with a trigger the test can fire.
+  OpenSearch: index lab-logs with its mapping; OpenSearch Dashboards index
+  pattern lab-logs*.
 .EXAMPLE
   .\configure.ps1
 #>
@@ -18,33 +26,98 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib.ps1')
 Initialize-Lab $PSScriptRoot
 
+$umbAdmin = Get-Setting 'UMBRELLA_ADMIN_USER' 'admin'
+$umbPassword = Get-Setting 'UMBRELLA_ADMIN_PASSWORD'
+$ownerPassword = Get-Setting 'LAB_OWNER_PASSWORD'
 $webhookToken = Get-Setting 'ZABBIX_WEBHOOK_TOKEN'
 $adminPassword = Get-Setting 'ZABBIX_ADMIN_PASSWORD'
-if (-not $webhookToken -or -not $adminPassword) { Stop-Lab 'set ZABBIX_WEBHOOK_TOKEN and ZABBIX_ADMIN_PASSWORD in .env' }
-# Zabbix server reaches Umbrella over the compose network.
+if (-not $umbPassword -or -not $webhookToken -or -not $adminPassword) { Stop-Lab 'set UMBRELLA_ADMIN_PASSWORD, ZABBIX_WEBHOOK_TOKEN and ZABBIX_ADMIN_PASSWORD in .env' }
+if (-not $ownerPassword) { Stop-Lab 'set LAB_OWNER_PASSWORD in .env (run install.ps1 to add the new settings)' }
+# Zabbix server and Alertmanager reach Umbrella over the compose network;
+# Umbrella reaches OpenSearch and the notification sink the same way.
 $umbInternal = Get-Setting 'UMB_INTERNAL_URL' 'http://umbrella:8080'
+$osInternal = Get-Setting 'OS_INTERNAL_URL' 'http://opensearch:9200'
+$sinkUrl = Get-Setting 'SINK_URL' 'http://notify-sink:8080'
 $labHost = 'umbrella-lab-agent'
 $labTeam = Get-Setting 'LAB_TEAM' 'monitoring'
 
 Write-Step "Waiting for Umbrella at $UmbUrl"
 if (-not (Wait-Http "$UmbUrl/healthz" 180)) { Stop-Lab "Umbrella does not answer at $UmbUrl" }
+if (-not (Connect-Umbrella $umbAdmin $umbPassword)) {
+  Stop-Lab "cannot sign in to Umbrella as ${umbAdmin}: check UMBRELLA_ADMIN_PASSWORD in .env (status $($script:LastStatus))"
+}
+Write-Step "Umbrella: signed in as $umbAdmin"
 
 Write-Step 'Umbrella: CMDB entries for the lab'
-$svcId = Get-LabCi 'umbrella-lab' 'it_service' $labTeam
+$shopId = Get-LabCi 'lab-shop' 'business_service' 'shop'
+$svcId = Get-LabCi 'umbrella-lab' 'it_service' $labTeam $shopId
 $hostCi = Get-LabCi $labHost 'host' $labTeam $svcId
-Write-Step "  it_service umbrella-lab = $svcId, host $labHost = $hostCi"
+$nodeCi = Get-LabCi 'umbrella-lab-node' 'host' $labTeam $svcId
+$apiId = Get-LabCi 'lab-shop-api' 'it_service' 'shop' $shopId
+$shopHost = Get-LabCi 'shop-api-1' 'host' 'shop' $apiId
+$billId = Get-LabCi 'lab-billing' 'business_service' 'billing'
+$billApi = Get-LabCi 'lab-billing-api' 'it_service' 'billing' $billId
+$billHost = Get-LabCi 'billing-api-1' 'host' 'billing' $billApi
+Write-Step "  business_service lab-shop = ${shopId}: umbrella-lab ($labHost, umbrella-lab-node), lab-shop-api (shop-api-1)"
+Write-Step "  business_service lab-billing = ${billId}: lab-billing-api (billing-api-1)"
 
-Write-Step 'Umbrella: Zabbix connector'
+Write-Step 'Umbrella: user lab-owner (role owner, service lab-shop)'
+$ownerId = Set-LabUser @{ username = 'lab-owner'; name = 'lab-shop owner'; password = $ownerPassword; roles = @('owner')
+  business_services = @($shopId); must_change_password = $false }
+Write-Step "  user $ownerId, password LAB_OWNER_PASSWORD in .env"
+
+Write-Step 'Umbrella: Zabbix connector (slug zabbix)'
 $graph = New-WebhookGraph 'openbao://lab/zabbix' 'severity' "Disaster=critical`nHigh=error`nAverage=warning`nWarning=warning`n*=info" `
   "source=zabbix`nzabbix_trigger=`${trigger_id}`nzabbix_url=`${url}" @{
   title = '${trigger_name}'; ci = '${host}'; signal = 'zabbix:${trigger_id}'; method = 'use'
   status = '${status}'; external_id = '${event_id}'; value = '${value}'
 }
-$connId = Set-WebhookConnector 'Zabbix' $labTeam $graph
+$connId = Set-Connector 'Zabbix' 'zabbix' $labTeam 'webhook-json' $graph
 $sample = ConvertTo-Json -Compress -InputObject @{ event_id = '1001'; event_value = '1'; status = 'firing'; host = $labHost
   trigger_id = '20001'; trigger_name = 'High CPU utilization'; severity = 'High'; value = '97 %'; url = '' }
 [void](Umb PUT "/api/connectors/$connId" @{ description = 'Zabbix 7.0 webhook media type "Umbrella" (deploy/zabbix-lab)'; sample_input = $sample })
-Write-Step "  connector $connId, ingest $umbInternal/api/ingest/$connId"
+Write-Step "  connector $connId, ingest $umbInternal/api/ingest/zabbix"
+
+Write-Step 'Umbrella: Prometheus connector (slug prometheus, Alertmanager webhook)'
+$graph = New-WebhookGraph 'openbao://lab/prometheus' 'labels.severity' "critical=critical`nerror=error`nwarning=warning`ninfo=info`npage=critical`n*=warning" `
+  "source=prometheus`nalertname=`${labels.alertname}`nprometheus_job=`${labels.job}" @{
+  title = '${annotations.summary|$labels.alertname}'; ci = '${labels.host|$labels.instance}'; signal = 'prometheus:${labels.alertname}'
+  method = '${labels.method|other}'; status = '${status}'; external_id = '${fingerprint}'; value = '${annotations.value}'
+} 'alerts'
+$promConnId = Set-Connector 'Prometheus' 'prometheus' $labTeam 'webhook-json' $graph
+$sample = ConvertTo-Json -Compress -Depth 8 -InputObject @{ version = '4'; status = 'firing'; receiver = 'umbrella'
+  groupKey = '{}:{alertname="UmbrellaLabTestFailure"}'
+  alerts = @(@{ status = 'firing'; fingerprint = '5f2b4c1d9e0a7b36'; startsAt = '2026-01-01T10:00:00Z'; endsAt = '0001-01-01T00:00:00Z'
+      labels = @{ alertname = 'UmbrellaLabTestFailure'; host = 'umbrella-lab-node'; instance = 'node-exporter:9100'; job = 'node'; severity = 'error'; method = 'other' }
+      annotations = @{ summary = 'Lab test failure on umbrella-lab-node'; value = '1' } }) }
+[void](Umb PUT "/api/connectors/$promConnId" @{ description = 'Alertmanager webhook_configs -> /api/ingest/prometheus, Bearer PROMETHEUS_WEBHOOK_TOKEN (deploy/zabbix-lab)'; sample_input = $sample })
+Write-Step "  connector $promConnId, Alertmanager posts to $umbInternal/api/ingest/prometheus"
+
+Write-Step 'Umbrella: OpenSearch connector (slug opensearch, pull every 15 s)'
+$osQuery = '{"size":100,"sort":[{"@timestamp":"desc"}],"query":{"bool":{"filter":[{"terms":{"level":["error","critical","fatal"]}},{"range":{"@timestamp":{"gte":"now-15m"}}}]}}}'
+$graph = New-PullGraph '15s' @{ url = "$osInternal/lab-logs/_search?ignore_unavailable=true"; method = 'POST'; body = $osQuery } 'hits.hits' '_source.level' `
+  "fatal=critical`ncritical=critical`nerror=error`n*=warning" "source=opensearch`nservice=`${_source.service}`nopensearch_index=`${_index}" @{
+  title = '${_source.message}'; ci = '${_source.host}'; signal = 'opensearch:${_source.service|app}:${_source.error_code|error}'
+  method = 'red'; status = 'firing'; external_id = '${_id}'; value = '${_source.error_code}'
+}
+$osConnId = Set-Connector 'OpenSearch' 'opensearch' 'shop' 'pull-http' $graph
+$sample = ConvertTo-Json -Compress -Depth 8 -InputObject @{ hits = @{ total = @{ value = 1 }; hits = @(@{ _index = 'lab-logs'; _id = 'Kq3x'
+        _source = @{ '@timestamp' = '2026-01-01T10:00:00Z'; level = 'error'; host = 'shop-api-1'; service = 'lab-shop-api'; message = 'Payment gateway timeout'; error_code = 'PAY-504' } }) } }
+[void](Umb PUT "/api/connectors/$osConnId" @{ description = 'Polls OpenSearch index lab-logs for error entries of the last 15 minutes (deploy/zabbix-lab)'; sample_input = $sample })
+Write-Step "  connector $osConnId, POST $osInternal/lab-logs/_search"
+
+Write-Step 'Umbrella: notification channels Lab Teams and Lab Zoom'
+$teamsUrl = Get-Setting 'TEAMS_WEBHOOK_URL' "$sinkUrl/teams"
+$zoomUrl = Get-Setting 'ZOOM_WEBHOOK_URL' "$sinkUrl/zoom"
+$zoomToken = Get-Setting 'ZOOM_VERIFICATION_TOKEN' (Get-Setting 'LAB_ZOOM_TOKEN')
+$teamsCh = Set-LabChannel @{ name = 'Lab Teams'; type = 'teams'; url = $teamsUrl; mode = 'always'; min_severity = 'warning'
+  events = @('open', 'escalate', 'ack', 'resolve', 'fallback'); services = @(); enabled = $true }
+$zoomCh = Set-LabChannel @{ name = 'Lab Zoom'; type = 'zoom'; url = $zoomUrl; token = $zoomToken; mode = 'always'; min_severity = 'error'
+  events = @('open', 'escalate', 'resolve', 'fallback'); services = @($shopId); enabled = $true }
+$teamsTarget = $teamsUrl; if (Get-Setting 'TEAMS_WEBHOOK_URL') { $teamsTarget = 'real webhook' }
+$zoomTarget = $zoomUrl; if (Get-Setting 'ZOOM_WEBHOOK_URL') { $zoomTarget = 'real webhook' }
+Write-Step "  Teams $teamsCh -> $teamsTarget"
+Write-Step "  Zoom $zoomCh (service lab-shop) -> $zoomTarget"
 
 Write-Step "Waiting for Zabbix web at $ZbxUrl"
 if (-not (Wait-Http "$ZbxUrl/" 300)) { Stop-Lab "Zabbix web does not answer at $ZbxUrl" }
@@ -91,7 +164,7 @@ return 'OK';
 '@
 $zbxPublic = 'http://' + (Get-Setting 'PUBLIC_HOST' 'localhost') + ':' + (Get-Setting 'ZABBIX_WEB_PORT' '8081')
 $params = @(
-  @{ name = 'url'; value = "$umbInternal/api/ingest/$connId" }, @{ name = 'token'; value = $webhookToken },
+  @{ name = 'url'; value = "$umbInternal/api/ingest/zabbix" }, @{ name = 'token'; value = $webhookToken },
   @{ name = 'event_id'; value = '{EVENT.ID}' }, @{ name = 'event_value'; value = '{EVENT.VALUE}' },
   @{ name = 'host'; value = '{HOST.HOST}' }, @{ name = 'host_name'; value = '{HOST.NAME}' },
   @{ name = 'trigger_id'; value = '{TRIGGER.ID}' }, @{ name = 'trigger_name'; value = '{EVENT.NAME}' },
@@ -160,7 +233,38 @@ if (-not $trgId) {
 }
 Write-Step "  item $itemId, trigger $trgId (fire it: .\smoke-test.ps1 -Zabbix)"
 
+
+Write-Step "Waiting for OpenSearch Dashboards at $OsdUrl"
+$green = $false
+for ($i = 0; $i -lt 100; $i++) {
+  $st = Osd GET '/api/status'
+  if ($st -and $st.status.overall.state -eq 'green') { $green = $true; break }
+  Start-Sleep -Seconds 3
+}
+if (-not $green) { Stop-Lab "OpenSearch Dashboards is not green at $OsdUrl" }
+
+Write-Step 'OpenSearch: index lab-logs'
+[void](Invoke-OpenSearch GET '/lab-logs')
+if ($script:LastStatus -eq 404) {
+  [void](Invoke-OpenSearch PUT '/lab-logs' @{ settings = @{ number_of_shards = 1; number_of_replicas = 0 }
+      mappings = @{ properties = @{ '@timestamp' = @{ type = 'date' }; level = @{ type = 'keyword' }; host = @{ type = 'keyword' }
+          service = @{ type = 'keyword' }; error_code = @{ type = 'keyword' }; message = @{ type = 'text' } } } })
+  if ($script:LastStatus -ne 200) { Stop-Lab "OpenSearch: create lab-logs answered $($script:LastStatus)" }
+  Write-Step '  created'
+} else {
+  Write-Step '  exists'
+}
+
+Write-Step 'OpenSearch Dashboards: index pattern lab-logs*'
+[void](Osd POST '/api/saved_objects/index-pattern/lab-logs?overwrite=true' @{ attributes = @{ title = 'lab-logs*'; timeFieldName = '@timestamp' } })
+if ($script:LastStatus -ne 200) { Stop-Lab "OpenSearch Dashboards: index pattern answered $($script:LastStatus)" }
+[void](Osd POST '/api/opensearch-dashboards/settings' @{ changes = @{ defaultIndex = 'lab-logs' } })
+
 Write-Host ''
 Write-Host 'Done.'
-Write-Host "  Umbrella:  $UmbUrl   (connector $connId `"Zabbix`")"
-Write-Host "  Zabbix:    $ZbxUrl   (Admin / ZABBIX_ADMIN_PASSWORD from .env)"
+Write-Host "  Umbrella:    $UmbUrl   ($umbAdmin / UMBRELLA_ADMIN_PASSWORD, lab-owner / LAB_OWNER_PASSWORD from .env)"
+Write-Host "    connectors: zabbix $connId, prometheus $promConnId, opensearch $osConnId; channels $teamsCh, $zoomCh"
+Write-Host "  Zabbix:      $ZbxUrl   (Admin / ZABBIX_ADMIN_PASSWORD from .env)"
+Write-Host "  Dashboards:  $OsdUrl   (index pattern lab-logs*)"
+Write-Host "  Grafana:     $GrafanaUrl   (admin / GRAFANA_ADMIN_PASSWORD from .env)"
+Write-Host "  Prometheus:  $PromUrl"

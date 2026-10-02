@@ -28,13 +28,38 @@ function Stop-Lab([string]$Text) { Write-Host "ERROR: $Text" -ForegroundColor Re
 
 $script:LastStatus = 0
 $script:ZbxToken = ''
+# Bearer token of the signed-in Umbrella user (Connect-Umbrella) or an API token.
+$script:UmbToken = ''
 
 # Initialize-Lab reads .env from the lab folder and sets the API addresses.
-function Initialize-Lab([string]$Dir, [string]$User = 'lab-setup') {
+function Initialize-Lab([string]$Dir) {
   Read-DotEnv (Join-Path $Dir '.env')
   $script:UmbUrl = Get-Setting 'UMB_URL' ("http://localhost:" + (Get-Setting 'UMBRELLA_PORT' '8080'))
   $script:ZbxUrl = Get-Setting 'ZBX_URL' ("http://localhost:" + (Get-Setting 'ZABBIX_WEB_PORT' '8081'))
-  $script:UmbUser = Get-Setting 'UMB_USER' $User
+  $script:PromUrl = Get-Setting 'PROM_URL' ("http://localhost:" + (Get-Setting 'PROMETHEUS_PORT' '9090'))
+  $script:GrafanaUrl = Get-Setting 'GRAFANA_URL' ("http://localhost:" + (Get-Setting 'GRAFANA_PORT' '3000'))
+  $script:OsdUrl = Get-Setting 'OSD_URL' ("http://localhost:" + (Get-Setting 'OSD_PORT' '5601'))
+}
+
+# ConvertTo-Base64Ascii encodes an ASCII string without .NET calls (for basic auth).
+function ConvertTo-Base64Ascii([string]$Text) {
+  $abc = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  $out = ''
+  for ($i = 0; $i -lt $Text.Length; $i += 3) {
+    $n = [int][char]$Text[$i] * 65536
+    if ($i + 1 -lt $Text.Length) { $n += [int][char]$Text[$i + 1] * 256 }
+    if ($i + 2 -lt $Text.Length) { $n += [int][char]$Text[$i + 2] }
+    $out += $abc[($n -shr 18) -band 63]
+    $out += $abc[($n -shr 12) -band 63]
+    if ($i + 1 -lt $Text.Length) { $out += $abc[($n -shr 6) -band 63] } else { $out += '=' }
+    if ($i + 2 -lt $Text.Length) { $out += $abc[$n -band 63] } else { $out += '=' }
+  }
+  return $out
+}
+
+# ConvertTo-UrlPart percent-encodes the characters that matter in a query value.
+function ConvertTo-UrlPart([string]$Text) {
+  return (($Text -replace '%', '%25') -replace '/', '%2F' -replace '\?', '%3F' -replace '=', '%3D' -replace '&', '%26' -replace ' ', '%20')
 }
 
 function ConvertTo-JsonBody($Value) {
@@ -81,9 +106,52 @@ function Send-Http([string]$Method, [string]$Url, $Body = $null, [hashtable]$Hea
   return @{ Status = $status; Body = $text; Json = (ConvertFrom-JsonText $text) }
 }
 
-# Umb calls the Umbrella API and returns the parsed JSON; $script:LastStatus holds the code.
+# Umb calls the Umbrella API as $script:UmbToken and returns the parsed JSON;
+# $script:LastStatus holds the code.
 function Umb([string]$Method, [string]$Path, $Body = $null) {
-  (Send-Http $Method ($script:UmbUrl + $Path) $Body @{ 'X-Umbrella-User' = $script:UmbUser }).Json
+  Umb-As $script:UmbToken $Method $Path $Body
+}
+
+# Umb-As calls the Umbrella API with another bearer token ('' = no sign-in).
+function Umb-As([string]$Token, [string]$Method, [string]$Path, $Body = $null) {
+  $h = @{}
+  if ($Token) { $h['Authorization'] = "Bearer $Token" }
+  (Send-Http $Method ($script:UmbUrl + $Path) $Body $h).Json
+}
+
+# Get-UmbToken returns a bearer session token (POST /api/auth/token) or ''.
+function Get-UmbToken([string]$User, [string]$Password) {
+  $r = Send-Http 'POST' ($script:UmbUrl + '/api/auth/token') @{ username = $User; password = $Password }
+  if ($r.Status -eq 200 -and $r.Json.token) { return [string]$r.Json.token }
+  return ''
+}
+
+# Connect-Umbrella signs in and keeps the token for Umb.
+function Connect-Umbrella([string]$User, [string]$Password) {
+  $r = Send-Http 'POST' ($script:UmbUrl + '/api/auth/token') @{ username = $User; password = $Password }
+  if ($r.Status -ne 200 -or -not $r.Json.token) { return $false }
+  if ($r.Json.must_change_password) {
+    Stop-Lab "Umbrella asks $User to change the password: sign in to the web UI, change it and put it into UMBRELLA_ADMIN_PASSWORD in .env"
+  }
+  $script:UmbToken = [string]$r.Json.token
+  return $true
+}
+
+# Invoke-OpenSearch calls OpenSearch through the OpenSearch Dashboards console
+# proxy (OpenSearch itself is reachable only inside the lab network).
+function Invoke-OpenSearch([string]$Method, [string]$Path, $Body = $null) {
+  (Send-Http 'POST' ($script:OsdUrl + '/api/console/proxy?path=' + (ConvertTo-UrlPart $Path) + "&method=$Method") $Body @{ 'osd-xsrf' = 'true' }).Json
+}
+
+# Osd calls the OpenSearch Dashboards API.
+function Osd([string]$Method, [string]$Path, $Body = $null) {
+  (Send-Http $Method ($script:OsdUrl + $Path) $Body @{ 'osd-xsrf' = 'true' }).Json
+}
+
+# Grafana calls the Grafana API as admin (basic auth, GRAFANA_ADMIN_PASSWORD).
+function Grafana([string]$Method, [string]$Path, $Body = $null) {
+  $auth = 'Basic ' + (ConvertTo-Base64Ascii ('admin:' + (Get-Setting 'GRAFANA_ADMIN_PASSWORD')))
+  (Send-Http $Method ($script:GrafanaUrl + $Path) $Body @{ Authorization = $auth }).Json
 }
 
 function Send-Ingest([string]$ConnectorId, [string]$Token, $Body) {
@@ -122,10 +190,48 @@ function Connect-Zabbix([string]$User, [string]$Password) {
 
 function First($List) { if ($null -eq $List) { return $null }; @($List)[0] }
 
+# Get-ConnectorId returns the id of the connector with that slug or name.
 function Get-ConnectorId([string]$Name) {
-  $c = First (@((Umb GET '/api/connectors').items) | Where-Object { $_.name -eq $Name })
+  $items = @((Umb GET '/api/connectors').items)
+  $c = First ($items | Where-Object { $_.slug -eq $Name })
+  if (-not $c) { $c = First ($items | Where-Object { $_.name -eq $Name }) }
   if ($c) { return $c.id }
   return ''
+}
+
+function Get-UserId([string]$Name) {
+  $u = First (@((Umb GET '/api/users').items) | Where-Object { $_.username -eq $Name })
+  if ($u) { return $u.id }
+  return ''
+}
+
+# Set-LabUser creates the user or updates name, roles and services. The
+# password is used only on create, so a user who changed it keeps the new one.
+function Set-LabUser([hashtable]$User) {
+  $id = Get-UserId $User.username
+  if (-not $id) {
+    $id = (Umb POST '/api/users' $User).id
+    if ($script:LastStatus -ne 201) { Stop-Lab "user $($User.username): create answered $($script:LastStatus)" }
+  } else {
+    $upd = @{}
+    foreach ($k in $User.Keys) { if (@('password', 'username', 'must_change_password', 'service') -notcontains $k) { $upd[$k] = $User[$k] } }
+    [void](Umb PUT "/api/users/$id" $upd)
+    if ($script:LastStatus -ne 200) { Stop-Lab "user $($User.username): update answered $($script:LastStatus)" }
+  }
+  return $id
+}
+
+# Set-LabChannel creates or updates a notification channel by name.
+function Set-LabChannel([hashtable]$Channel) {
+  $c = First (@((Umb GET '/api/channels').items) | Where-Object { $_.name -eq $Channel.name })
+  if (-not $c) {
+    $id = (Umb POST '/api/channels' $Channel).id
+    if ($script:LastStatus -ne 201) { Stop-Lab "channel $($Channel.name): create answered $($script:LastStatus)" }
+    return $id
+  }
+  [void](Umb PUT "/api/channels/$($c.id)" $Channel)
+  if ($script:LastStatus -ne 200) { Stop-Lab "channel $($Channel.name): update answered $($script:LastStatus)" }
+  return $c.id
 }
 
 function Get-CiId([string]$Name) {
@@ -134,7 +240,8 @@ function Get-CiId([string]$Name) {
   return ''
 }
 
-# Get-LabCi returns the CI id, creating the CI when missing.
+# Get-LabCi returns the CI id, creating the CI when missing. Parent depends on
+# the new CI (business service -> IT service -> host).
 function Get-LabCi([string]$Name, [string]$Type, [string]$Team, [string]$Parent = '') {
   $id = Get-CiId $Name
   if (-not $id) {
@@ -144,7 +251,25 @@ function Get-LabCi([string]$Name, [string]$Type, [string]$Team, [string]$Parent 
   return $id
 }
 
-# Set-WebhookConnector returns the id of a published, running connector with that graph.
+# Set-Connector returns the id of a published, running connector with that
+# slug and graph. It is found by slug, then by name (connectors made by older
+# versions of the lab scripts had no slug).
+function Set-Connector([string]$Name, [string]$Slug, [string]$Team, [string]$Template, $Graph) {
+  $id = Get-ConnectorId $Slug
+  if (-not $id) { $id = Get-ConnectorId $Name }
+  if (-not $id) {
+    $id = (Umb POST '/api/connectors' @{ name = $Name; slug = $Slug; team = $Team; template = $Template }).id
+    if ($script:LastStatus -ne 201) { Stop-Lab "connector ${Name}: create answered $($script:LastStatus)" }
+  }
+  [void](Umb PUT "/api/connectors/$id" @{ name = $Name; slug = $Slug; draft = $Graph })
+  if ($script:LastStatus -ne 200) { Stop-Lab "connector ${Name}: update answered $($script:LastStatus)" }
+  [void](Umb POST "/api/connectors/$id/publish")
+  if ($script:LastStatus -ne 200) { Stop-Lab "connector ${Name}: publish answered $($script:LastStatus)" }
+  [void](Umb POST "/api/connectors/$id/start")
+  return $id
+}
+
+# Set-WebhookConnector: a connector without a slug (the smoke test makes these).
 function Set-WebhookConnector([string]$Name, [string]$Team, $Graph) {
   $id = Get-ConnectorId $Name
   if (-not $id) { $id = (Umb POST '/api/connectors' @{ name = $Name; team = $Team; template = 'webhook-json' }).id }
@@ -157,13 +282,15 @@ function Set-WebhookConnector([string]$Name, [string]$Team, $Graph) {
 
 # New-WebhookGraph builds trigger.webhook -> parse.json -> map.severity ->
 # enrich.labels -> map.event -> out.event -> ack.response.
-function New-WebhookGraph([string]$SecretRef, [string]$SeverityField, [string]$Mapping, [string]$Labels, [hashtable]$Event) {
+function New-WebhookGraph([string]$SecretRef, [string]$SeverityField, [string]$Mapping, [string]$Labels, [hashtable]$Event, [string]$Items = '') {
   $ev = @{ severity = '${_severity}' }
   foreach ($k in $Event.Keys) { $ev[$k] = $Event[$k] }
+  $parse = @{}
+  if ($Items) { $parse['items'] = $Items }
   @{
     nodes = @(
       @{ id = 'n1'; kind = 'trigger.webhook'; x = 40; y = 140; config = @{ auth = 'token'; secret_ref = $SecretRef } },
-      @{ id = 'n2'; kind = 'parse.json'; x = 280; y = 140; config = @{} },
+      @{ id = 'n2'; kind = 'parse.json'; x = 280; y = 140; config = $parse },
       @{ id = 'n3'; kind = 'map.severity'; x = 520; y = 140; config = @{ field = $SeverityField; mapping = $Mapping } },
       @{ id = 'n4'; kind = 'enrich.labels'; x = 760; y = 140; config = @{ labels = $Labels } },
       @{ id = 'n5'; kind = 'map.event'; x = 40; y = 320; config = $ev },
@@ -174,6 +301,31 @@ function New-WebhookGraph([string]$SecretRef, [string]$SeverityField, [string]$M
       @{ id = 'e1'; source = 'n1'; target = 'n2' }, @{ id = 'e2'; source = 'n2'; target = 'n3' },
       @{ id = 'e3'; source = 'n3'; target = 'n4' }, @{ id = 'e4'; source = 'n4'; target = 'n5' },
       @{ id = 'e5'; source = 'n5'; target = 'n6' }, @{ id = 'e6'; source = 'n6'; target = 'n7' }
+    )
+  }
+}
+
+# New-PullGraph builds trigger.schedule -> fetch.http -> parse.json ->
+# map.severity -> enrich.labels -> map.event -> out.event -> ack.response.
+function New-PullGraph([string]$Interval, [hashtable]$Fetch, [string]$Items, [string]$SeverityField, [string]$Mapping, [string]$Labels, [hashtable]$Event) {
+  $ev = @{ severity = '${_severity}' }
+  foreach ($k in $Event.Keys) { $ev[$k] = $Event[$k] }
+  @{
+    nodes = @(
+      @{ id = 'n1'; kind = 'trigger.schedule'; x = 40; y = 140; config = @{ interval = $Interval } },
+      @{ id = 'n2'; kind = 'fetch.http'; x = 280; y = 140; config = $Fetch },
+      @{ id = 'n3'; kind = 'parse.json'; x = 520; y = 140; config = @{ items = $Items } },
+      @{ id = 'n4'; kind = 'map.severity'; x = 760; y = 140; config = @{ field = $SeverityField; mapping = $Mapping } },
+      @{ id = 'n5'; kind = 'enrich.labels'; x = 40; y = 320; config = @{ labels = $Labels } },
+      @{ id = 'n6'; kind = 'map.event'; x = 280; y = 320; config = $ev },
+      @{ id = 'n7'; kind = 'out.event'; x = 520; y = 320; config = @{} },
+      @{ id = 'n8'; kind = 'ack.response'; x = 760; y = 320; config = @{ mode = 'cursor' } }
+    )
+    edges = @(
+      @{ id = 'e1'; source = 'n1'; target = 'n2' }, @{ id = 'e2'; source = 'n2'; target = 'n3' },
+      @{ id = 'e3'; source = 'n3'; target = 'n4' }, @{ id = 'e4'; source = 'n4'; target = 'n5' },
+      @{ id = 'e5'; source = 'n5'; target = 'n6' }, @{ id = 'e6'; source = 'n6'; target = 'n7' },
+      @{ id = 'e7'; source = 'n7'; target = 'n8' }
     )
   }
 }

@@ -58,7 +58,7 @@ log "  business_service lab-billing = $BILL_ID: lab-billing-api (billing-api-1)"
 
 log "Umbrella: user lab-owner (role owner, service lab-shop)"
 OWNER_ID=$(ensure_user lab-owner "$(jq -nc --arg p "$LAB_OWNER_PASSWORD" --arg s "$SHOP_ID" '{username:"lab-owner",
-  name:"Владелец lab-shop",password:$p,roles:["owner"],business_services:[$s],must_change_password:false}')")
+  name:"lab-shop owner",password:$p,roles:["owner"],business_services:[$s],must_change_password:false}')")
 log "  user $OWNER_ID, password LAB_OWNER_PASSWORD in .env"
 
 log "Umbrella: Zabbix connector (slug zabbix)"

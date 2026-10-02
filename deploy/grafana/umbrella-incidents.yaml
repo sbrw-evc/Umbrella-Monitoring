@@ -247,7 +247,7 @@ spec:
     targets:
     - refId: A
       datasource: *id001
-      expr: umbrella_incidents_fallback or vector(0)
+      expr: sum(umbrella_incidents_fallback) or vector(0)
       legendFormat: Резервный канал
       range: true
       instant: false
@@ -293,7 +293,7 @@ spec:
     targets:
     - refId: A
       datasource: *id001
-      expr: umbrella_incidents_unbound or vector(0)
+      expr: sum(umbrella_incidents_unbound) or vector(0)
       legendFormat: Без КЕ
       range: true
       instant: false
@@ -339,7 +339,7 @@ spec:
     targets:
     - refId: A
       datasource: *id001
-      expr: umbrella_incidents_suppressed or vector(0)
+      expr: sum(umbrella_incidents_suppressed) or vector(0)
       legendFormat: Подавлено
       range: true
       instant: false
@@ -385,7 +385,7 @@ spec:
     targets:
     - refId: A
       datasource: *id001
-      expr: umbrella_pagerduty_simulated_outage or vector(0)
+      expr: sum(umbrella_pagerduty_simulated_outage) or vector(0)
       legendFormat: Учения PagerDuty
       range: true
       instant: false
@@ -1017,7 +1017,7 @@ spec:
     targets:
     - refId: A
       datasource: *id001
-      expr: umbrella_users_enabled
+      expr: sum(umbrella_users_enabled)
       legendFormat: пользователей
       range: true
       instant: false
