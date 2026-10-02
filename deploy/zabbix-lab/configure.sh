@@ -1,46 +1,113 @@
 #!/usr/bin/env bash
-# Connects Zabbix to Umbrella. Safe to run again: it finds what it created
-# before and updates it. Umbrella MVP keeps its data in memory, so run this
-# again after the umbrella container restarts.
+# Connects the lab sources to Umbrella. Safe to run again: it finds what it
+# created before and updates it. Umbrella MVP keeps its data in memory, so run
+# this again after the umbrella container restarts.
 #
 #   ./configure.sh            # reads .env next to this script
 #
-# Umbrella: CMDB entries for the lab, the "Zabbix" webhook connector
-# (parse.json -> map.severity -> enrich.labels -> map.event -> out.event ->
-# ack.response), published and running.
+# Umbrella (signed in as UMBRELLA_ADMIN_USER):
+#   CMDB: business services lab-shop and lab-billing, their IT services and hosts;
+#   user lab-owner (role owner, bound to lab-shop) to show service scope;
+#   connectors (published and running), ingest URL /api/ingest/<slug>:
+#     zabbix      Zabbix webhook media type
+#     prometheus  Alertmanager webhook (alerts[] with labels, annotations, status, fingerprint)
+#     opensearch  pull: every 15 s searches lab-logs for recent error entries
+#   notification channels "Lab Teams" and "Lab Zoom" (the notify-sink
+#   container, or real webhooks from TEAMS_WEBHOOK_URL / ZOOM_WEBHOOK_URL).
 # Zabbix: Admin password from .env, the "Umbrella" webhook media type, media
-# for Admin, the "Send problems to Umbrella" action, the lab agent host with
-# the Linux template and a trapper item with a trigger the test can fire.
+#   for Admin, the "Send problems to Umbrella" action, the lab agent host with
+#   the Linux template and a trapper item with a trigger the test can fire.
+# OpenSearch: index lab-logs with its mapping; OpenSearch Dashboards index
+#   pattern lab-logs*.
 set -euo pipefail
 cd "$(dirname "$0")"
 [ -f .env ] && set -a && . ./.env && set +a
 . ./lib.sh
 
+: "${UMBRELLA_ADMIN_PASSWORD:?set in .env}"
 : "${ZABBIX_WEBHOOK_TOKEN:?set in .env}"
 : "${ZABBIX_ADMIN_PASSWORD:?set in .env}"
-# Zabbix server reaches Umbrella over the compose network.
+: "${LAB_OWNER_PASSWORD:?set in .env (run install.sh to add the new settings)}"
+UMB_ADMIN=${UMBRELLA_ADMIN_USER:-admin}
+# Zabbix server and Alertmanager reach Umbrella over the compose network;
+# Umbrella reaches OpenSearch and the notification sink the same way.
 UMB_INTERNAL_URL=${UMB_INTERNAL_URL:-http://umbrella:8080}
+OS_INTERNAL_URL=${OS_INTERNAL_URL:-http://opensearch:9200}
+SINK_URL=${SINK_URL:-http://notify-sink:8080}
 LAB_HOST=umbrella-lab-agent
 LAB_TEAM=${LAB_TEAM:-monitoring}
 
 log "Waiting for Umbrella at $UMB_URL"
 wait_http "$UMB_URL/healthz" 180 || die "Umbrella does not answer at $UMB_URL"
+umb_login "$UMB_ADMIN" "$UMBRELLA_ADMIN_PASSWORD" ||
+  die "cannot sign in to Umbrella as $UMB_ADMIN: check UMBRELLA_ADMIN_PASSWORD in .env (status $(umb_status))"
+log "Umbrella: signed in as $UMB_ADMIN"
 
 log "Umbrella: CMDB entries for the lab"
-SVC_ID=$(ensure_ci umbrella-lab it_service "$LAB_TEAM")
+SHOP_ID=$(ensure_ci lab-shop business_service shop)
+SVC_ID=$(ensure_ci umbrella-lab it_service "$LAB_TEAM" "$SHOP_ID")
 HOST_ID=$(ensure_ci "$LAB_HOST" host "$LAB_TEAM" "$SVC_ID")
-log "  it_service umbrella-lab = $SVC_ID, host $LAB_HOST = $HOST_ID"
+NODE_ID=$(ensure_ci umbrella-lab-node host "$LAB_TEAM" "$SVC_ID")
+API_ID=$(ensure_ci lab-shop-api it_service shop "$SHOP_ID")
+SHOP_HOST_ID=$(ensure_ci shop-api-1 host shop "$API_ID")
+BILL_ID=$(ensure_ci lab-billing business_service billing)
+BILL_API_ID=$(ensure_ci lab-billing-api it_service billing "$BILL_ID")
+BILL_HOST_ID=$(ensure_ci billing-api-1 host billing "$BILL_API_ID")
+log "  business_service lab-shop = $SHOP_ID: umbrella-lab ($LAB_HOST, umbrella-lab-node), lab-shop-api (shop-api-1)"
+log "  business_service lab-billing = $BILL_ID: lab-billing-api (billing-api-1)"
 
-log "Umbrella: Zabbix connector"
+log "Umbrella: user lab-owner (role owner, service lab-shop)"
+OWNER_ID=$(ensure_user lab-owner "$(jq -nc --arg p "$LAB_OWNER_PASSWORD" --arg s "$SHOP_ID" '{username:"lab-owner",
+  name:"Владелец lab-shop",password:$p,roles:["owner"],business_services:[$s],must_change_password:false}')")
+log "  user $OWNER_ID, password LAB_OWNER_PASSWORD in .env"
+
+log "Umbrella: Zabbix connector (slug zabbix)"
 GRAPH=$(webhook_graph openbao://lab/zabbix severity \
   $'Disaster=critical\nHigh=error\nAverage=warning\nWarning=warning\n*=info' \
   $'source=zabbix\nzabbix_trigger=${trigger_id}\nzabbix_url=${url}' \
   '${trigger_name}' '${host}' 'zabbix:${trigger_id}' use '${status}' '${event_id}' '${value}')
-CONN_ID=$(ensure_webhook_connector Zabbix "$LAB_TEAM" "$GRAPH")
+CONN_ID=$(ensure_connector Zabbix zabbix "$LAB_TEAM" webhook-json "$GRAPH")
 umb PUT "/api/connectors/$CONN_ID" "$(jq -nc '{description:"Zabbix 7.0 webhook media type \"Umbrella\" (deploy/zabbix-lab)",
   sample_input:({event_id:"1001",event_value:"1",status:"firing",host:"umbrella-lab-agent",trigger_id:"20001",
   trigger_name:"High CPU utilization",severity:"High",value:"97 %",url:""}|tojson)}')" >/dev/null
-log "  connector $CONN_ID, ingest $UMB_INTERNAL_URL/api/ingest/$CONN_ID"
+log "  connector $CONN_ID, ingest $UMB_INTERNAL_URL/api/ingest/zabbix"
+
+log "Umbrella: Prometheus connector (slug prometheus, Alertmanager webhook)"
+GRAPH=$(webhook_graph openbao://lab/prometheus labels.severity \
+  $'critical=critical\nerror=error\nwarning=warning\ninfo=info\npage=critical\n*=warning' \
+  $'source=prometheus\nalertname=${labels.alertname}\nprometheus_job=${labels.job}' \
+  '${annotations.summary|$labels.alertname}' '${labels.host|$labels.instance}' 'prometheus:${labels.alertname}' \
+  '${labels.method|other}' '${status}' '${fingerprint}' '${annotations.value}' alerts)
+PROM_CONN_ID=$(ensure_connector Prometheus prometheus "$LAB_TEAM" webhook-json "$GRAPH")
+umb PUT "/api/connectors/$PROM_CONN_ID" "$(jq -nc '{description:"Alertmanager webhook_configs -> /api/ingest/prometheus, Bearer PROMETHEUS_WEBHOOK_TOKEN (deploy/zabbix-lab)",
+  sample_input:({version:"4",status:"firing",receiver:"umbrella",groupKey:"{}:{alertname=\"UmbrellaLabTestFailure\"}",
+  alerts:[{status:"firing",fingerprint:"5f2b4c1d9e0a7b36",startsAt:"2026-01-01T10:00:00Z",endsAt:"0001-01-01T00:00:00Z",
+  labels:{alertname:"UmbrellaLabTestFailure",host:"umbrella-lab-node",instance:"node-exporter:9100",job:"node",severity:"error",method:"other"},
+  annotations:{summary:"Lab test failure on umbrella-lab-node",value:"1"}}]}|tojson)}')" >/dev/null
+log "  connector $PROM_CONN_ID, Alertmanager posts to $UMB_INTERNAL_URL/api/ingest/prometheus"
+
+log "Umbrella: OpenSearch connector (slug opensearch, pull every 15 s)"
+OS_QUERY='{"size":100,"sort":[{"@timestamp":"desc"}],"query":{"bool":{"filter":[{"terms":{"level":["error","critical","fatal"]}},{"range":{"@timestamp":{"gte":"now-15m"}}}]}}}'
+GRAPH=$(pull_graph 15s "$OS_INTERNAL_URL/lab-logs/_search?ignore_unavailable=true" POST "$OS_QUERY" hits.hits _source.level \
+  $'fatal=critical\ncritical=critical\nerror=error\n*=warning' \
+  $'source=opensearch\nservice=${_source.service}\nopensearch_index=${_index}' \
+  '${_source.message}' '${_source.host}' 'opensearch:${_source.service|app}:${_source.error_code|error}' red firing '${_id}' '${_source.error_code}')
+OS_CONN_ID=$(ensure_connector OpenSearch opensearch shop pull-http "$GRAPH")
+umb PUT "/api/connectors/$OS_CONN_ID" "$(jq -nc '{description:"Polls OpenSearch index lab-logs for error entries of the last 15 minutes (deploy/zabbix-lab)",
+  sample_input:({hits:{total:{value:1},hits:[{_index:"lab-logs",_id:"Kq3x",_source:{"@timestamp":"2026-01-01T10:00:00Z",
+  level:"error",host:"shop-api-1",service:"lab-shop-api",message:"Payment gateway timeout",error_code:"PAY-504"}}]}}|tojson)}')" >/dev/null
+log "  connector $OS_CONN_ID, POST $OS_INTERNAL_URL/lab-logs/_search"
+
+log "Umbrella: notification channels Lab Teams and Lab Zoom"
+TEAMS_URL=${TEAMS_WEBHOOK_URL:-$SINK_URL/teams}
+ZOOM_URL=${ZOOM_WEBHOOK_URL:-$SINK_URL/zoom}
+TEAMS_CH=$(ensure_channel "Lab Teams" "$(jq -nc --arg u "$TEAMS_URL" '{name:"Lab Teams",type:"teams",url:$u,mode:"always",
+  min_severity:"warning",events:["open","escalate","ack","resolve","fallback"],services:[],enabled:true}')")
+ZOOM_CH=$(ensure_channel "Lab Zoom" "$(jq -nc --arg u "$ZOOM_URL" --arg t "${ZOOM_VERIFICATION_TOKEN:-${LAB_ZOOM_TOKEN:-}}" --arg s "$SHOP_ID" \
+  '{name:"Lab Zoom",type:"zoom",url:$u,token:$t,mode:"always",min_severity:"error",
+  events:["open","escalate","resolve","fallback"],services:[$s],enabled:true}')")
+log "  Teams $TEAMS_CH -> ${TEAMS_WEBHOOK_URL:+real webhook}${TEAMS_WEBHOOK_URL:-$TEAMS_URL}"
+log "  Zoom $ZOOM_CH (service lab-shop) -> ${ZOOM_WEBHOOK_URL:+real webhook}${ZOOM_WEBHOOK_URL:-$ZOOM_URL}"
 
 log "Waiting for Zabbix web at $ZBX_URL"
 wait_http "$ZBX_URL/" 300 || die "Zabbix web does not answer at $ZBX_URL"
@@ -87,7 +154,7 @@ if (code < 200 || code >= 300) {
 return 'OK';
 JS
 ZBX_PUBLIC_URL="http://${PUBLIC_HOST:-localhost}:${ZABBIX_WEB_PORT:-8081}"
-MT_PARAMS=$(jq -nc --arg url "$UMB_INTERNAL_URL/api/ingest/$CONN_ID" --arg token "$ZABBIX_WEBHOOK_TOKEN" \
+MT_PARAMS=$(jq -nc --arg url "$UMB_INTERNAL_URL/api/ingest/zabbix" --arg token "$ZABBIX_WEBHOOK_TOKEN" \
   --arg zurl "$ZBX_PUBLIC_URL/zabbix.php?action=problem.view&triggerids%5B%5D={TRIGGER.ID}" '[
   {name:"url",value:$url},{name:"token",value:$token},
   {name:"event_id",value:"{EVENT.ID}"},{name:"event_value",value:"{EVENT.VALUE}"},
@@ -153,9 +220,40 @@ if [ -z "$TRG_ID" ]; then
 fi
 log "  item $ITEM_ID, trigger $TRG_ID (fire it: ./smoke-test.sh --zabbix)"
 
+
+log "Waiting for OpenSearch Dashboards at $OSD_URL"
+for i in $(seq 1 100); do
+  [ "$(osd GET /api/status | jq -r '.status.overall.state // empty' 2>/dev/null)" = green ] && break
+  sleep 3
+done
+[ "$(osd GET /api/status | jq -r '.status.overall.state // empty' 2>/dev/null)" = green ] ||
+  die "OpenSearch Dashboards is not green at $OSD_URL"
+
+log "OpenSearch: index lab-logs"
+os_api GET /lab-logs >/dev/null || true
+if [ "$(umb_status)" = 404 ]; then
+  os_api PUT /lab-logs '{"settings":{"number_of_shards":1,"number_of_replicas":0},
+    "mappings":{"properties":{"@timestamp":{"type":"date"},"level":{"type":"keyword"},"host":{"type":"keyword"},
+    "service":{"type":"keyword"},"error_code":{"type":"keyword"},"message":{"type":"text"}}}}' >/dev/null
+  [ "$(umb_status)" = 200 ] || die "OpenSearch: create lab-logs answered $(umb_status)"
+  log "  created"
+else
+  log "  exists"
+fi
+
+log "OpenSearch Dashboards: index pattern lab-logs*"
+osd POST '/api/saved_objects/index-pattern/lab-logs?overwrite=true' \
+  '{"attributes":{"title":"lab-logs*","timeFieldName":"@timestamp"}}' >/dev/null
+[ "$(umb_status)" = 200 ] || die "OpenSearch Dashboards: index pattern answered $(umb_status)"
+osd POST /api/opensearch-dashboards/settings '{"changes":{"defaultIndex":"lab-logs"}}' >/dev/null || true
+
 cat <<MSG
 
 Done.
-  Umbrella:  $UMB_URL   (connector $CONN_ID "Zabbix")
-  Zabbix:    $ZBX_URL   (Admin / ZABBIX_ADMIN_PASSWORD from .env)
+  Umbrella:    $UMB_URL   ($UMB_ADMIN / UMBRELLA_ADMIN_PASSWORD, lab-owner / LAB_OWNER_PASSWORD from .env)
+    connectors: zabbix $CONN_ID, prometheus $PROM_CONN_ID, opensearch $OS_CONN_ID; channels $TEAMS_CH, $ZOOM_CH
+  Zabbix:      $ZBX_URL   (Admin / ZABBIX_ADMIN_PASSWORD from .env)
+  Dashboards:  $OSD_URL   (index pattern lab-logs*)
+  Grafana:     $GRAFANA_URL   (admin / GRAFANA_ADMIN_PASSWORD from .env)
+  Prometheus:  $PROM_URL
 MSG

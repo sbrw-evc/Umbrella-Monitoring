@@ -1,0 +1,47 @@
+# Lab alert rules. Labels the Umbrella connector "prometheus" reads:
+#   host     -> CMDB entry (falls back to instance)
+#   severity -> critical | error | warning | info
+#   method   -> red | use | other
+groups:
+  - name: umbrella-lab
+    rules:
+      # Fired by the smoke test: it writes node-textfile/umbrella_lab.prom
+      # with umbrella_lab_test_failure 1 and removes the file afterwards.
+      - alert: UmbrellaLabTestFailure
+        expr: umbrella_lab_test_failure > 0
+        labels:
+          severity: error
+          method: other
+        annotations:
+          summary: "Lab test failure on {{ $labels.host }}"
+          value: "{{ $value }}"
+
+      - alert: HostHighLoad
+        expr: node_load5 / on (instance) count by (instance) (node_cpu_seconds_total{mode="idle"}) > 2
+        for: 5m
+        labels:
+          severity: warning
+          method: use
+        annotations:
+          summary: "High load on {{ $labels.host }}"
+          value: "{{ $value | printf \"%.2f\" }} per CPU"
+
+      - alert: HostLowMemory
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1
+        for: 5m
+        labels:
+          severity: error
+          method: use
+        annotations:
+          summary: "Less than 10% memory available on {{ $labels.host }}"
+          value: "{{ $value | humanizePercentage }}"
+
+      - alert: TargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: error
+          method: red
+        annotations:
+          summary: "Prometheus cannot scrape {{ $labels.job }} on {{ $labels.host }}"
+          value: "up = 0"

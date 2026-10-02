@@ -1,0 +1,22 @@
+# Alertmanager of the Umbrella lab: every alert goes to the Umbrella
+# connector "prometheus" as an Alertmanager webhook. The bearer token is
+# PROMETHEUS_WEBHOOK_TOKEN from .env (compose secret); Umbrella reads the same
+# value as UMB_SECRET_LAB_PROMETHEUS (openbao://lab/prometheus).
+route:
+  receiver: umbrella
+  group_by: [alertname, host]
+  # Short waits so the lab reacts fast; production would use 30s / 5m.
+  group_wait: 5s
+  group_interval: 10s
+  repeat_interval: 1h
+
+receivers:
+  - name: umbrella
+    webhook_configs:
+      - url: http://umbrella:8080/api/ingest/prometheus
+        send_resolved: true
+        max_alerts: 0
+        http_config:
+          authorization:
+            type: Bearer
+            credentials_file: /run/secrets/prometheus_webhook_token

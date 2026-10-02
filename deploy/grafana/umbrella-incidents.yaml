@@ -1,0 +1,1189 @@
+# Grafana dashboard "Umbrella: инциденты" as a Grafana 12 resource
+# (dashboard.grafana.app/v1beta1; spec is the classic dashboard JSON model).
+# Source of truth: edit this file, then run  python3 deploy/grafana/build.py
+# to regenerate dashboards/umbrella-incidents.json for file provisioning.
+# To import into another Grafana 12, push this file with grafanactl
+# (grafanactl resources push) or any kubectl-style client of the Grafana API.
+apiVersion: dashboard.grafana.app/v1beta1
+kind: Dashboard
+metadata:
+  name: umbrella-incidents
+spec:
+  uid: umbrella-incidents
+  title: 'Umbrella: инциденты'
+  description: Инциденты Umbrella, PagerDuty, коннекторы и уведомления (метрики /metrics и REST API)
+  tags:
+  - umbrella
+  - incidents
+  timezone: browser
+  editable: true
+  graphTooltip: 1
+  refresh: 30s
+  schemaVersion: 41
+  time:
+    from: now-6h
+    to: now
+  timepicker: {}
+  fiscalYearStartMonth: 0
+  liveNow: false
+  weekStart: ''
+  links:
+  - title: Umbrella
+    type: link
+    url: ${umbrella}/incidents
+    targetBlank: true
+    icon: external link
+    tooltip: Список инцидентов в Umbrella
+    asDropdown: false
+    includeVars: false
+    keepTime: false
+    tags: []
+  annotations:
+    list:
+    - builtIn: 1
+      datasource:
+        type: grafana
+        uid: -- Grafana --
+      enable: true
+      hide: true
+      iconColor: rgba(0, 211, 255, 1)
+      name: Annotations & Alerts
+      type: dashboard
+  templating:
+    list:
+    - name: team
+      label: Команда
+      type: query
+      datasource: &id001
+        type: prometheus
+        uid: prometheus
+      query:
+        qryType: 1
+        query: label_values(umbrella_incidents_active, team)
+        refId: PrometheusVariableQueryEditor-VariableQuery
+      definition: label_values(umbrella_incidents_active, team)
+      refresh: 2
+      includeAll: true
+      multi: true
+      allValue: .*
+      current:
+        selected: true
+        text:
+        - All
+        value:
+        - $__all
+      sort: 1
+      hide: 0
+      regex: ''
+      options: []
+    - name: service
+      label: Сервис
+      type: query
+      datasource: *id001
+      query:
+        qryType: 1
+        query: label_values(umbrella_incidents_active{team=~"$team"}, service)
+        refId: PrometheusVariableQueryEditor-VariableQuery
+      definition: label_values(umbrella_incidents_active{team=~"$team"}, service)
+      refresh: 2
+      includeAll: true
+      multi: true
+      allValue: .*
+      current:
+        selected: true
+        text:
+        - All
+        value:
+        - $__all
+      sort: 1
+      hide: 0
+      regex: ''
+      options: []
+    - name: severity
+      label: Важность
+      type: query
+      datasource: *id001
+      query:
+        qryType: 1
+        query: label_values(umbrella_incidents_active, severity)
+        refId: PrometheusVariableQueryEditor-VariableQuery
+      definition: label_values(umbrella_incidents_active, severity)
+      refresh: 2
+      includeAll: true
+      multi: true
+      allValue: .*
+      current:
+        selected: true
+        text:
+        - All
+        value:
+        - $__all
+      sort: 1
+      hide: 0
+      regex: ''
+      options: []
+    - name: umbrella
+      label: Адрес Umbrella
+      type: constant
+      hide: 2
+      query: http://localhost:8080
+      skipUrlSync: true
+      description: Публичный адрес Umbrella для ссылок; в стенде его подставляет контейнер grafana
+  panels:
+  - id: 1
+    type: row
+    title: Сейчас
+    collapsed: false
+    gridPos:
+      x: 0
+      y: 0
+      w: 24
+      h: 1
+    panels: []
+  - id: 2
+    type: stat
+    title: Активные инциденты по важности
+    gridPos:
+      x: 0
+      y: 1
+      w: 12
+      h: 5
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: sum(umbrella_incidents_active{severity="critical",team=~"$team",service=~"$service"}) or vector(0)
+      legendFormat: critical
+      range: true
+      instant: false
+    - refId: B
+      datasource: *id001
+      expr: sum(umbrella_incidents_active{severity="error",team=~"$team",service=~"$service"}) or vector(0)
+      legendFormat: error
+      range: true
+      instant: false
+    - refId: C
+      datasource: *id001
+      expr: sum(umbrella_incidents_active{severity="warning",team=~"$team",service=~"$service"}) or vector(0)
+      legendFormat: warning
+      range: true
+      instant: false
+    - refId: D
+      datasource: *id001
+      expr: sum(umbrella_incidents_active{severity="info",team=~"$team",service=~"$service"}) or vector(0)
+      legendFormat: info
+      range: true
+      instant: false
+    description: Открытые и подтверждённые инциденты без подавленных обслуживанием (umbrella_incidents_active). Фильтры команды
+      и сервиса применяются.
+    fieldConfig:
+      defaults:
+        unit: none
+        noValue: '0'
+        decimals: 0
+        color:
+          mode: fixed
+          fixedColor: text
+        thresholds:
+          mode: absolute
+          steps:
+          - color: text
+            value: null
+      overrides:
+      - matcher:
+          id: byName
+          options: critical
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: dark-red
+      - matcher:
+          id: byName
+          options: error
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: red
+      - matcher:
+          id: byName
+          options: warning
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: orange
+      - matcher:
+          id: byName
+          options: info
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: blue
+    options:
+      reduceOptions:
+        calcs:
+        - lastNotNull
+        fields: ''
+        values: false
+      orientation: auto
+      textMode: value_and_name
+      colorMode: value
+      graphMode: area
+      justifyMode: center
+      wideLayout: true
+      showPercentChange: false
+  - id: 3
+    type: stat
+    title: Резервный канал
+    gridPos:
+      x: 12
+      y: 1
+      w: 3
+      h: 5
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: umbrella_incidents_fallback or vector(0)
+      legendFormat: Резервный канал
+      range: true
+      instant: false
+    description: 'Активные инциденты, которые PagerDuty не принял вовремя: ушли в Teams/Zoom (fallback)'
+    fieldConfig:
+      defaults:
+        unit: none
+        noValue: '0'
+        decimals: 0
+        color:
+          mode: thresholds
+          fixedColor: text
+        thresholds:
+          mode: absolute
+          steps:
+          - color: green
+            value: null
+          - color: red
+            value: 1
+      overrides: []
+    options:
+      reduceOptions:
+        calcs:
+        - lastNotNull
+        fields: ''
+        values: false
+      orientation: auto
+      textMode: value
+      colorMode: background
+      graphMode: none
+      justifyMode: center
+      wideLayout: true
+      showPercentChange: false
+  - id: 4
+    type: stat
+    title: Без КЕ
+    gridPos:
+      x: 15
+      y: 1
+      w: 3
+      h: 5
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: umbrella_incidents_unbound or vector(0)
+      legendFormat: Без КЕ
+      range: true
+      instant: false
+    description: Активные инциденты без совпадения в CMDB
+    fieldConfig:
+      defaults:
+        unit: none
+        noValue: '0'
+        decimals: 0
+        color:
+          mode: thresholds
+          fixedColor: text
+        thresholds:
+          mode: absolute
+          steps:
+          - color: green
+            value: null
+          - color: orange
+            value: 1
+      overrides: []
+    options:
+      reduceOptions:
+        calcs:
+        - lastNotNull
+        fields: ''
+        values: false
+      orientation: auto
+      textMode: value
+      colorMode: background
+      graphMode: none
+      justifyMode: center
+      wideLayout: true
+      showPercentChange: false
+  - id: 5
+    type: stat
+    title: Подавлено
+    gridPos:
+      x: 18
+      y: 1
+      w: 3
+      h: 5
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: umbrella_incidents_suppressed or vector(0)
+      legendFormat: Подавлено
+      range: true
+      instant: false
+    description: Активные инциденты в окне обслуживания
+    fieldConfig:
+      defaults:
+        unit: none
+        noValue: '0'
+        decimals: 0
+        color:
+          mode: thresholds
+          fixedColor: text
+        thresholds:
+          mode: absolute
+          steps:
+          - color: green
+            value: null
+          - color: blue
+            value: 1
+      overrides: []
+    options:
+      reduceOptions:
+        calcs:
+        - lastNotNull
+        fields: ''
+        values: false
+      orientation: auto
+      textMode: value
+      colorMode: background
+      graphMode: none
+      justifyMode: center
+      wideLayout: true
+      showPercentChange: false
+  - id: 6
+    type: stat
+    title: Учения PagerDuty
+    gridPos:
+      x: 21
+      y: 1
+      w: 3
+      h: 5
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: umbrella_pagerduty_simulated_outage or vector(0)
+      legendFormat: Учения PagerDuty
+      range: true
+      instant: false
+    description: 1, пока включена имитация отказа PagerDuty
+    fieldConfig:
+      defaults:
+        unit: none
+        noValue: '0'
+        decimals: 0
+        color:
+          mode: thresholds
+          fixedColor: text
+        thresholds:
+          mode: absolute
+          steps:
+          - color: green
+            value: null
+          - color: red
+            value: 1
+        mappings:
+        - type: value
+          options:
+            '0':
+              text: нет
+              index: 0
+            '1':
+              text: идут
+              index: 1
+      overrides: []
+    options:
+      reduceOptions:
+        calcs:
+        - lastNotNull
+        fields: ''
+        values: false
+      orientation: auto
+      textMode: value
+      colorMode: background
+      graphMode: none
+      justifyMode: center
+      wideLayout: true
+      showPercentChange: false
+  - id: 7
+    type: bargauge
+    title: Активные по сервисам
+    gridPos:
+      x: 0
+      y: 6
+      w: 8
+      h: 8
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: sum by (service) (umbrella_incidents_active{team=~"$team",service=~"$service",severity=~"$severity",service!=""})
+      legendFormat: '{{service}}'
+      range: false
+      instant: true
+    description: Ближайший ИТ-сервис над КЕ инцидента
+    fieldConfig: &id002
+      defaults:
+        unit: none
+        decimals: 0
+        min: 0
+        color:
+          mode: continuous-YlRd
+        thresholds:
+          mode: absolute
+          steps:
+          - color: green
+            value: null
+      overrides: []
+    options: &id003
+      reduceOptions:
+        calcs:
+        - lastNotNull
+        fields: ''
+        values: false
+      orientation: horizontal
+      displayMode: gradient
+      showUnfilled: true
+      valueMode: color
+      namePlacement: left
+      sizing: auto
+      minVizHeight: 16
+      maxVizHeight: 300
+      minVizWidth: 8
+      legend:
+        showLegend: false
+  - id: 8
+    type: bargauge
+    title: Активные по командам
+    gridPos:
+      x: 8
+      y: 6
+      w: 8
+      h: 8
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: sum by (team) (umbrella_incidents_active{team=~"$team",service=~"$service",severity=~"$severity",team!=""})
+      legendFormat: '{{team}}'
+      range: false
+      instant: true
+    fieldConfig: *id002
+    options: *id003
+  - id: 9
+    type: bargauge
+    title: 'PagerDuty: состояние доставки'
+    gridPos:
+      x: 16
+      y: 6
+      w: 8
+      h: 8
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: sum by (state) (umbrella_incidents_pagerduty)
+      legendFormat: '{{state}}'
+      range: false
+      instant: true
+    description: Активные инциденты по состоянию отправки в PagerDuty (pending, accepted, acked, failed, skipped)
+    fieldConfig:
+      defaults:
+        unit: none
+        decimals: 0
+        min: 0
+        color:
+          mode: fixed
+          fixedColor: purple
+        thresholds:
+          mode: absolute
+          steps:
+          - color: purple
+            value: null
+      overrides:
+      - matcher:
+          id: byName
+          options: failed
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: red
+      - matcher:
+          id: byName
+          options: pending
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: orange
+      - matcher:
+          id: byName
+          options: accepted
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: green
+      - matcher:
+          id: byName
+          options: acked
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: blue
+      - matcher:
+          id: byName
+          options: skipped
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: gray
+    options: *id003
+  - id: 10
+    type: row
+    title: Динамика
+    collapsed: false
+    gridPos:
+      x: 0
+      y: 14
+      w: 24
+      h: 1
+    panels: []
+  - id: 11
+    type: timeseries
+    title: Открыто и решено
+    gridPos:
+      x: 0
+      y: 15
+      w: 12
+      h: 8
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: sum(increase(umbrella_incidents_total[$__rate_interval]))
+      legendFormat: Открыто
+      range: true
+      instant: false
+    - refId: B
+      datasource: *id001
+      expr: sum(increase(umbrella_incidents_resolved_total[$__rate_interval]))
+      legendFormat: Решено
+      range: true
+      instant: false
+    description: Новые и решённые инциденты за интервал (umbrella_incidents_total, umbrella_incidents_resolved_total). Счётчики
+      обнуляются при перезапуске Umbrella; increase это учитывает.
+    fieldConfig:
+      defaults:
+        unit: none
+        min: 0
+        color:
+          mode: palette-classic
+        custom:
+          drawStyle: bars
+          lineWidth: 1
+          fillOpacity: 60
+          showPoints: never
+          stacking:
+            mode: none
+            group: A
+          spanNulls: true
+      overrides:
+      - matcher:
+          id: byName
+          options: Открыто
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: orange
+      - matcher:
+          id: byName
+          options: Решено
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: green
+    options: &id004
+      legend:
+        showLegend: true
+        displayMode: list
+        placement: bottom
+        calcs: []
+      tooltip:
+        mode: multi
+        sort: desc
+    interval: 1m
+  - id: 12
+    type: timeseries
+    title: Активные инциденты
+    gridPos:
+      x: 12
+      y: 15
+      w: 12
+      h: 8
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: sum by (severity) (umbrella_incidents_active{team=~"$team",service=~"$service",severity=~"$severity"})
+      legendFormat: '{{severity}}'
+      range: true
+      instant: false
+    fieldConfig:
+      defaults:
+        unit: none
+        min: 0
+        color:
+          mode: palette-classic
+        custom:
+          drawStyle: line
+          lineWidth: 1
+          fillOpacity: 15
+          showPoints: never
+          stacking:
+            mode: normal
+            group: A
+          spanNulls: true
+      overrides:
+      - matcher:
+          id: byName
+          options: critical
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: dark-red
+      - matcher:
+          id: byName
+          options: error
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: red
+      - matcher:
+          id: byName
+          options: warning
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: orange
+      - matcher:
+          id: byName
+          options: info
+        properties:
+        - id: color
+          value:
+            mode: fixed
+            fixedColor: blue
+    options: *id004
+  - id: 13
+    type: timeseries
+    title: События по коннекторам, в минуту
+    gridPos:
+      x: 0
+      y: 23
+      w: 8
+      h: 8
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: sum by (name) (rate(umbrella_events_total[$__rate_interval])) * 60
+      legendFormat: '{{name}}'
+      range: true
+      instant: false
+    description: Нормализованные события, которые коннектор передал в обработку тревог
+    fieldConfig:
+      defaults:
+        unit: none
+        min: 0
+        color:
+          mode: palette-classic
+        custom:
+          drawStyle: line
+          lineWidth: 1
+          fillOpacity: 15
+          showPoints: never
+          stacking:
+            mode: none
+            group: A
+          spanNulls: true
+      overrides: []
+    options: *id004
+    interval: 1m
+  - id: 14
+    type: timeseries
+    title: Ошибки разбора
+    gridPos:
+      x: 8
+      y: 23
+      w: 8
+      h: 8
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: sum by (name) (increase(umbrella_parse_errors_total[$__rate_interval]))
+      legendFormat: '{{name}}'
+      range: true
+      instant: false
+    description: Сообщения, которые коннектор не смог разобрать (журнал ошибок разбора)
+    fieldConfig:
+      defaults:
+        unit: none
+        min: 0
+        color:
+          mode: palette-classic
+        custom:
+          drawStyle: bars
+          lineWidth: 1
+          fillOpacity: 60
+          showPoints: never
+          stacking:
+            mode: none
+            group: A
+          spanNulls: true
+      overrides: []
+    options: *id004
+    interval: 1m
+  - id: 15
+    type: timeseries
+    title: Уведомления Teams и Zoom
+    gridPos:
+      x: 16
+      y: 23
+      w: 8
+      h: 8
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: sum by (name, result) (increase(umbrella_notifications_total[$__rate_interval]))
+      legendFormat: '{{name}}: {{result}}'
+      range: true
+      instant: false
+    description: 'Доставки по каналам уведомлений: ok и failed (umbrella_notifications_total)'
+    fieldConfig:
+      defaults:
+        unit: none
+        min: 0
+        color:
+          mode: palette-classic
+        custom:
+          drawStyle: bars
+          lineWidth: 1
+          fillOpacity: 60
+          showPoints: never
+          stacking:
+            mode: normal
+            group: A
+          spanNulls: true
+      overrides: []
+    options: *id004
+    interval: 1m
+  - id: 16
+    type: row
+    title: Коннекторы и CMDB
+    collapsed: false
+    gridPos:
+      x: 0
+      y: 31
+      w: 24
+      h: 1
+    panels: []
+  - id: 17
+    type: table
+    title: Коннекторы
+    gridPos:
+      x: 0
+      y: 32
+      w: 12
+      h: 7
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: max by (connector, name) (umbrella_connector_running)
+      legendFormat: __auto
+      range: false
+      instant: true
+      format: table
+    - refId: B
+      datasource: *id001
+      expr: max by (connector, name) (umbrella_events_total)
+      legendFormat: __auto
+      range: false
+      instant: true
+      format: table
+    - refId: C
+      datasource: *id001
+      expr: max by (connector, name) (umbrella_parse_errors_total)
+      legendFormat: __auto
+      range: false
+      instant: true
+      format: table
+    description: Состояние коннекторов и счётчики с момента запуска Umbrella
+    fieldConfig:
+      defaults:
+        custom:
+          align: auto
+          cellOptions:
+            type: auto
+      overrides:
+      - matcher:
+          id: byName
+          options: Работает
+        properties:
+        - id: mappings
+          value:
+          - type: value
+            options:
+              '0':
+                text: остановлен
+                color: red
+                index: 0
+              '1':
+                text: работает
+                color: green
+                index: 1
+        - id: custom.cellOptions
+          value:
+            type: color-text
+      - matcher:
+          id: byName
+          options: Ошибок разбора
+        properties:
+        - id: custom.cellOptions
+          value:
+            type: color-text
+        - id: thresholds
+          value:
+            mode: absolute
+            steps:
+            - color: green
+              value: null
+            - color: red
+              value: 1
+    options:
+      showHeader: true
+      cellHeight: sm
+      footer:
+        show: false
+    transformations:
+    - id: merge
+      options: {}
+    - id: organize
+      options:
+        excludeByName:
+          Time: true
+        renameByName:
+          connector: ID
+          name: Коннектор
+          'Value #A': Работает
+          'Value #B': Событий
+          'Value #C': Ошибок разбора
+        indexByName:
+          connector: 0
+          name: 1
+          'Value #A': 2
+          'Value #B': 3
+          'Value #C': 4
+  - id: 18
+    type: bargauge
+    title: 'CMDB: КЕ по типам'
+    gridPos:
+      x: 12
+      y: 32
+      w: 6
+      h: 7
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: sum by (type) (umbrella_cmdb_cis)
+      legendFormat: '{{type}}'
+      range: false
+      instant: true
+    description: Записи CMDB, включая созданные автоматически по событиям
+    fieldConfig:
+      defaults:
+        unit: none
+        decimals: 0
+        min: 0
+        color:
+          mode: fixed
+          fixedColor: blue
+        thresholds:
+          mode: absolute
+          steps:
+          - color: blue
+            value: null
+      overrides: []
+    options: *id003
+  - id: 19
+    type: stat
+    title: Umbrella
+    gridPos:
+      x: 18
+      y: 32
+      w: 3
+      h: 7
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: max(up{job="umbrella"}) or vector(0)
+      legendFormat: up
+      range: true
+      instant: false
+    description: Prometheus получает /metrics Umbrella
+    fieldConfig:
+      defaults:
+        unit: none
+        noValue: '0'
+        decimals: 0
+        color:
+          mode: thresholds
+          fixedColor: text
+        thresholds:
+          mode: absolute
+          steps:
+          - color: red
+            value: null
+          - color: green
+            value: 1
+        mappings:
+        - type: value
+          options:
+            '0':
+              text: нет
+              index: 0
+            '1':
+              text: работает
+              index: 1
+      overrides: []
+    options:
+      reduceOptions:
+        calcs:
+        - lastNotNull
+        fields: ''
+        values: false
+      orientation: auto
+      textMode: value
+      colorMode: background
+      graphMode: none
+      justifyMode: center
+      wideLayout: true
+      showPercentChange: false
+  - id: 20
+    type: stat
+    title: Пользователи
+    gridPos:
+      x: 21
+      y: 32
+      w: 3
+      h: 7
+    datasource: *id001
+    targets:
+    - refId: A
+      datasource: *id001
+      expr: umbrella_users_enabled
+      legendFormat: пользователей
+      range: true
+      instant: false
+    description: Включённые учётные записи, в том числе сервисные
+    fieldConfig:
+      defaults:
+        unit: none
+        noValue: '0'
+        decimals: 0
+        color:
+          mode: fixed
+          fixedColor: text
+        thresholds:
+          mode: absolute
+          steps:
+          - color: text
+            value: null
+      overrides: []
+    options:
+      reduceOptions:
+        calcs:
+        - lastNotNull
+        fields: ''
+        values: false
+      orientation: auto
+      textMode: value
+      colorMode: value
+      graphMode: none
+      justifyMode: center
+      wideLayout: true
+      showPercentChange: false
+  - id: 21
+    type: row
+    title: Открытые инциденты (API Umbrella)
+    collapsed: false
+    gridPos:
+      x: 0
+      y: 39
+      w: 24
+      h: 1
+    panels: []
+  - id: 22
+    type: table
+    title: Открытые инциденты
+    gridPos:
+      x: 0
+      y: 40
+      w: 24
+      h: 10
+    datasource: &id005
+      type: yesoreyeram-infinity-datasource
+      uid: umbrella-api
+    targets:
+    - refId: A
+      datasource: *id005
+      type: json
+      source: url
+      parser: backend
+      format: table
+      url: /api/incidents?view=open&limit=500
+      url_options:
+        method: GET
+        data: ''
+      root_selector: items
+      columns:
+      - selector: id
+        text: ID
+        type: string
+      - selector: severity
+        text: Важность
+        type: string
+      - selector: status
+        text: Статус
+        type: string
+      - selector: title
+        text: Заголовок
+        type: string
+      - selector: ci_name
+        text: КЕ
+        type: string
+      - selector: service
+        text: Сервис
+        type: string
+      - selector: team
+        text: Команда
+        type: string
+      - selector: first_seen
+        text: Начало
+        type: timestamp
+      - selector: pd_state
+        text: PagerDuty
+        type: string
+      filters: []
+      global_query_id: ''
+    description: GET /api/incidents?view=open через источник Umbrella API (Infinity, сервисная учётная запись grafana). ID
+      ведёт в карточку инцидента в Umbrella.
+    fieldConfig:
+      defaults:
+        custom:
+          align: auto
+          cellOptions:
+            type: auto
+          filterable: true
+      overrides:
+      - matcher:
+          id: byName
+          options: ID
+        properties:
+        - id: custom.width
+          value: 110
+        - id: links
+          value:
+          - title: Открыть инцидент в Umbrella
+            targetBlank: true
+            url: ${umbrella}/incidents?id=${__value.raw}
+      - matcher:
+          id: byName
+          options: Важность
+        properties:
+        - id: custom.width
+          value: 110
+        - id: mappings
+          value:
+          - type: value
+            options:
+              critical:
+                color: dark-red
+                index: 0
+              error:
+                color: red
+                index: 1
+              warning:
+                color: orange
+                index: 2
+              info:
+                color: blue
+                index: 3
+        - id: custom.cellOptions
+          value:
+            type: color-background
+            mode: basic
+      - matcher:
+          id: byName
+          options: Статус
+        properties:
+        - id: custom.width
+          value: 130
+      - matcher:
+          id: byName
+          options: Начало
+        properties:
+        - id: unit
+          value: dateTimeAsLocal
+        - id: custom.width
+          value: 170
+      - matcher:
+          id: byName
+          options: PagerDuty
+        properties:
+        - id: custom.width
+          value: 110
+    options:
+      showHeader: true
+      cellHeight: sm
+      footer:
+        show: false
+      sortBy:
+      - displayName: Начало
+        desc: true

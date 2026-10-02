@@ -1,5 +1,8 @@
-# Umbrella lab: Umbrella MVP + Zabbix 7.0 (server, web, agent 2) on one host.
+# Umbrella lab on one host: Umbrella MVP, Zabbix 7.0 (server, web, agent 2),
+# Prometheus + Alertmanager + node-exporter, OpenSearch + Dashboards, Grafana
+# and a notification sink standing in for Teams and Zoom webhooks.
 # Secrets come from .env, which install.sh generates; see .env.example.
+# Images can be replaced with a mirror through the *_IMAGE variables.
 name: umbrella-lab
 
 services:
@@ -9,19 +12,28 @@ services:
     image: umbrella-mvp:lab
     restart: unless-stopped
     environment:
-      UMBRELLA_DEMO: ${UMBRELLA_DEMO:-true}
+      UMBRELLA_DEMO: ${UMBRELLA_DEMO:-false}
       UMBRELLA_PUBLIC_URL: http://${PUBLIC_HOST:-localhost}:${UMBRELLA_PORT:-8080}
       UMBRELLA_WS_ORIGINS: ${PUBLIC_HOST:-localhost}:*,localhost:*,127.0.0.1:*
       UMBRELLA_PD_ROUTING_KEY: ${UMBRELLA_PD_ROUTING_KEY:-}
-      # Webhook tokens of the lab connectors (openbao://lab/zabbix, openbao://lab/smoke).
+      UMBRELLA_ADMIN_USER: ${UMBRELLA_ADMIN_USER:-admin}
+      UMBRELLA_ADMIN_PASSWORD: ${UMBRELLA_ADMIN_PASSWORD:?run install.sh or fill .env}
+      # Service account "grafana" (role reader) with this API token.
+      UMBRELLA_GRAFANA_TOKEN: ${UMBRELLA_GRAFANA_TOKEN:?run install.sh or fill .env}
+      UMBRELLA_GRAFANA_URL: http://${PUBLIC_HOST:-localhost}:${GRAFANA_PORT:-3000}/d/umbrella-incidents
+      UMBRELLA_METRICS_TOKEN: ${UMBRELLA_METRICS_TOKEN:-}
+      # The lab sends Teams and Zoom notifications to the http sink below.
+      UMBRELLA_ALLOW_HTTP_WEBHOOKS: "true"
+      # Webhook tokens of the lab connectors (openbao://lab/<name>).
       UMB_SECRET_LAB_ZABBIX: ${ZABBIX_WEBHOOK_TOKEN:?run install.sh or fill .env}
       UMB_SECRET_LAB_SMOKE: ${SMOKE_WEBHOOK_TOKEN:?run install.sh or fill .env}
+      UMB_SECRET_LAB_PROMETHEUS: ${PROMETHEUS_WEBHOOK_TOKEN:?run install.sh or fill .env}
     ports:
       - "${UMBRELLA_PORT:-8080}:8080"
     networks: [lab]
 
   zabbix-db:
-    image: postgres:16-alpine
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
     restart: unless-stopped
     environment:
       POSTGRES_USER: zabbix
@@ -75,8 +87,156 @@ services:
     depends_on: [zabbix-server]
     networks: [lab]
 
+  # Prometheus scrapes node-exporter, Umbrella /metrics, Alertmanager and
+  # itself; rules in prometheus/rules fire into Alertmanager.
+  prometheus:
+    image: ${PROMETHEUS_IMAGE:-prom/prometheus:v3.5.0}
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --storage.tsdb.retention.size=1GB
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    secrets:
+      - umbrella_metrics_token
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks: [lab]
+
+  # Alertmanager posts alerts to the Umbrella connector "prometheus"
+  # (/api/ingest/prometheus) with the bearer token from .env.
+  alertmanager:
+    image: ${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.28.1}
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager:/etc/alertmanager:ro
+      - alertmanager-data:/alertmanager
+    secrets:
+      - prometheus_webhook_token
+    networks: [lab]
+
+  # Host metrics of the lab server; *.prom files in node-textfile/ become
+  # metrics too (the smoke test fires the lab alert this way).
+  node-exporter:
+    image: ${NODE_EXPORTER_IMAGE:-prom/node-exporter:v1.9.1}
+    restart: unless-stopped
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.textfile.directory=/textfile
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+)($|/)
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - ./node-textfile:/textfile:ro
+    networks: [lab]
+
+  # Single-node OpenSearch without the security plugin: lab only, the port
+  # stays inside the lab network. Umbrella polls it (connector "opensearch").
+  opensearch:
+    image: ${OPENSEARCH_IMAGE:-opensearchproject/opensearch:2.19.3}
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      bootstrap.memory_lock: "false"
+      cluster.routing.allocation.disk.threshold_enabled: "false"
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health >/dev/null"]
+      interval: 10s
+      retries: 30
+    networks: [lab]
+
+  opensearch-dashboards:
+    image: ${OSD_IMAGE:-opensearchproject/opensearch-dashboards:2.19.3}
+    restart: unless-stopped
+    environment:
+      OPENSEARCH_HOSTS: '["http://opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: "true"
+      NODE_OPTIONS: --max-old-space-size=512
+    ports:
+      - "${OSD_PORT:-5601}:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks: [lab]
+
+  # Grafana: Prometheus and Umbrella API (Infinity) data sources and the
+  # "Umbrella incidents" dashboard, all provisioned from ../grafana.
+  grafana:
+    image: ${GRAFANA_IMAGE:-grafana/grafana:12.1.1}
+    restart: unless-stopped
+    # The dashboard link column needs the public Umbrella address, which a
+    # provisioned file cannot read from the environment: the entrypoint puts
+    # it into a copy of the dashboards, then starts Grafana as usual.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        mkdir -p /tmp/umbrella-dashboards
+        for f in /etc/grafana/umbrella-dashboards/*.json; do
+          sed "s#http://localhost:8080#$${UMBRELLA_PUBLIC_URL}#g" "$$f" > "/tmp/umbrella-dashboards/$${f##*/}"
+        done
+        exec /run.sh
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?run install.sh or fill .env}
+      GF_SERVER_ROOT_URL: http://${PUBLIC_HOST:-localhost}:${GRAFANA_PORT:-3000}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      # Infinity plugin from grafana.com. Grafana 12 ignores GF_INSTALL_PLUGINS
+      # without GF_INSTALL_PLUGINS_FORCE; the background preinstall keeps
+      # Grafana up even when grafana.com is unreachable (then only the
+      # Infinity panel stays empty).
+      GF_PLUGINS_PREINSTALL: yesoreyeram-infinity-datasource
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /tmp/umbrella-dashboards/umbrella-incidents.json
+      # Read by the provisioning files ($__env / ${...} interpolation).
+      UMBRELLA_GRAFANA_TOKEN: ${UMBRELLA_GRAFANA_TOKEN}
+      UMBRELLA_PUBLIC_URL: http://${PUBLIC_HOST:-localhost}:${UMBRELLA_PORT:-8080}
+    volumes:
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/etc/grafana/umbrella-dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks: [lab]
+
+  # Stands in for Microsoft Teams and Zoom webhooks: answers 200 to any
+  # request and logs it (docker compose logs notify-sink).
+  notify-sink:
+    image: ${SINK_IMAGE:-mendhak/http-https-echo:37}
+    restart: unless-stopped
+    environment:
+      HTTP_PORT: "8080"
+      HTTPS_PORT: "8443"
+    networks: [lab]
+
+secrets:
+  umbrella_metrics_token:
+    environment: UMBRELLA_METRICS_TOKEN
+  prometheus_webhook_token:
+    environment: PROMETHEUS_WEBHOOK_TOKEN
+
 volumes:
   zabbix-db:
+  prometheus-data:
+  alertmanager-data:
+  opensearch-data:
+  grafana-data:
 
 networks:
   lab:
