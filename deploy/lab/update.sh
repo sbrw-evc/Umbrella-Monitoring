@@ -19,6 +19,7 @@ the other lab services are kept. Only the umbrella container is replaced.
 TXT
 }
 
+main() {
 PULL=1 ALL=0 CONFIGURE=0 TEST=0 ROLLBACK=0
 for a in "$@"; do
   case "$a" in
@@ -80,6 +81,15 @@ if [ "$PULL" = 1 ] && [ -n "$ROOT" ]; then
   git -C "$ROOT" pull --ff-only -q || die "git pull failed: commit or stash local changes, or run with --no-pull"
   NEW=$(git -C "$ROOT" rev-parse --short HEAD)
   if [ "$OLD" = "$NEW" ]; then log "  already at $NEW"; else log "  $OLD -> $NEW"; git -C "$ROOT" log --oneline "$OLD..$NEW" | head -20; fi
+  if [ "$OLD" != "$NEW" ] && git -C "$ROOT" diff --name-only "$OLD" "$NEW" | grep -qE '^deploy/lab/(update|preflight)\.sh$'; then
+    log "  update.sh changed: running the new version"
+    local args=() a
+    for a in "$@"; do [ "$a" = --no-pull ] || args+=("$a"); done
+    UPDATE_FROM=$OLD exec "$LAB_DIR/update.sh" --no-pull "${args[@]}"
+  fi
+elif [ -n "${UPDATE_FROM:-}" ] && [ -n "$ROOT" ]; then
+  OLD=$UPDATE_FROM
+  NEW=$(git -C "$ROOT" rev-parse --short HEAD)
 fi
 
 ./env.sh
@@ -140,3 +150,7 @@ log "Umbrella ${BEFORE:-?} -> $(running_version)"
 if [ "$CONFIGURE" = 1 ]; then ./configure.sh; fi
 if [ "$TEST" = 1 ]; then ./smoke-test.sh --all; fi
 docker image prune -f --filter "label=com.docker.compose.project=umbrella-lab" >/dev/null 2>&1 || true
+}
+
+main "$@"
+exit

@@ -43,6 +43,18 @@ if (-not $NoPull -and (Get-Command git -ErrorAction SilentlyContinue)) {
   Invoke-Native git @('-C', $lab, 'pull', '--ff-only', '-q')
   $new = Get-NativeOutput git @('-C', $lab, 'rev-parse', '--short', 'HEAD')
   Write-Step "  $old -> $new"
+  $self = @((Get-NativeOutput git @('-C', $lab, 'diff', '--name-only', $old, $new)) -split "`n") |
+    Where-Object { $_ -in 'deploy/lab/update.ps1', 'deploy/lab/lib.ps1' }
+  if ($old -ne $new -and $self) {
+    Write-Step '  update.ps1 changed: running the new version'
+    $env:UPDATE_FROM = $old
+    & $PSCommandPath -NoPull -All:$All -Configure:$Configure -Test:$Test
+    exit $LASTEXITCODE
+  }
+} elseif ($env:UPDATE_FROM) {
+  $old = $env:UPDATE_FROM
+  $new = Get-NativeOutput git @('-C', $lab, 'rev-parse', '--short', 'HEAD')
+  Remove-Item Env:UPDATE_FROM
 }
 
 Update-DotEnv (Join-Path $lab '.env')
