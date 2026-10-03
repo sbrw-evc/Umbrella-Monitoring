@@ -60,6 +60,16 @@ if ($All) {
   Invoke-Native docker @('compose', 'pull', '--ignore-buildable', '--quiet')
   Invoke-Native docker @('compose', 'build', 'fluentd')
   Invoke-Native docker @('compose', 'up', '-d', '--remove-orphans')
+  if ($old -and $new -and $old -ne $new) {
+    $changed = @(Get-NativeOutput git @('-C', $lab, 'diff', '--name-only', $old, $new)) -split "`n"
+    $map = [ordered]@{ 'deploy/lab/telegraf/' = 'telegraf'; 'deploy/lab/prometheus/' = 'prometheus';
+      'deploy/lab/alertmanager/' = 'alertmanager'; 'deploy/lab/node-textfile/' = 'node-exporter'; 'deploy/grafana/' = 'grafana' }
+    $restart = @($map.Keys | Where-Object { $p = $_; $changed | Where-Object { $_.StartsWith($p) } } | ForEach-Object { $map[$_] })
+    if ($restart.Count -gt 0) {
+      Write-Step "Restarting services with changed mounted configs: $($restart -join ' ')"
+      Invoke-Native docker (@('compose', 'restart') + $restart)
+    }
+  }
 } else {
   Write-Step 'Replacing the umbrella container'
   Invoke-Native docker @('compose', 'up', '-d', '--no-deps', '--no-build', 'umbrella')

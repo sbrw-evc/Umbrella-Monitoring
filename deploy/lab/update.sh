@@ -108,6 +108,18 @@ if [ "$ALL" = 1 ]; then
   docker compose pull --ignore-buildable --quiet
   docker compose build fluentd
   docker compose up -d --remove-orphans
+  if [ -n "${OLD:-}" ] && [ "$OLD" != "${NEW:-}" ]; then
+    CHANGED=$(git -C "$ROOT" diff --name-only "$OLD" "$NEW")
+    RESTART=()
+    for pair in telegraf:telegraf prometheus:prometheus alertmanager:alertmanager node-textfile:node-exporter; do
+      grep -q "^deploy/lab/${pair%%:*}/" <<<"$CHANGED" && RESTART+=("${pair#*:}")
+    done
+    grep -q '^deploy/grafana/' <<<"$CHANGED" && RESTART+=(grafana)
+    if [ ${#RESTART[@]} -gt 0 ]; then
+      log "Restarting services with changed mounted configs: ${RESTART[*]}"
+      docker compose restart "${RESTART[@]}"
+    fi
+  fi
 else
   log "Replacing the umbrella container"
   start_umbrella
