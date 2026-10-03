@@ -81,8 +81,10 @@ func (e *Engine) Ingest(src Source, drafts []pipeline.Draft) []model.Event {
 				Raw:         dr.Raw,
 				ReceivedAt:  now,
 			}
-			if dup := findInbox(d, src.ID, dr.ExternalID, dr.Status, now); dup {
-
+			if prev := findInbox(d, src.ID, dr.ExternalID, now); prev != nil && prev.Status == dr.Status {
+				if a := rebind(d, prev.AlertID, dr, now); a != nil {
+					changed = append(changed, cloneAlert(a))
+				}
 				continue
 			}
 			ci := ResolveCI(d, dr.CI, dr.Labels)
@@ -123,9 +125,9 @@ func (e *Engine) Ingest(src Source, drafts []pipeline.Draft) []model.Event {
 	return events
 }
 
-func findInbox(d *store.Data, connectorID, externalID string, status model.EventStatus, now time.Time) bool {
+func findInbox(d *store.Data, connectorID, externalID string, now time.Time) *model.Event {
 	if externalID == "" {
-		return false
+		return nil
 	}
 	for i := len(d.Events) - 1; i >= 0; i-- {
 		ev := d.Events[i]
@@ -133,10 +135,28 @@ func findInbox(d *store.Data, connectorID, externalID string, status model.Event
 			break
 		}
 		if ev.ConnectorID == connectorID && ev.ExternalID == externalID {
-			return ev.Status == status
+			return ev
 		}
 	}
-	return false
+	return nil
+}
+
+func rebind(d *store.Data, alertID string, dr pipeline.Draft, now time.Time) *model.Alert {
+	a := d.Alerts[alertID]
+	if a == nil || !a.Status.Active() || (a.CIID != "" && d.CIs[a.CIID] != nil) {
+		return nil
+	}
+	ci := ResolveCI(d, dr.CI, dr.Labels)
+	if ci == nil {
+		return nil
+	}
+	a.CIID, a.CIName, a.CIType = ci.ID, ci.Name, ci.Type
+	if a.Team == "" {
+		a.Team = ci.Team
+	}
+	a.DedupKey = ci.ID + "|" + a.Signal
+	a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "event", Text: "привязан к КЕ " + ci.Name + " по повторному событию"})
+	return a
 }
 
 func ResolveCI(d *store.Data, name string, labels map[string]string) *model.CI {

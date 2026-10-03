@@ -163,3 +163,35 @@ type testErr struct{}
 func (testErr) Error() string { return "down" }
 
 var errTest = testErr{}
+
+func TestRedeliveredEventRebindsOrphanedIncident(t *testing.T) {
+	e, _, st, _ := setup()
+	e.Ingest(Source{ID: "Z", Name: "Zabbix"}, []pipeline.Draft{draft("host1", "zabbix:7", model.SevError, model.EventFiring, "901")})
+	st.Write(func(d *store.Data) {
+		d.DeleteCI("CI-2")
+		d.CIs["CI-9"] = &model.CI{ID: "CI-9", Name: "host1", Type: model.CIHost, Team: "infra"}
+	})
+	e.Ingest(Source{ID: "Z", Name: "Zabbix"}, []pipeline.Draft{draft("host1", "zabbix:7", model.SevError, model.EventFiring, "901")})
+
+	var alerts []model.Alert
+	st.Read(func(d *store.Data) {
+		for _, a := range d.Alerts {
+			alerts = append(alerts, *a)
+		}
+	})
+	if len(alerts) != 1 {
+		t.Fatalf("redelivery must not open a second incident: %+v", alerts)
+	}
+	if a := alerts[0]; a.CIID != "CI-9" || a.DedupKey != "CI-9|zabbix:7" || a.Count != 1 {
+		t.Fatalf("incident not rebound: %+v", a)
+	}
+
+	e.Ingest(Source{ID: "Z", Name: "Zabbix"}, []pipeline.Draft{draft("host1", "zabbix:7", model.SevError, model.EventResolved, "901")})
+	st.Read(func(d *store.Data) {
+		for _, a := range d.Alerts {
+			if a.Status.Active() {
+				t.Fatalf("recovery did not reach the rebound incident: %+v", a)
+			}
+		}
+	})
+}
