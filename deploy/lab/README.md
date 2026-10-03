@@ -28,6 +28,12 @@ NetBox (устройства, ВМ, контакты) ─ API: КЕ и отве�
 
 node-exporter собирает метрики самого хоста; метрики контейнеров Docker отдаёт cAdvisor (node-exporter их не собирает).
 
+Zabbix agent 2 работает в контейнере, но читает `/proc/meminfo`, `/proc/stat`, `/proc/loadavg`, `/proc/uptime`, `/proc/swaps`, `/proc/diskstats` и `/proc/cpuinfo` хоста. В LXC-контейнере Proxmox это значения самого LXC (lxcfs), а не всего узла; smoke-test сверяет память в Zabbix и node-exporter. Файлы `/etc/*`, которые Docker монтирует в контейнер, исключены из обнаружения файловых систем. Узел «Zabbix server» мониторит сам сервер Zabbix (шаблон «Zabbix server health») без шаблона агента.
+
+### Docker в LXC (Proxmox)
+
+AppArmor в ядре включён, а LXC не даёт Docker загрузить профиль `docker-default`: ни один контейнер не стартует. `preflight.sh` распознаёт этот случай. В `/etc/pve/lxc/<id>.conf` на узле Proxmox нужны `features: nesting=1,keyctl=1`, `lxc.apparmor.profile: unconfined` и `lxc.mount.entry: /dev/null sys/module/apparmor/parameters/enabled none bind 0 0`, затем `pct reboot <id>`.
+
 ## Установка одной командой
 
 Сервер Debian или Ubuntu: 4 vCPU, 10 ГБ памяти (минимум 8 ГБ), 40 ГБ диска, доступ в интернет. Под root:

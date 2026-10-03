@@ -167,6 +167,14 @@ services:
       ZBX_HOSTNAME: ${LAB_HOST:-lab-host-1}
       ZBX_SERVER_HOST: zabbix-server
       ZBX_SERVER_ACTIVE: zabbix-server
+    volumes:
+      - /proc/meminfo:/proc/meminfo:ro
+      - /proc/stat:/proc/stat:ro
+      - /proc/loadavg:/proc/loadavg:ro
+      - /proc/uptime:/proc/uptime:ro
+      - /proc/swaps:/proc/swaps:ro
+      - /proc/diskstats:/proc/diskstats:ro
+      - /proc/cpuinfo:/proc/cpuinfo:ro
     depends_on: [zabbix-server]
     logging: *logging
     networks: [lab]

@@ -91,7 +91,7 @@ GROUP_ID=$(zbx hostgroup.get '{"filter":{"name":["Linux servers"]},"output":["gr
 TPL_ID=$(zbx template.get '{"filter":{"host":["Linux by Zabbix agent"]},"output":["templateid"]}' | jq -r '.[0].templateid // empty')
 MACROS='[{"macro":"{$CPU.UTIL.CRIT}","value":"3"},{"macro":"{$LOAD_AVG_PER_CPU.MAX.WARN}","value":"0.1"},
   {"macro":"{$MEMORY.UTIL.MAX}","value":"25"},{"macro":"{$VFS.FS.PUSED.MAX.WARN}","value":"5"},{"macro":"{$VFS.FS.PUSED.MAX.CRIT}","value":"10"},
-  {"macro":"{$SWAP.PFREE.MIN.WARN}","value":"99"}]'
+  {"macro":"{$SWAP.PFREE.MIN.WARN}","value":"99"},{"macro":"{$VFS.FS.FSNAME.NOT_MATCHES}","value":"^(/dev|/sys|/run|/proc|/etc/.+|.+/shm$)"}]'
 HOSTID=$(zbx host.get "$(jq -nc --arg h "$LAB_HOST" '{filter:{host:[$h]},output:["hostid"]}')" | jq -r '.[0].hostid // empty')
 if [ -z "$HOSTID" ]; then
   HOSTID=$(zbx host.create "$(jq -nc --arg h "$LAB_HOST" --arg g "$GROUP_ID" --arg t "$TPL_ID" --argjson m "$MACROS" '{
@@ -105,6 +105,12 @@ ITEM_ID=$(zbx item.get "$(jq -nc --arg h "$HOSTID" '{hostids:[$h],filter:{key_:"
 TRG=$(zbx trigger.get "$(jq -nc --arg h "$HOSTID" '{hostids:[$h],filter:{description:"Umbrella test problem"},output:["triggerid"]}')" | jq -r '.[0].triggerid // empty')
 [ -n "$TRG" ] || zbx trigger.create "$(jq -nc --arg h "$LAB_HOST" '{description:"Umbrella test problem",
   expression:("last(/" + $h + "/umbrella.test)>0"),priority:4,opdata:"value {ITEM.LASTVALUE}",manual_close:1,tags:[{tag:"umbrella",value:"test"}]}')" >/dev/null
+SRV_ID=$(zbx host.get '{"filter":{"host":["Zabbix server"]},"output":["hostid"]}' | jq -r '.[0].hostid // empty')
+if [ -n "$SRV_ID" ] && [ -n "$TPL_ID" ]; then
+  LINKED=$(zbx host.get "$(jq -nc --arg id "$SRV_ID" '{hostids:[$id],output:["hostid"],selectParentTemplates:["templateid"]}')" | jq -r --arg t "$TPL_ID" '[.[0].parentTemplates[].templateid] | index($t) != null')
+  [ "$LINKED" = true ] && zbx host.update "$(jq -nc --arg id "$SRV_ID" --arg t "$TPL_ID" '{hostid:$id,templates_clear:[{templateid:$t}]}')" >/dev/null
+  log "  host Zabbix server: self-monitoring only (Zabbix server health), no agent template"
+fi
 log "  host $LAB_HOST ($HOSTID): Linux template with low thresholds (CPU > 3%, memory > 25%, disk > 5%)"
 
 log "OpenSearch Dashboards at $OSD_URL"
