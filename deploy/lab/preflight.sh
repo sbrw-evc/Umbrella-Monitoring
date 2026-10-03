@@ -43,7 +43,18 @@ apparmor_check() {
   if [[ "$so" == *apparmor* ]]; then
     pf_log "  Docker uses AppArmor: probing the lab container profiles"
     PROBE_CMD=(true)
-    probe --security-opt apparmor=docker-default || pf_die "a container under AppArmor profile docker-default does not start; see: dmesg | grep -i apparmor"
+    if ! probe --security-opt apparmor=docker-default; then
+      if [ "$(systemd-detect-virt -c 2>/dev/null)" = lxc ] &&
+        docker run --rm --pull=missing "$PROBE_IMAGE" true 2>&1 | grep -q 'policy admin privileges'; then
+        pf_die "Docker runs inside an LXC container that may not load AppArmor profiles, so docker-default cannot be loaded and no container starts.
+  Fix it on the Proxmox host (pct config <id>), then restart the container:
+    features: nesting=1,keyctl=1
+    lxc.apparmor.profile: unconfined
+    lxc.mount.entry: /dev/null sys/module/apparmor/parameters/enabled none bind 0 0
+  Containers then run without the docker-default profile; or install the lab into a VM instead of an LXC"
+      fi
+      pf_die "a container under AppArmor profile docker-default does not start; see: dmesg | grep -i apparmor"
+    fi
     probe --privileged || pf_die "a privileged container (cAdvisor) does not start under AppArmor"
     PROBE_CMD=(test -S /var/run/docker.sock)
     probe -v /var/run/docker.sock:/var/run/docker.sock:ro || pf_die "AppArmor blocks /var/run/docker.sock in containers (Telegraf reads container logs through it)"
