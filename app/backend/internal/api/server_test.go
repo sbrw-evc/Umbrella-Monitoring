@@ -49,6 +49,7 @@ func newEnv(t *testing.T, seed bool) *testEnv {
 	pd.SetInbound(eng.PDInbound)
 	rt := connector.New(st, eng, vault, n.Observe)
 	im := integration.NewManager(st, vault, "https://umbrella.example")
+	im.SetFeed(rt.Webhook)
 	srv := New(Config{AllowHTTPWebhooks: true, PublicURL: "https://umbrella.example", Version: "test"},
 		Deps{Store: st, Engine: eng, Runtime: rt, PagerDuty: pd, Hub: NewHub(), Vault: vault, Integrations: im, Rules: rules.New(st, im, eng)})
 	srv.SetNotifier(n)

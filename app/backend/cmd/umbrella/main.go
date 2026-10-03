@@ -140,6 +140,7 @@ func main() {
 	pd.SetInbound(eng.PDInbound)
 	rt := connector.New(st, eng, vault, publish)
 	integrations := integration.NewManager(st, vault, publicURL)
+	integrations.SetFeed(rt.Webhook)
 	ruleEngine := rules.New(st, integrations, eng)
 
 	var tokens []auth.ServiceToken

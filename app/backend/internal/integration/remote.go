@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -287,6 +288,79 @@ func (z *zabbix) setup(ctx context.Context, it model.Integration, ingestURL, tok
 	info := fmt.Sprintf("Zabbix: тип оповещения «%s» (%s), медиа пользователя %s, действие «%s» (%s); адрес приёма %s",
 		p("media_type"), mtID, p("zabbix_user"), p("action"), actID, ingestURL)
 	return map[string]string{"mediatype_id": mtID, "action_id": actID, "user_id": uid}, info, nil
+}
+
+var zabbixSeverityName = []string{"Not classified", "Information", "Warning", "Average", "High", "Disaster"}
+
+const maxBackfill = 1000
+
+func (z *zabbix) openProblems(ctx context.Context, it model.Integration) ([]string, error) {
+	var problems []struct {
+		EventID  string `json:"eventid"`
+		ObjectID string `json:"objectid"`
+		Name     string `json:"name"`
+		Severity string `json:"severity"`
+		OpData   string `json:"opdata"`
+		Tags     []struct {
+			Tag   string `json:"tag"`
+			Value string `json:"value"`
+		} `json:"tags"`
+	}
+	if err := z.call(ctx, "problem.get", map[string]any{"source": 0, "object": 0, "recent": false, "suppressed": false,
+		"output": []string{"eventid", "objectid", "name", "severity", "opdata"}, "selectTags": "extend",
+		"sortfield": []string{"eventid"}, "sortorder": "DESC", "limit": maxBackfill}, true, &problems); err != nil {
+		return nil, err
+	}
+	if len(problems) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(problems))
+	for _, p := range problems {
+		ids = append(ids, p.ObjectID)
+	}
+	var triggers []struct {
+		ID    string `json:"triggerid"`
+		Hosts []struct {
+			Host string `json:"host"`
+			Name string `json:"name"`
+		} `json:"hosts"`
+	}
+	if err := z.call(ctx, "trigger.get", map[string]any{"triggerids": ids, "output": []string{"triggerid"},
+		"selectHosts": []string{"host", "name"}}, true, &triggers); err != nil {
+		return nil, err
+	}
+	hosts := map[string][2]string{}
+	for _, t := range triggers {
+		if len(t.Hosts) > 0 {
+			hosts[t.ID] = [2]string{t.Hosts[0].Host, t.Hosts[0].Name}
+		}
+	}
+	base := strings.TrimRight(it.URL, "/")
+	out := make([]string, 0, len(problems))
+	for i := len(problems) - 1; i >= 0; i-- {
+		p := problems[i]
+		h, ok := hosts[p.ObjectID]
+		if !ok {
+			continue
+		}
+		sev := zabbixSeverityName[0]
+		if n, err := strconv.Atoi(p.Severity); err == nil && n >= 0 && n < len(zabbixSeverityName) {
+			sev = zabbixSeverityName[n]
+		}
+		tags := make([]string, 0, len(p.Tags))
+		for _, t := range p.Tags {
+			tags = append(tags, t.Tag+":"+t.Value)
+		}
+		b, err := json.Marshal(map[string]string{"event_id": p.EventID, "event_value": "1", "status": "firing",
+			"host": h[0], "host_name": h[1], "trigger_id": p.ObjectID, "trigger_name": p.Name, "severity": sev,
+			"value": p.OpData, "tags": strings.Join(tags, ", "),
+			"url": base + "/zabbix.php?action=problem.view&triggerids%5B%5D=" + p.ObjectID})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, string(b))
+	}
+	return out, nil
 }
 
 func (z *zabbix) teardown(ctx context.Context, remote map[string]string) error {

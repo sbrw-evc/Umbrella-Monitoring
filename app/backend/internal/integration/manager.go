@@ -37,7 +37,12 @@ type Manager struct {
 	st        *store.Store
 	vault     Vault
 	publicURL string
+	feed      Feed
 }
+
+type Feed func(connectorID, body, token string) (int, error)
+
+func (m *Manager) SetFeed(f Feed) { m.feed = f }
 
 func NewManager(st *store.Store, vault Vault, publicURL string) *Manager {
 	return &Manager{st: st, vault: vault, publicURL: strings.TrimRight(publicURL, "/")}
@@ -731,7 +736,11 @@ func (m *Manager) setup(ctx context.Context, v View) (map[string]string, string,
 			return nil, "", err
 		}
 		defer z.close(ctx)
-		return z.setup(ctx, it, v.IngestURL, token)
+		remote, info, err := z.setup(ctx, it, v.IngestURL, token)
+		if err != nil {
+			return nil, "", err
+		}
+		return remote, info + m.backfillZabbix(ctx, z, it, token), nil
 	case TypeGrafana:
 		return grafanaSetup(ctx, newRemote(it, secret), it, v.IngestURL, token)
 	}
@@ -771,3 +780,21 @@ func (m *Manager) RevealToken(id string) (string, error) {
 }
 
 func urlQuery(s string) string { return url.QueryEscape(s) }
+
+func (m *Manager) backfillZabbix(ctx context.Context, z *zabbix, it model.Integration, token string) string {
+	if m.feed == nil || it.ConnectorID == "" {
+		return ""
+	}
+	bodies, err := z.openProblems(ctx, it)
+	if err != nil {
+		return "; открытые проблемы не загружены: " + err.Error()
+	}
+	sent := 0
+	for _, b := range bodies {
+		if _, err := m.feed(it.ConnectorID, b, token); err != nil {
+			return fmt.Sprintf("; открытых проблем передано %d из %d: %v", sent, len(bodies), err)
+		}
+		sent++
+	}
+	return fmt.Sprintf("; открытых проблем передано %d", sent)
+}

@@ -303,7 +303,7 @@ if [ "$STACK_E2E" = 1 ]; then
   psql_lab "select * from $TABLE" >/dev/null 2>&1
   DOC=""
   for i in $(seq 1 40); do
-    DOC=$(os_api POST "/pg-logs-*/_search" "$(jq -nc --arg t "$TABLE" '{size:1,query:{match_phrase:{message:$t}}}')")
+    DOC=$(os_api POST "/pg-logs-*/_search" "$(jq -nc --arg t "$TABLE" '{size:1,query:{bool:{must:[{match_phrase:{message:$t}}],filter:[{term:{pg_level:"ERROR"}}]}}}')")
     [ "$(jq -r '.hits.hits | length' <<<"$DOC" 2>/dev/null)" -gt 0 ] 2>/dev/null && break
     sleep 3
   done

@@ -97,6 +97,11 @@ func newWorld(t *testing.T) *fakeWorld {
 			res = map[string]any{"userids": []string{"1"}}
 		case "action.create":
 			res = map[string]any{"actionids": []string{"7"}}
+		case "problem.get":
+			res = []any{map[string]any{"eventid": "901", "objectid": "13500", "name": "High CPU utilization (over 90% for 5m)",
+				"severity": "4", "opdata": "Current utilization: 97 %", "tags": []any{map[string]string{"tag": "scope", "value": "performance"}}}}
+		case "trigger.get":
+			res = []any{map[string]any{"triggerid": "13500", "hosts": []any{map[string]string{"host": "db-01", "name": "db-01"}}}}
 		}
 		reply(rw, map[string]any{"jsonrpc": "2.0", "result": res, "id": 1})
 	})
@@ -303,8 +308,23 @@ func TestIntegrationsMergeHostsAndRules(t *testing.T) {
 		t.Fatalf("check = %+v", res)
 	}
 	do(t, "POST", ts.URL+"/api/integrations/"+zbx.ID+"/setup", "", &res)
-	if !res.OK {
+	if !res.OK || !strings.Contains(res.Message, "открытых проблем передано 1") {
 		t.Fatalf("setup = %+v", res)
+	}
+	var open struct {
+		Items []struct {
+			Signal, Severity, Status, CI, Title string
+		}
+	}
+	do(t, "GET", ts.URL+"/api/incidents?view=all", "", &open)
+	found := false
+	for _, a := range open.Items {
+		if a.Signal == "zabbix:13500" && a.Severity == "error" && a.Status == "open" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("open Zabbix problem was not imported on setup: %+v", open.Items)
 	}
 	world.mu.Lock()
 	mt := world.mediaType
@@ -381,7 +401,7 @@ func TestIntegrationsMergeHostsAndRules(t *testing.T) {
 		Items []model.Alert
 	}
 	do(t, "GET", ts.URL+"/api/incidents?view=open", "", &list)
-	if len(list.Items) != 2 {
+	if len(list.Items) != 3 {
 		t.Fatalf("incidents = %+v", list.Items)
 	}
 	for _, a := range list.Items {
@@ -394,8 +414,13 @@ func TestIntegrationsMergeHostsAndRules(t *testing.T) {
 	world.mu.Unlock()
 	do(t, "POST", ts.URL+"/api/rules/"+rule.ID+"/evaluate", "", &rule)
 	do(t, "GET", ts.URL+"/api/incidents?view=open", "", &list)
-	if len(list.Items) != 1 || list.Items[0].Method != model.MethodUSE && list.Items[0].Signal == "use.cpu.utilization" {
-		t.Fatalf("rule incident not resolved: %+v", list.Items)
+	for _, a := range list.Items {
+		if a.Signal == "use.cpu.utilization" {
+			t.Fatalf("rule incident not resolved: %+v", list.Items)
+		}
+	}
+	if len(list.Items) != 2 {
+		t.Fatalf("open incidents after rule recovery: %+v", list.Items)
 	}
 	if code := do(t, "DELETE", ts.URL+"/api/rules/"+rule.ID, "", nil); code != 204 {
 		t.Fatalf("rule delete code = %d", code)
