@@ -1,6 +1,3 @@
-// Package store keeps Umbrella state. The MVP step 1 store is in memory
-// behind one lock; the PostgreSQL implementation replaces it without
-// changing callers, because everything goes through Read and Write.
 package store
 
 import (
@@ -12,33 +9,36 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 )
 
-// Limits of the in-memory rings.
 const (
 	MaxEvents      = 20000
 	MaxParseErrors = 2000
+	MaxDeliveries  = 1000
+	MaxAudit       = 5000
 )
 
-// Data is the whole state. Access it only inside Read or Write.
 type Data struct {
-	Teams       []model.Team
-	CIs         map[string]*model.CI
-	Relations   []model.Relation
-	Connectors  map[string]*model.Connector
-	Events      []*model.Event // oldest first
-	Alerts      map[string]*model.Alert
-	ParseErrors []*model.ParseError // oldest first
-	Maintenance map[string]*model.Maintenance
-	Rules       []model.Rule
-	Audit       []AuditEntry
-	Users       map[string]*model.User
-	Roles       map[string]*model.Role
-	Tokens      map[string]*model.APIToken
-	Channels    map[string]*model.Channel
-	Deliveries  []*model.Delivery // oldest first
-	seq         map[string]int
+	CIs          map[string]*model.CI
+	Relations    []model.Relation
+	Connectors   map[string]*model.Connector
+	Events       []*model.Event
+	Alerts       map[string]*model.Alert
+	ParseErrors  []*model.ParseError
+	Maintenance  map[string]*model.Maintenance
+	Audit        []AuditEntry
+	Users        map[string]*model.User
+	Roles        map[string]*model.Role
+	Tokens       map[string]*model.APIToken
+	Channels     map[string]*model.Channel
+	Deliveries   []*model.Delivery
+	Integrations map[string]*model.Integration
+	Rules        map[string]*model.Rule
+	Teams        map[string]*model.Team
+	PagerDuty    model.PDSettings
+	OnCall       model.OnCall
+	Settings     model.Settings
+	Seq          map[string]int
 }
 
-// AuditEntry records a change made by a person.
 type AuditEntry struct {
 	At     string `json:"at"`
 	Actor  string `json:"actor"`
@@ -46,84 +46,114 @@ type AuditEntry struct {
 	Object string `json:"object"`
 }
 
-// Store guards Data.
 type Store struct {
-	mu sync.RWMutex
-	d  Data
+	mu      sync.RWMutex
+	d       Data
+	version uint64
+
+	persistMu sync.Mutex
+	backend   Backend
+	saved     uint64
+	lastErr   error
 }
 
-// New returns an empty store.
 func New() *Store {
-	return &Store{d: Data{
-		CIs:         map[string]*model.CI{},
-		Connectors:  map[string]*model.Connector{},
-		Alerts:      map[string]*model.Alert{},
-		Maintenance: map[string]*model.Maintenance{},
-		Users:       map[string]*model.User{},
-		Roles:       map[string]*model.Role{},
-		Tokens:      map[string]*model.APIToken{},
-		Channels:    map[string]*model.Channel{},
-		seq:         map[string]int{},
-	}}
+	s := &Store{}
+	s.d.init()
+	return s
 }
 
-// Read runs f under the read lock. f must not keep pointers after return.
+func (d *Data) init() {
+	if d.CIs == nil {
+		d.CIs = map[string]*model.CI{}
+	}
+	if d.Connectors == nil {
+		d.Connectors = map[string]*model.Connector{}
+	}
+	if d.Alerts == nil {
+		d.Alerts = map[string]*model.Alert{}
+	}
+	if d.Maintenance == nil {
+		d.Maintenance = map[string]*model.Maintenance{}
+	}
+	if d.Users == nil {
+		d.Users = map[string]*model.User{}
+	}
+	if d.Roles == nil {
+		d.Roles = map[string]*model.Role{}
+	}
+	if d.Tokens == nil {
+		d.Tokens = map[string]*model.APIToken{}
+	}
+	if d.Channels == nil {
+		d.Channels = map[string]*model.Channel{}
+	}
+	if d.Integrations == nil {
+		d.Integrations = map[string]*model.Integration{}
+	}
+	if d.Teams == nil {
+		d.Teams = map[string]*model.Team{}
+	}
+	if d.Rules == nil {
+		d.Rules = map[string]*model.Rule{}
+	}
+	if d.Seq == nil {
+		d.Seq = map[string]int{}
+	}
+	if d.PagerDuty.Region == "" {
+		d.PagerDuty.Region = model.PDRegionUS
+	}
+	if d.PagerDuty.MinSeverity == "" {
+		d.PagerDuty.MinSeverity = model.SevInfo
+	}
+}
+
 func (s *Store) Read(f func(d *Data)) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	f(&s.d)
 }
 
-// Write runs f under the write lock.
 func (s *Store) Write(f func(d *Data)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.version++
 	f(&s.d)
 }
 
-// NextID returns a readable sequential id like "ALR-42". Call inside Write.
 func (d *Data) NextID(prefix string) string {
-	d.seq[prefix]++
-	return fmt.Sprintf("%s-%d", prefix, d.seq[prefix])
+	d.Seq[prefix]++
+	return fmt.Sprintf("%s-%d", prefix, d.Seq[prefix])
 }
 
-// UseID records an id assigned outside NextID (seed data), so NextID never
-// hands it out again.
 func (d *Data) UseID(id string) {
 	i := strings.LastIndex(id, "-")
 	if i < 0 {
 		return
 	}
-	if n, err := strconv.Atoi(id[i+1:]); err == nil && n > d.seq[id[:i]] {
-		d.seq[id[:i]] = n
+	if n, err := strconv.Atoi(id[i+1:]); err == nil && n > d.Seq[id[:i]] {
+		d.Seq[id[:i]] = n
 	}
 }
 
-// AddEvent appends to the ring.
-func (d *Data) AddEvent(e *model.Event) {
-	d.Events = append(d.Events, e)
-	if len(d.Events) > MaxEvents {
-		d.Events = append([]*model.Event(nil), d.Events[len(d.Events)-MaxEvents:]...)
+func ring[T any](list []T, v T, max int) []T {
+	list = append(list, v)
+	if len(list) > max {
+		list = append([]T(nil), list[len(list)-max:]...)
 	}
+	return list
 }
 
-// AddParseError appends to the ring.
+func (d *Data) AddEvent(e *model.Event) { d.Events = ring(d.Events, e, MaxEvents) }
+
 func (d *Data) AddParseError(p *model.ParseError) {
-	d.ParseErrors = append(d.ParseErrors, p)
-	if len(d.ParseErrors) > MaxParseErrors {
-		d.ParseErrors = append([]*model.ParseError(nil), d.ParseErrors[len(d.ParseErrors)-MaxParseErrors:]...)
-	}
+	d.ParseErrors = ring(d.ParseErrors, p, MaxParseErrors)
 }
 
-// AddDelivery appends to the notification delivery ring.
-func (d *Data) AddDelivery(x *model.Delivery) {
-	d.Deliveries = append(d.Deliveries, x)
-	if len(d.Deliveries) > 1000 {
-		d.Deliveries = append([]*model.Delivery(nil), d.Deliveries[len(d.Deliveries)-1000:]...)
-	}
-}
+func (d *Data) AddDelivery(x *model.Delivery) { d.Deliveries = ring(d.Deliveries, x, MaxDeliveries) }
 
-// UserByName finds a user by login, ignoring case.
+func (d *Data) AddAudit(a AuditEntry) { d.Audit = ring(d.Audit, a, MaxAudit) }
+
 func (d *Data) UserByName(username string) *model.User {
 	for _, u := range d.Users {
 		if strings.EqualFold(u.Username, username) {
@@ -133,10 +163,64 @@ func (d *Data) UserByName(username string) *model.User {
 	return nil
 }
 
-// AddAudit appends an audit line.
-func (d *Data) AddAudit(a AuditEntry) {
-	d.Audit = append(d.Audit, a)
-	if len(d.Audit) > 5000 {
-		d.Audit = d.Audit[len(d.Audit)-5000:]
+func (d *Data) DeleteCI(id string) {
+	delete(d.CIs, id)
+	kept := d.Relations[:0]
+	for _, rel := range d.Relations {
+		if rel.From != id && rel.To != id {
+			kept = append(kept, rel)
+		}
 	}
+	d.Relations = kept
+	for mid, m := range d.Maintenance {
+		if m.CIID == id {
+			delete(d.Maintenance, mid)
+		}
+	}
+	for _, a := range d.Alerts {
+		if a.CIID == id {
+			a.CIID = ""
+		}
+	}
+	for _, c := range d.Channels {
+		c.Services = without(c.Services, id)
+	}
+	for _, u := range d.Users {
+		u.BusinessServices = without(u.BusinessServices, id)
+	}
+}
+
+func (d *Data) TeamUsage() map[string]int {
+	use := map[string]int{}
+	for _, ci := range d.CIs {
+		if ci.Team != "" {
+			use[ci.Team]++
+		}
+	}
+	for _, it := range d.Integrations {
+		if it.Team != "" {
+			use[it.Team]++
+		}
+	}
+	for _, r := range d.Rules {
+		if r.Team != "" {
+			use[r.Team]++
+		}
+	}
+	for _, c := range d.Connectors {
+		if c.Team != "" {
+			use[c.Team]++
+		}
+	}
+	return use
+}
+
+func without(list []string, v string) []string {
+	out := list[:0]
+	for _, x := range list {
+		if x != v {
+			out = append(out, x)
+		}
+	}
+	return out
 }

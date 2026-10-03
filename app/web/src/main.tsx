@@ -10,7 +10,11 @@ import { ConnectorEditorPage } from './pages/ConnectorEditor'
 import { ConnectorsPage } from './pages/Connectors'
 import { HeatmapPage } from './pages/Heatmap'
 import { IncidentsPage } from './pages/Incidents'
-import { AuditPage, EventsPage, MaintenancePage, ParseErrorsPage, RulesPage, SelfCheckPage } from './pages/Misc'
+import { AuditPage, EventsPage, MaintenancePage, ParseErrorsPage, SelfCheckPage } from './pages/Misc'
+import { CisPage } from './pages/Cis'
+import { IntegrationsPage } from './pages/Integrations'
+import { RulesPage } from './pages/Rules'
+import { TeamsPage } from './pages/Teams'
 import { OpsPage } from './pages/Ops'
 import { SettingsPage } from './pages/Settings'
 import { applyTheme, BUILT_IN_THEMES, loadActiveTheme, loadCustomThemes } from './theme'
@@ -51,6 +55,8 @@ createRoot(document.getElementById('root')!).render(
             {page('/incidents', <IncidentsPage />)}
             {page('/cmdb', <CmdbPage />)}
             {page('/heatmap', <HeatmapPage />)}
+            {page('/cis', <CisPage />)}
+            {page('/integrations', <IntegrationsPage />)}
             {page('/connectors', <ConnectorsPage />)}
             {page('/connectors/:id', <ConnectorEditorPage />)}
             {page('/events', <EventsPage />)}
@@ -60,6 +66,7 @@ createRoot(document.getElementById('root')!).render(
             {page('/selfcheck', <SelfCheckPage />)}
             {page('/audit', <AuditPage />)}
             {page('/notifications', <NotificationsPage />)}
+            {page('/teams', <TeamsPage />)}
             {page('/users', <UsersPage />)}
             {page('/roles', <RolesPage />)}
             <Route path="/settings" element={<SettingsPage />} />

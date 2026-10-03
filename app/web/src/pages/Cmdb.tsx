@@ -4,6 +4,7 @@ import { api, ciTypeLabel, fmtTime, qs, type CI, type Relation } from '../api'
 import { useApp, useFetch, useLive } from '../context'
 import { t } from '../i18n'
 import { CiDrawer } from '../components/CiDrawer'
+import { originLabel } from './Cis'
 import { CiIcon, CmdbGraph } from '../components/CmdbGraph'
 import { IncidentDrawer } from '../components/IncidentDrawer'
 import { Empty, Field, Modal, PageHeader, SevBadge, SideList } from '../components/ui'
@@ -121,7 +122,7 @@ export function CmdbPage() {
                         <td className="num">
                           ↑{c.parents} ↓{c.children}
                         </td>
-                        <td>{c.origin === 'discovery' ? t('cmdb.table.discovery') : t('cmdb.table.manual')}</td>
+                        <td>{originLabel(c.origin)}</td>
                         <td className="nowrap">{fmtTime(c.created_at)}</td>
                       </tr>
                     ))}
@@ -132,7 +133,7 @@ export function CmdbPage() {
           </>
         ) : (
           <div className="card card-flush graph-card graph-card-tall">
-            {graph.data && <CmdbGraph nodes={graph.data.nodes} edges={graph.data.edges} onSelect={setOpenCi} />}
+            {graph.data && <CmdbGraph nodes={graph.data.nodes} edges={graph.data.edges} selected={openCi ?? undefined} onSelect={setOpenCi} />}
           </div>
         )}
       </div>

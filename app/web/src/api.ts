@@ -41,6 +41,10 @@ export interface Incident {
   fallback: boolean
   related_id?: string
   timeline?: TimelineEntry[]
+  pd_route?: string
+  pd_incident_id?: string
+  pd_incident_url?: string
+  pd_retry?: string
 }
 
 export interface EventItem {
@@ -79,14 +83,26 @@ export interface CI {
   logical_group?: string
   labels?: Record<string, string>
   identities: Identity[]
+  owners?: Owner[]
   origin: string
+  source?: string
+  external_url?: string
   created_at: string
+  updated_at?: string
   status: Severity | ''
   own_status: Severity | ''
   open_alerts: number
   maintenance: boolean
   children: number
   parents: number
+}
+
+export interface Owner {
+  name: string
+  email?: string
+  phone?: string
+  role?: string
+  from?: string
 }
 
 export interface Relation {
@@ -202,26 +218,253 @@ export interface Maintenance {
   created_at: string
 }
 
+export interface RuleSeries {
+  ci: string
+  labels: Record<string, string>
+  value: number
+  since: string
+  firing: boolean
+  fired_at?: string
+  last_seen: string
+}
+
 export interface Rule {
   id: string
+  name: string
+  description?: string
   method: Method
   signal: string
-  name: string
-  condition: string
-  applies_to: string
+  source_id: string
+  query: string
+  ci_label: string
+  service_label?: string
+  op: string
+  threshold: number
+  for: string
+  interval: string
   severity: Severity
+  title: string
+  team?: string
   enabled: boolean
+  created_at?: string
+  updated_at?: string
+  updated_by?: string
+  last_eval_at?: string
+  last_error?: string
+  series?: number
+  pending?: number
+  firing?: number
+  state?: Record<string, RuleSeries>
+}
+
+export interface IntegrationField {
+  key: string
+  label: string
+  type: 'text' | 'textarea' | 'select'
+  options?: string[]
+  default?: string
+  placeholder?: string
+  help?: string
+  required?: boolean
+}
+
+export interface IntegrationType {
+  id: string
+  title: string
+  description: string
+  mode: 'push' | 'pull' | 'metrics' | 'inventory'
+  url_label: string
+  url_placeholder: string
+  url_required: boolean
+  auth: string[]
+  secret_label: string
+  params: IntegrationField[] | null
+  setup: boolean
+  setup_help?: string
+}
+
+export interface Integration {
+  id: string
+  name: string
+  type: string
+  team: string
+  url: string
+  auth_type: string
+  username?: string
+  secret_ref?: string
+  webhook_token_ref?: string
+  tls_skip_verify: boolean
+  params: Record<string, string>
+  connector_id: string
+  last_check_at?: string
+  last_check_ok: boolean
+  last_check?: string
+  setup_at?: string
+  setup_info?: string
+  synced_at?: string
+  sync_ok: boolean
+  sync_info?: string
+  created_at: string
+  updated_at: string
+  updated_by: string
+  mode: IntegrationType['mode']
+  type_title: string
+  slug?: string
+  connector_status?: string
+  connector_version?: number
+  connector_edited: boolean
+  events_total: number
+  errors_total: number
+  last_event_at?: string
+  ingest_url?: string
+  token_header?: string
+  snippet?: string
+  setup_help?: string
+  can_setup: boolean
+  can_sync: boolean
+  secret_set: boolean
+}
+
+export interface CheckResult {
+  ok: boolean
+  message: string
+  at?: string
+}
+
+export interface PDRoute {
+  id: string
+  name: string
+  team?: string
+  service?: string
+  routing_key_ref: string
+  service_id?: string
+  service_name?: string
+}
+
+export interface PDSettings {
+  enabled: boolean
+  region: 'us' | 'eu'
+  events_url?: string
+  api_url?: string
+  routing_key_ref?: string
+  service_id?: string
+  service_name?: string
+  api_token_ref?: string
+  webhook_secret_ref?: string
+  webhook_subscription_id?: string
+  min_severity: Severity
+  escalation_policies: string[]
+  routes: PDRoute[]
+  updated_at?: string
+  updated_by?: string
+}
+
+export interface PDStatus {
+  enabled: boolean
+  configured: boolean
+  region: string
+  api_token: boolean
+  webhook_secret: boolean
+  routes: number
+  breaker_open: boolean
+  consecutive_failures: number
+  sent: number
+  failed: number
+  queue: number
+  last_success_at?: string
+  last_error?: string
+  last_error_at?: string
+  last_webhook_at?: string
+  oncall_synced_at?: string
+  oncall_error?: string
+}
+
+export interface OnCallEntry {
+  policy_id: string
+  policy_name: string
+  level: number
+  user_name: string
+  email?: string
+  schedule?: string
+  start?: string
+  end?: string
+}
+
+export interface PDView {
+  settings: PDSettings
+  status: PDStatus
+  oncall: { entries: OnCallEntry[]; synced_at?: string; error?: string }
+  webhook_url: string
+  events_url: string
+  api_url: string
+  openbao: boolean
+}
+
+export interface OpenBaoStatus {
+  configured: boolean
+  addr?: string
+  mount?: string
+  auth?: string
+  reachable: boolean
+  initialized: boolean
+  sealed: boolean
+  version?: string
+  cluster_name?: string
+  token_ok: boolean
+  token_expires?: string
+  policies?: string[]
+  mount_ok: boolean
+  error?: string
+  last_error?: string
+  last_error_at?: string
 }
 
 export interface Team {
   id: string
   name: string
+  description?: string
+  email?: string
+  chat?: string
+  members?: string[]
+  leads?: string[]
+  updated_at?: string
+  updated_by?: string
+}
+
+export interface TeamView extends Team {
+  managed: boolean
+  cis: number
+  open_alerts: number
+  connectors: number
+  rules: number
+}
+
+export interface StorageView {
+  kind: 'file' | 'postgres'
+  where: string
+  enabled: boolean
+  data_dir?: string
+  postgres?: { host: string; port: number; database: string; user: string; sslmode: string }
+  password_set?: boolean
+}
+
+export interface SetupStatus {
+  required: boolean
+  admin_exists: boolean
+  token_required: boolean
+  openbao: boolean
+  themes: string[]
+  locales: string[]
+  defaults: { theme: string; locale: string }
+  storage?: StorageView
+  version: string
 }
 
 export interface Meta {
   teams: Team[]
   grafana: boolean
-  pd_mode: string
+  pagerduty: boolean
+  openbao: boolean
   version: string
 }
 
@@ -244,9 +487,10 @@ export type Perm =
   | 'events.view'
   | 'maintenance.edit'
   | 'rules.view'
+  | 'rules.edit'
   | 'notify.edit'
+  | 'integrations.edit'
   | 'selfcheck.view'
-  | 'selfcheck.admin'
   | 'audit.view'
   | 'users.admin'
 
@@ -310,8 +554,6 @@ export interface Channel {
   services?: string[]
   url_ref?: string
   token_ref?: string
-  url_set: boolean
-  token_set: boolean
   url_hint?: string
   sent: number
   failed: number
@@ -355,8 +597,8 @@ export class ApiError extends Error {
 // must be changed; the app then shows the sign-in screen.
 export const AUTH_EVENT = 'umb:auth'
 
-async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+async function request<T>(method: string, url: string, body?: unknown, extra?: Record<string, string>): Promise<T> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...extra }
   if (method !== 'GET' && csrf) headers['X-Umbrella-CSRF'] = csrf
   const res = await fetch(url, {
     method,
@@ -377,6 +619,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 export const api = {
   get: <T,>(url: string) => request<T>('GET', url),
   post: <T,>(url: string, body?: unknown) => request<T>('POST', url, body ?? {}),
+  postWith: <T,>(url: string, body: unknown, headers: Record<string, string>) => request<T>('POST', url, body, headers),
   put: <T,>(url: string, body: unknown) => request<T>('PUT', url, body),
   del: (url: string) => request<void>('DELETE', url),
 }

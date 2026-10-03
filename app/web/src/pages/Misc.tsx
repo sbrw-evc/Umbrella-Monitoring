@@ -1,6 +1,6 @@
 import { Pause, Play, Plus, Search, Trash2 } from 'lucide-react'
 import { Fragment, type ReactNode, useState } from 'react'
-import { api, fmtTime, methodLabel, qs, type CI, type EventItem, type Maintenance, type ParseError, type Rule } from '../api'
+import { api, fmtTime, methodLabel, qs, type CI, type EventItem, type Maintenance, type OpenBaoStatus, type ParseError, type PDStatus } from '../api'
 import { useApp, useFetch, useLive } from '../context'
 import { maintStateLabel } from '../components/CiDrawer'
 import { t } from '../i18n'
@@ -123,49 +123,6 @@ export function ParseErrorsPage() {
               </tbody>
             </table>
           )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-export function RulesPage() {
-  const { data } = useFetch<{ items: Rule[] }>('/api/rules')
-  return (
-    <div className="page">
-      <div className="page-main">
-        <PageHeader title={t('rules.header.title')} sub={t('rules.header.sub')} />
-        <div className="card card-flush">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t('rules.table.method')}</th>
-                <th>{t('rules.table.signal')}</th>
-                <th>{t('rules.table.rule')}</th>
-                <th>{t('rules.table.condition')}</th>
-                <th>{t('rules.table.appliesTo')}</th>
-                <th>{t('rules.table.severity')}</th>
-                <th>{t('rules.table.enabled')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.items ?? []).map((r) => (
-                <tr key={r.id}>
-                  <td>
-                    <span className={`tag tag-${r.method}`}>{methodLabel(r.method)}</span>
-                  </td>
-                  <td className="mono">{r.signal}</td>
-                  <td>{r.name}</td>
-                  <td className="mono">{r.condition}</td>
-                  <td>{r.applies_to}</td>
-                  <td>
-                    <SevBadge sev={r.severity} />
-                  </td>
-                  <td>{r.enabled ? t('common.words.yes') : t('common.words.no')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </div>
     </div>
@@ -299,6 +256,7 @@ export function MaintenancePage() {
 
 interface SelfCheck {
   uptime_s: number
+  version: string
   events: number
   alerts: number
   active_alerts: number
@@ -306,32 +264,18 @@ interface SelfCheck {
   connectors: number
   connectors_running: number
   last_event_at?: string
-  store: string
-  bus: string
-  pagerduty: {
-    mode: string
-    breaker_open: boolean
-    simulated_outage: boolean
-    consecutive_failures: number
-    sent: number
-    failed: number
-    queue: number
-    last_success_at?: string
-    last_error?: string
-  }
+  pagerduty: PDStatus
+  pagerduty_outbox: number
+  openbao: OpenBaoStatus
+  persistence: { enabled: boolean; dir?: string; pending: boolean; error?: string }
 }
 
 export function SelfCheckPage() {
-  const { toast, can } = useApp()
   const { data, reload } = useFetch<SelfCheck>('/api/selfcheck')
   useLive(['alert', 'event'], reload, 2000)
   if (!data) return <Empty>{t('common.words.loading')}</Empty>
   const pd = data.pagerduty
-  const outage = async (on: boolean) => {
-    await api.post('/api/selfcheck/pd-outage', { on })
-    toast(on ? t('selfcheck.toasts.outageOn') : t('selfcheck.toasts.outageOff'))
-    reload()
-  }
+  const ob = data.openbao
   const tile = (title: string, value: ReactNode, sub?: string, cls = '') => (
     <div className={`stat ${cls}`}>
       <div className="stat-title">{title}</div>
@@ -339,12 +283,13 @@ export function SelfCheckPage() {
       {sub && <div className="stat-sub">{sub}</div>}
     </div>
   )
+  const obOK = ob.configured && ob.token_ok && ob.mount_ok && !ob.sealed
   return (
     <div className="page">
       <div className="page-main">
-        <PageHeader title={t('selfcheck.header.title')} sub={t('selfcheck.header.sub')} />
+        <PageHeader title={t('selfcheck.header.title')} sub={t('selfcheck.header.sub', { version: data.version })} />
         <div className="stats">
-          {tile(t('selfcheck.tiles.uptime'), t('selfcheck.tiles.uptimeValue', { m: Math.floor(data.uptime_s / 60) }), t('selfcheck.tiles.uptimeSub', { store: data.store, bus: data.bus }))}
+          {tile(t('selfcheck.tiles.uptime'), t('selfcheck.tiles.uptimeValue', { m: Math.floor(data.uptime_s / 60) }))}
           {tile(t('selfcheck.tiles.connectors'), `${data.connectors_running} / ${data.connectors}`, t('selfcheck.tiles.connectorsSub'))}
           {tile(t('selfcheck.tiles.events'), data.events, t('selfcheck.tiles.eventsSub', { time: fmtTime(data.last_event_at) }))}
           {tile(t('selfcheck.tiles.parseErrors'), data.parse_errors, undefined, data.parse_errors ? 'stat-warn' : '')}
@@ -353,24 +298,28 @@ export function SelfCheckPage() {
         <div className="card">
           <h3>PagerDuty Gateway</h3>
           <div className="stats">
-            {tile(t('selfcheck.pd.mode'), pd.mode === 'live' ? 'Events API v2' : 'dry-run', pd.mode === 'live' ? t('selfcheck.pd.modeLive') : t('selfcheck.pd.modeDry'))}
+            {tile(t('selfcheck.pd.mode'), pd.enabled ? t('selfcheck.pd.on') : t('selfcheck.pd.off'), pd.enabled ? t('selfcheck.pd.onSub', { region: pd.region.toUpperCase(), routes: pd.routes }) : t('selfcheck.pd.offSub'), pd.enabled ? '' : 'stat-warn')}
             {tile(t('selfcheck.pd.breaker'), pd.breaker_open ? t('selfcheck.pd.breakerOpen') : t('selfcheck.pd.breakerClosed'), t('selfcheck.pd.breakerSub', { n: pd.consecutive_failures }), pd.breaker_open ? 'stat-bad' : '')}
             {tile(t('selfcheck.pd.sent'), pd.sent, t('selfcheck.pd.sentSub', { failed: pd.failed, queue: pd.queue }))}
+            {tile(t('selfcheck.pd.outbox'), data.pagerduty_outbox, t('selfcheck.pd.outboxSub'), data.pagerduty_outbox ? 'stat-warn' : '')}
             {tile(t('selfcheck.pd.lastSuccess'), fmtTime(pd.last_success_at), pd.last_error ? t('selfcheck.pd.lastError', { error: pd.last_error }) : undefined)}
+            {tile(t('selfcheck.pd.webhook'), fmtTime(pd.last_webhook_at), pd.webhook_secret ? t('selfcheck.pd.webhookOn') : t('selfcheck.pd.webhookOff'))}
           </div>
-          <div className="outage">
-            <div>
-              <b>{t('selfcheck.outage.title')}</b> {t('selfcheck.outage.text')}
-            </div>
-            {!can('selfcheck.admin') ? null : pd.simulated_outage ? (
-              <button className="btn btn-primary" onClick={() => outage(false)}>
-                {t('selfcheck.outage.restore')}
-              </button>
-            ) : (
-              <button className="btn btn-danger" onClick={() => outage(true)}>
-                {t('selfcheck.outage.simulate')}
-              </button>
-            )}
+        </div>
+        <div className="card">
+          <h3>OpenBao</h3>
+          <div className="stats">
+            {tile(t('selfcheck.openbao.state'), obOK ? t('selfcheck.openbao.ok') : ob.configured ? (ob.sealed ? t('selfcheck.openbao.sealed') : t('selfcheck.openbao.fail')) : t('selfcheck.openbao.off'), ob.error ?? ob.addr, obOK ? '' : 'stat-bad')}
+            {tile(t('selfcheck.openbao.version'), ob.version ?? '—', ob.cluster_name)}
+            {tile(t('selfcheck.openbao.auth'), ob.auth ?? '—', ob.token_expires ? t('selfcheck.openbao.tokenUntil', { time: fmtTime(ob.token_expires) }) : undefined)}
+            {tile(t('selfcheck.openbao.mount'), ob.mount ?? '—', ob.mount_ok ? t('selfcheck.openbao.mountOk') : undefined)}
+          </div>
+        </div>
+        <div className="card">
+          <h3>{t('selfcheck.store.title')}</h3>
+          <div className="stats">
+            {tile(t('selfcheck.store.mode'), data.persistence.enabled ? t('selfcheck.store.disk') : t('selfcheck.store.memory'), data.persistence.dir, data.persistence.enabled ? '' : 'stat-warn')}
+            {tile(t('selfcheck.store.state'), data.persistence.error ? t('selfcheck.store.error') : data.persistence.pending ? t('selfcheck.store.pending') : t('selfcheck.store.saved'), data.persistence.error, data.persistence.error ? 'stat-bad' : '')}
           </div>
         </div>
       </div>

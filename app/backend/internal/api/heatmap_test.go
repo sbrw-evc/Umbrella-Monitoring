@@ -4,28 +4,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/demo"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
 func TestHeatmapBuckets(t *testing.T) {
 	st := store.New()
-	demo.Seed(st)
+	seedFixture(st)
 	now := time.Date(2026, 10, 2, 12, 0, 30, 0, time.UTC)
 	resolved := now.Add(-4 * time.Hour)
 	var hm Heatmap
 	st.Write(func(d *store.Data) {
 		d.Alerts = map[string]*model.Alert{
-			// active for the last 90 minutes: the last two hourly buckets
+
 			"A1": {ID: "A1", CIID: "CI-6", CIName: "pay-app-01", Severity: model.SevCritical, Status: model.AlertOpen, FirstSeen: now.Add(-90 * time.Minute)},
-			// 5 h ago for one hour, resolved
+
 			"A2": {ID: "A2", CIID: "CI-6", CIName: "pay-app-01", Severity: model.SevWarning, Status: model.AlertResolved, FirstSeen: now.Add(-5 * time.Hour), ResolvedAt: &resolved},
-			// outside the window
+
 			"A3": {ID: "A3", CIID: "CI-6", CIName: "pay-app-01", Severity: model.SevError, Status: model.AlertResolved, FirstSeen: now.Add(-50 * time.Hour), ResolvedAt: ptr(now.Add(-49 * time.Hour))},
-			// no CMDB record
+
 			"A4": {ID: "A4", CIName: "unknown-host", Severity: model.SevError, Status: model.AlertOpen, FirstSeen: now.Add(-10 * time.Minute)},
-			// suppressed by maintenance: not shown
+
 			"A5": {ID: "A5", CIID: "CI-7", CIName: "pay-app-02", Severity: model.SevCritical, Status: model.AlertOpen, FirstSeen: now.Add(-10 * time.Minute), Suppressed: true},
 		}
 		hm = buildHeatmap(d, now, 24, "service", "", nil, true, nil)

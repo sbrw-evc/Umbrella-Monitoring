@@ -375,7 +375,7 @@ spec:
       showPercentChange: false
   - id: 6
     type: stat
-    title: Учения PagerDuty
+    title: 'PagerDuty: circuit breaker'
     gridPos:
       x: 21
       y: 1
@@ -385,11 +385,11 @@ spec:
     targets:
     - refId: A
       datasource: *id001
-      expr: sum(umbrella_pagerduty_simulated_outage) or vector(0)
-      legendFormat: Учения PagerDuty
+      expr: max(umbrella_pagerduty_breaker_open) or vector(0)
+      legendFormat: circuit breaker
       range: true
       instant: false
-    description: 1, пока включена имитация отказа PagerDuty
+    description: 1, пока circuit breaker PagerDuty Gateway открыт после серии ошибок доставки
     fieldConfig:
       defaults:
         unit: none
@@ -409,10 +409,10 @@ spec:
         - type: value
           options:
             '0':
-              text: нет
+              text: закрыт
               index: 0
             '1':
-              text: идут
+              text: открыт
               index: 1
       overrides: []
     options:

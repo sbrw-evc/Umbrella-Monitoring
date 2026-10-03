@@ -94,11 +94,56 @@ func TestMaintenanceSuppresses(t *testing.T) {
 func TestFallbackAfterTimeout(t *testing.T) {
 	e, _, _, now := setup()
 	evs := e.Ingest(Source{ID: "A", Name: "A"}, []pipeline.Draft{draft("host1", "cpu", model.SevError, model.EventFiring, "1")})
-	e.PDResult(evs[0].AlertID, PDTrigger, errTest)
+	e.PDResult(evs[0].AlertID, PDTrigger, "", errTest)
 	*now = now.Add(3 * time.Minute)
 	e.Tick()
 	if a, _ := e.Get(evs[0].AlertID); !a.Fallback || a.PDState != model.PDFailed {
 		t.Errorf("fallback=%v pd=%s", a.Fallback, a.PDState)
+	}
+}
+
+func TestRetryAndCatchUpAfterOutage(t *testing.T) {
+	e, pd, _, now := setup()
+	id := e.Ingest(Source{ID: "A", Name: "A"}, []pipeline.Draft{draft("host1", "cpu", model.SevError, model.EventFiring, "1")})[0].AlertID
+	e.PDResult(id, PDTrigger, "", errTest)
+	if _, err := e.Act(id, "ack", "duty", ""); err != nil {
+		t.Fatal(err)
+	}
+	e.PDResult(id, PDAcknowledge, "", errTest)
+	sent := len(pd.cmds)
+	e.Tick()
+	if len(pd.cmds) != sent {
+		t.Fatalf("retried before RetryEvery: %d", len(pd.cmds)-sent)
+	}
+	*now = now.Add(61 * time.Second)
+	e.Tick()
+	if len(pd.cmds) != sent+1 || pd.cmds[len(pd.cmds)-1].Action != PDTrigger {
+		t.Fatalf("trigger not retried: %+v", pd.cmds[sent:])
+	}
+	e.PDResult(id, PDTrigger, "default", nil)
+	if last := pd.cmds[len(pd.cmds)-1]; last.Action != PDAcknowledge {
+		t.Fatalf("acknowledge not caught up, last = %s", last.Action)
+	}
+	e.PDResult(id, PDAcknowledge, "default", nil)
+	if a, _ := e.Get(id); a.PDState != model.PDAcked || a.PDRetry != "" || a.PDRoute != "default" {
+		t.Fatalf("state = %s retry = %q route = %q", a.PDState, a.PDRetry, a.PDRoute)
+	}
+	*now = now.Add(time.Hour)
+	before := len(pd.cmds)
+	e.Tick()
+	if len(pd.cmds) != before {
+		t.Fatal("delivered alert re-sent")
+	}
+}
+
+func TestBelowThresholdIsSkipped(t *testing.T) {
+	e, _, _, now := setup()
+	id := e.Ingest(Source{ID: "A", Name: "A"}, []pipeline.Draft{draft("host1", "cpu", model.SevError, model.EventFiring, "1")})[0].AlertID
+	e.PDResult(id, PDTrigger, "", ErrPDSkipped)
+	*now = now.Add(time.Hour)
+	e.Tick()
+	if a, _ := e.Get(id); a.PDState != model.PDSkipped || a.Fallback {
+		t.Fatalf("state = %s fallback = %v", a.PDState, a.Fallback)
 	}
 }
 

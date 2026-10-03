@@ -59,6 +59,14 @@ export function loadActiveLocale(): string {
   return 'ru'
 }
 
+export function hasSavedLocale(): boolean {
+  try {
+    return !!localStorage.getItem(ACTIVE_KEY)
+  } catch {
+    return false
+  }
+}
+
 export function saveActiveLocale(id: string) {
   try {
     localStorage.setItem(ACTIVE_KEY, id)

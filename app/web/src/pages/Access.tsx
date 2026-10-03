@@ -885,7 +885,7 @@ function ChannelModal({ channel, events, services, onClose, onDone }: { channel:
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           placeholder={
-            channel?.url_set
+            channel?.url_ref
               ? t('notifications.form.urlKeep', {
                   host: channel.url_hint ?? '',
                 })
@@ -896,15 +896,15 @@ function ChannelModal({ channel, events, services, onClose, onDone }: { channel:
         />
       </Field>
       <Field label={t('notifications.form.urlRef')} help={t('notifications.form.urlRefHelp')}>
-        <input value={urlRef} onChange={(e) => setUrlRef(e.target.value)} placeholder="openbao://notify/teams-ops#url" className="mono" />
+        <input value={urlRef} onChange={(e) => setUrlRef(e.target.value)} placeholder="openbao://umbrella/notify/teams-ops#url" className="mono" />
       </Field>
       {type === 'zoom' && (
         <div className="row2">
           <Field label={t('notifications.form.token')}>
-            <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={channel?.token_set ? t('notifications.form.tokenKeep') : ''} autoComplete="off" />
+            <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={channel?.token_ref ? t('notifications.form.tokenKeep') : ''} autoComplete="off" />
           </Field>
           <Field label={t('notifications.form.tokenRef')}>
-            <input value={tokenRef} onChange={(e) => setTokenRef(e.target.value)} placeholder="openbao://notify/zoom#token" className="mono" />
+            <input value={tokenRef} onChange={(e) => setTokenRef(e.target.value)} placeholder="openbao://umbrella/notify/zoom#token" className="mono" />
           </Field>
         </div>
       )}

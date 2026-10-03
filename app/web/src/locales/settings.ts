@@ -79,6 +79,19 @@ export const ru = {
     strings: { one: '{n} строка', few: '{n} строки', many: '{n} строк', other: '{n} строки' },
     code: 'Код',
   },
+  defaults: {
+    title: 'Для всех пользователей',
+    intro: 'Тема и язык, которые видят пользователи, пока не выбрали свои.',
+    theme: 'Тема по умолчанию',
+    locale: 'Язык по умолчанию',
+    saved: 'Умолчания сохранены',
+  },
+  storage: {
+    title: 'Хранилище данных',
+    intro: 'Где Umbrella хранит своё состояние. При переключении данные переносятся в новое хранилище или загружаются из него.',
+    apply: 'Переключить хранилище',
+    saved: 'Хранилище переключено, данные перенесены',
+  },
 }
 
 export const en: typeof ru = {
@@ -160,5 +173,18 @@ export const en: typeof ru = {
     structureHint: 'Strings are grouped by page and element. Keep keys and {placeholders} as they are. Plural forms use the categories one, few, many, other. Untranslated strings are shown in English.',
     strings: { one: '{n} string', few: '{n} strings', many: '{n} strings', other: '{n} strings' },
     code: 'Code',
+  },
+  defaults: {
+    title: 'For all users',
+    intro: 'Theme and language users see until they choose their own.',
+    theme: 'Default theme',
+    locale: 'Default language',
+    saved: 'Defaults saved',
+  },
+  storage: {
+    title: 'Data storage',
+    intro: 'Where Umbrella keeps its state. Switching moves the data into the new storage or loads it from there.',
+    apply: 'Switch storage',
+    saved: 'Storage switched, data moved',
   },
 }

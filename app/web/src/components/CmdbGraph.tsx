@@ -1,7 +1,7 @@
-import { Background, Controls, Handle, MarkerType, Position, ReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react'
+import { Background, Controls, Handle, MarkerType, Position, ReactFlow, useNodesInitialized, useReactFlow, type Edge, type Node, type NodeProps } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Box, Building2, Cloud, Database, Layers, Router, Server } from 'lucide-react'
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { ciTypeLabel, type CI, type Relation } from '../api'
 
 export function CiIcon({ type, size = 16 }: { type: string; size?: number }) {
@@ -49,9 +49,23 @@ function CiNode({ data }: NodeProps<Node<CiNodeData>>) {
 
 const nodeTypes = { ci: CiNode }
 
-// CmdbGraph draws the resource-service model top-down: business services,
-// IT services, resources, network. Node color is the worst open alert on
-// the CI or below it.
+function FocusNode({ id }: { id?: string }) {
+  const { getNode, setCenter, getZoom, fitView } = useReactFlow()
+  const ready = useNodesInitialized()
+  useEffect(() => {
+    if (!ready) return
+    const n = id ? getNode(id) : undefined
+    if (!n) {
+      void fitView({ padding: 0.08, maxZoom: 1.1, duration: 300 })
+      return
+    }
+    const w = n.measured?.width ?? 190
+    const h = n.measured?.height ?? 56
+    void setCenter(n.position.x + w / 2, n.position.y + h / 2, { zoom: Math.max(getZoom(), 0.9), duration: 450 })
+  }, [id, ready, getNode, setCenter, getZoom, fitView])
+  return null
+}
+
 export function CmdbGraph({
   nodes,
   edges,
@@ -64,7 +78,6 @@ export function CmdbGraph({
   onSelect?: (id: string) => void
 }) {
   const flow = useMemo(() => {
-    // Level by type, then push a CI below every CI it depends on is above.
     const level = new Map<string, number>()
     for (const n of nodes) level.set(n.id, LEVEL[n.type] ?? 2)
     for (let i = 0; i < 4; i++) {
@@ -114,6 +127,7 @@ export function CmdbGraph({
         proOptions={{ hideAttribution: true }}
         minZoom={0.2}
       >
+        <FocusNode id={selected} />
         <Background gap={20} color="var(--graph-grid)" />
         <Controls showInteractive={false} />
       </ReactFlow>

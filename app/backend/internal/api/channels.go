@@ -10,12 +10,12 @@ import (
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
 var allNotifyEvents = []string{model.NotifyOpen, model.NotifyEscalate, model.NotifyAck, model.NotifyResolve, model.NotifyFallback}
 
-// GET /api/channels
 func (s *Server) listChannels(w http.ResponseWriter, _ *http.Request) {
 	out := []model.Channel{}
 	s.st.Read(func(d *store.Data) {
@@ -35,14 +35,43 @@ type channelBody struct {
 	MinSeverity *string   `json:"min_severity"`
 	Events      *[]string `json:"events"`
 	Services    *[]string `json:"services"`
-	URL         *string   `json:"url"` // write-only; "" keeps the stored one
+	URL         *string   `json:"url"`
 	URLRef      *string   `json:"url_ref"`
 	Token       *string   `json:"token"`
 	TokenRef    *string   `json:"token_ref"`
 	ClearToken  bool      `json:"clear_token"`
+	hint        *string
 }
 
-// apply validates and copies the body into c. Call inside a store write.
+func (s *Server) channelSecrets(r *http.Request, id string, b *channelBody) error {
+	path := "channels/" + id
+	if b.URL != nil && strings.TrimSpace(*b.URL) != "" {
+		u := strings.TrimSpace(*b.URL)
+		if err := notify.CheckURL(u, s.cfg.AllowHTTPWebhooks); err != nil {
+			return err
+		}
+		ref, err := s.vault.PutRef(r.Context(), path, "url", u)
+		if err != nil {
+			return err
+		}
+		host := notify.Host(u)
+		b.URLRef, b.hint = &ref, &host
+	}
+	if b.Token != nil && *b.Token != "" {
+		ref, err := s.vault.PutRef(r.Context(), path, "token", *b.Token)
+		if err != nil {
+			return err
+		}
+		b.TokenRef = &ref
+	}
+	if b.ClearToken {
+		empty := ""
+		b.TokenRef = &empty
+		_ = s.vault.Put(r.Context(), path, map[string]string{"token": ""})
+	}
+	return nil
+}
+
 func (s *Server) applyChannel(d *store.Data, c *model.Channel, b *channelBody) error {
 	if b.Name != nil {
 		c.Name = strings.TrimSpace(*b.Name)
@@ -65,20 +94,13 @@ func (s *Server) applyChannel(d *store.Data, c *model.Channel, b *channelBody) e
 	if b.Services != nil {
 		c.Services = dedupe(*b.Services)
 	}
-	if b.URL != nil && strings.TrimSpace(*b.URL) != "" {
-		if err := notify.CheckURL(*b.URL, s.cfg.AllowHTTPWebhooks); err != nil {
-			return err
-		}
-		c.URL = strings.TrimSpace(*b.URL)
-	}
 	if b.URLRef != nil {
 		c.URLRef = strings.TrimSpace(*b.URLRef)
-	}
-	if b.Token != nil && *b.Token != "" {
-		c.Token = *b.Token
-	}
-	if b.ClearToken {
-		c.Token = ""
+		if b.hint != nil {
+			c.URLHint = *b.hint
+		} else {
+			c.URLHint = c.URLRef
+		}
 	}
 	if b.TokenRef != nil {
 		c.TokenRef = strings.TrimSpace(*b.TokenRef)
@@ -110,53 +132,65 @@ func (s *Server) applyChannel(d *store.Data, c *model.Channel, b *channelBody) e
 		}
 	}
 	for _, ref := range []string{c.URLRef, c.TokenRef} {
-		if ref != "" && !strings.Contains(ref, "://") {
-			return errors.New("ссылка на секрет имеет вид openbao://путь")
+		if ref != "" {
+			if _, _, _, err := secrets.ParseRef(ref); err != nil {
+				return err
+			}
 		}
 	}
-	if c.URL == "" && c.URLRef == "" {
-		return errors.New("укажите адрес webhook или ссылку на секрет с ним")
-	}
-	c.URLSet, c.TokenSet = c.URL != "", c.Token != ""
-	c.URLHint = notify.Host(c.URL)
-	if c.URLHint == "" && c.URLRef != "" {
-		c.URLHint = c.URLRef
+	if c.URLRef == "" {
+		return errors.New("укажите адрес webhook: он будет сохранён в OpenBao")
 	}
 	return nil
 }
 
-// POST /api/channels
 func (s *Server) createChannel(w http.ResponseWriter, r *http.Request) {
 	var b channelBody
 	if err := readJSON(r, &b); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
+	var id string
+	s.st.Write(func(d *store.Data) { id = d.NextID("CH") })
+	if err := s.channelSecrets(r, id, &b); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
 	var c model.Channel
 	var err error
 	s.st.Write(func(d *store.Data) {
-		c = model.Channel{Mode: model.ChannelAlways, Enabled: true, MinSeverity: model.SevError,
+		c = model.Channel{ID: id, Mode: model.ChannelAlways, Enabled: true, MinSeverity: model.SevError,
 			Events: []string{model.NotifyOpen, model.NotifyEscalate, model.NotifyResolve}, Services: []string{}}
 		if err = s.applyChannel(d, &c, &b); err != nil {
 			return
 		}
-		c.ID = d.NextID("CH")
 		c.UpdatedAt, c.UpdatedBy = time.Now(), actor(r)
 		cc := c
 		d.Channels[c.ID] = &cc
 		d.AddAudit(store.AuditEntry{At: time.Now().Format(time.RFC3339), Actor: actor(r), Action: "channel.create", Object: c.ID})
 	})
 	if err != nil {
+		_ = s.vault.Delete(r.Context(), "channels/"+id)
 		writeErr(w, 400, err)
 		return
 	}
 	writeJSON(w, 201, c)
 }
 
-// PUT /api/channels/{id}
 func (s *Server) updateChannel(w http.ResponseWriter, r *http.Request) {
 	var b channelBody
 	if err := readJSON(r, &b); err != nil {
+		writeErr(w, 400, err)
+		return
+	}
+	id := r.PathValue("id")
+	exists := false
+	s.st.Read(func(d *store.Data) { exists = d.Channels[id] != nil })
+	if !exists {
+		writeErr(w, 404, errors.New("канал не найден"))
+		return
+	}
+	if err := s.channelSecrets(r, id, &b); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
@@ -164,7 +198,7 @@ func (s *Server) updateChannel(w http.ResponseWriter, r *http.Request) {
 	var err error
 	code := 400
 	s.st.Write(func(d *store.Data) {
-		c := d.Channels[r.PathValue("id")]
+		c := d.Channels[id]
 		if c == nil {
 			err, code = errors.New("канал не найден"), 404
 			return
@@ -185,16 +219,16 @@ func (s *Server) updateChannel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, out)
 }
 
-// DELETE /api/channels/{id}
 func (s *Server) deleteChannel(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
 	s.st.Write(func(d *store.Data) {
-		delete(d.Channels, r.PathValue("id"))
-		d.AddAudit(store.AuditEntry{At: time.Now().Format(time.RFC3339), Actor: actor(r), Action: "channel.delete", Object: r.PathValue("id")})
+		delete(d.Channels, id)
+		d.AddAudit(store.AuditEntry{At: time.Now().Format(time.RFC3339), Actor: actor(r), Action: "channel.delete", Object: id})
 	})
+	_ = s.vault.Delete(r.Context(), "channels/"+id)
 	w.WriteHeader(204)
 }
 
-// POST /api/channels/{id}/test sends a test message now.
 func (s *Server) testChannel(w http.ResponseWriter, r *http.Request) {
 	var ch *model.Channel
 	s.st.Read(func(d *store.Data) {
@@ -214,7 +248,6 @@ func (s *Server) testChannel(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, s.notify.Test(*ch, actor(r)))
 }
 
-// GET /api/deliveries?channel=
 func (s *Server) listDeliveries(w http.ResponseWriter, r *http.Request) {
 	ch := r.URL.Query().Get("channel")
 	out := []model.Delivery{}

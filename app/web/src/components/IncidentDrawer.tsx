@@ -9,7 +9,7 @@ interface Detail {
   incident: Incident
   events: EventItem[]
   related: Incident | null
-  grafana_url: string
+  grafana_url?: string
 }
 
 type Tab = 'main' | 'events' | 'timeline' | 'pd' | 'comments'
@@ -51,9 +51,16 @@ export function IncidentDrawer({ id, onClose, onOpen }: { id: string; onClose: (
       actions={
         inc && (
           <>
-            <a className="btn" href={data!.grafana_url} target="_blank" rel="noreferrer">
-              <ExternalLink size={14} /> {t('incidents.drawer.grafana')}
-            </a>
+            {data?.grafana_url && (
+              <a className="btn" href={data.grafana_url} target="_blank" rel="noreferrer">
+                <ExternalLink size={14} /> {t('incidents.drawer.grafana')}
+              </a>
+            )}
+            {inc.pd_incident_url && (
+              <a className="btn" href={inc.pd_incident_url} target="_blank" rel="noreferrer">
+                <ExternalLink size={14} /> PagerDuty
+              </a>
+            )}
             {canAct && inc.status === 'open' && (
               <button className="btn" onClick={() => act('ack')}>
                 <CheckCheck size={14} /> {t('incidents.drawer.ack')}
@@ -139,6 +146,9 @@ export function IncidentDrawer({ id, onClose, onOpen }: { id: string; onClose: (
             <div className="props">
               <Prop k={t('incidents.drawer.pdState')}><PDPill state={inc.pd_state} fallback={inc.fallback} /></Prop>
               <Prop k="dedup_key"><code>{inc.pd_dedup_key}</code></Prop>
+              {inc.pd_route && <Prop k={t('incidents.drawer.pdRoute')}>{inc.pd_route}</Prop>}
+              {inc.pd_incident_id && <Prop k={t('incidents.drawer.pdIncident')}>{inc.pd_incident_url ? <a className="link" href={inc.pd_incident_url} target="_blank" rel="noreferrer">{inc.pd_incident_id}</a> : inc.pd_incident_id}</Prop>}
+              {inc.pd_retry && <Prop k={t('incidents.drawer.pdRetry')}><code>{inc.pd_retry}</code></Prop>}
               {inc.pd_error && <Prop k={t('incidents.drawer.lastError')}><span className="text-danger">{inc.pd_error}</span></Prop>}
               <Prop k={t('incidents.drawer.fallback')}>{inc.fallback ? t('incidents.drawer.fallbackYes') : t('incidents.drawer.fallbackNo')}</Prop>
               <div className="section-title">{t('incidents.drawer.deliveries')}</div>

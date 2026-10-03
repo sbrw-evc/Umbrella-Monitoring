@@ -11,8 +11,6 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
-// metrics serves GET /metrics in the Prometheus text format: incident
-// counts for Grafana and the health of connectors and notifications.
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.MetricsToken != "" {
 		got, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -57,7 +55,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		}
 		m.help("umbrella_incidents_active", "Active incidents (open or acknowledged, not suppressed).", "gauge")
 		for _, sev := range []string{"critical", "error", "warning", "info"} {
-			// Zero series keep the panels stable when nothing is open.
+
 			if !sevSeen[sev] {
 				m.sample("umbrella_incidents_active", map[string]string{"severity": sev, "status": "open", "team": "", "service": ""}, 0)
 			}
@@ -125,15 +123,40 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		m.gauge("umbrella_users_enabled", "Enabled user accounts.", nil, float64(users))
+
+		m.help("umbrella_rule_firing", "Series firing per RED/USE rule.", "gauge")
+		for _, r := range d.Rules {
+			m.sample("umbrella_rule_firing", map[string]string{"rule": r.ID, "name": r.Name, "method": string(r.Method)}, float64(r.Firing))
+		}
+		m.help("umbrella_rule_errors", "1 when the last evaluation of a rule failed.", "gauge")
+		for _, r := range d.Rules {
+			m.sample("umbrella_rule_errors", map[string]string{"rule": r.ID, "name": r.Name}, b2f(r.LastError != ""))
+		}
+		m.help("umbrella_integration_ok", "1 when the last check or inventory sync of an integration succeeded.", "gauge")
+		for _, it := range d.Integrations {
+			ok := it.LastCheckOK
+			if it.SyncedAt != nil {
+				ok = it.SyncOK
+			}
+			m.sample("umbrella_integration_ok", map[string]string{"integration": it.ID, "name": it.Name, "type": it.Type}, b2f(ok))
+		}
 	})
 	st := s.pd.Status()
-	outage := 0.0
-	if st.Outage {
-		outage = 1
-	}
-	m.gauge("umbrella_pagerduty_simulated_outage", "1 while the PagerDuty outage drill is on.", nil, outage)
+	m.gauge("umbrella_pagerduty_enabled", "1 when the PagerDuty integration is enabled.", nil, b2f(st.Enabled))
+	m.gauge("umbrella_pagerduty_breaker_open", "1 while the PagerDuty circuit breaker is open.", nil, b2f(st.BreakerOpen))
+	m.gauge("umbrella_pagerduty_queue", "Commands waiting for the PagerDuty Gateway.", nil, float64(st.QueueLen))
+	m.help("umbrella_pagerduty_deliveries_total", "PagerDuty Events API deliveries since start.", "counter")
+	m.sample("umbrella_pagerduty_deliveries_total", map[string]string{"result": "ok"}, float64(st.Sent))
+	m.sample("umbrella_pagerduty_deliveries_total", map[string]string{"result": "failed"}, float64(st.Failed))
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
 	w.Write([]byte(b.String()))
+}
+
+func b2f(v bool) float64 {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 func sortedKeys(m map[string]int) []string {

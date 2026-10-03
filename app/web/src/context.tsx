@@ -1,8 +1,9 @@
 import { flushSync } from 'react-dom'
 import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { api, AUTH_EVENT, setCSRF, type Me, type Meta, type Perm } from './api'
+import { api, AUTH_EVENT, setCSRF, type Me, type Meta, type Perm, type SetupStatus } from './api'
 import {
   BUILT_IN_LOCALES,
+  hasSavedLocale,
   loadActiveLocale,
   loadCustomLocales,
   saveActiveLocale,
@@ -13,10 +14,10 @@ import {
   type T,
 } from './i18n'
 import { transition } from './motion'
+import { SetupWizard } from './pages/Setup'
 import { SignIn } from './pages/SignIn'
-import { applyTheme, BUILT_IN_THEMES, loadActiveTheme, loadCustomThemes, saveActiveTheme, saveCustomThemes, type Theme } from './theme'
+import { applyTheme, BUILT_IN_THEMES, hasSavedTheme, loadActiveTheme, loadCustomThemes, saveActiveTheme, saveCustomThemes, type Theme } from './theme'
 
-// Live updates from /api/ws. Pages subscribe to message types and refetch.
 type Listener = (type: string, data: unknown) => void
 
 interface AppState {
@@ -28,6 +29,9 @@ interface AppState {
   can: (p: Perm) => boolean
   signedIn: (m: Me) => void
   refreshMe: () => Promise<void>
+  setup: SetupStatus | null
+  reloadSetup: () => Promise<void>
+  reloadMeta: () => void
   logout: () => void
   connected: boolean
   subscribe: (l: Listener) => () => void
@@ -90,6 +94,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const locale = locales.find((x) => x.id === localeId) ?? BUILT_IN_LOCALES[0]
   setActiveLocale(locale)
 
+  const [setup, setSetup] = useState<SetupStatus | null | undefined>(undefined)
+  const reloadSetup = useCallback(
+    () =>
+      api
+        .get<SetupStatus>('/api/setup/status')
+        .then(setSetup)
+        .catch(() => setSetup(null)),
+    [],
+  )
+  useEffect(() => {
+    reloadSetup()
+    api
+      .get<{ theme: string; locale: string }>('/api/ui-defaults')
+      .then((d) => {
+        if (d.theme && !hasSavedTheme()) setThemeId(d.theme)
+        if (d.locale && !hasSavedLocale()) setLocaleId(d.locale)
+      })
+      .catch(() => undefined)
+  }, [reloadSetup])
+
   const applyMe = useCallback((m: Me | null) => {
     setCSRF(m?.csrf ?? '')
     setMe(m)
@@ -119,10 +143,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const can = useCallback((p: Perm) => perms.has(p), [perms])
   const ready = !!me && !me.user.must_change_password
 
-  useEffect(() => {
-    if (!ready) return
+  const reloadMeta = useCallback(() => {
     api.get<Meta>('/api/meta').then(setMeta).catch(() => setMeta(null))
-  }, [ready])
+  }, [])
+  useEffect(() => {
+    if (ready) reloadMeta()
+  }, [ready, reloadMeta])
 
   useEffect(() => {
     if (!ready) return
@@ -220,6 +246,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     can,
     signedIn: applyMe,
     refreshMe,
+    setup: setup ?? null,
+    reloadSetup,
+    reloadMeta,
     logout,
     connected,
     subscribe,
@@ -242,7 +271,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={value}>
       <Fragment key={`${locale.id}:${localeRev}`}>
-        {me === undefined ? <div className="boot" /> : ready ? children : <SignIn mustChange={!!me} />}
+        {me === undefined || setup === undefined ? (
+          <div className="boot" />
+        ) : setup?.required && !setup.admin_exists ? (
+          <SetupWizard />
+        ) : ready ? (
+          setup?.required && perms.has('users.admin') ? <SetupWizard /> : children
+        ) : (
+          <SignIn mustChange={!!me} />
+        )}
       </Fragment>
       <div className="toasts">
         {toasts.map((t) => (

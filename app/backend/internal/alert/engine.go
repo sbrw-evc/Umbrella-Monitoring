@@ -1,9 +1,7 @@
-// Package alert is the Alert Engine: final CI binding, dedup of identical
-// events across sources, the alert lifecycle, maintenance suppression,
-// RED/USE linking and the hand-off to PagerDuty and the fallback notifier.
 package alert
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,7 +12,6 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
-// PDAction is what the PagerDuty Gateway must do.
 type PDAction string
 
 const (
@@ -23,55 +20,43 @@ const (
 	PDResolve     PDAction = "resolve"
 )
 
-// PDCommand is queued for the PagerDuty Gateway (the outbox).
 type PDCommand struct {
 	Action PDAction
 	Alert  model.Alert
 }
 
-// Sender is implemented by the PagerDuty Gateway.
 type Sender interface {
 	Send(cmd PDCommand)
 }
 
-// Engine processes normalized events into alerts.
 type Engine struct {
 	st     *store.Store
 	pd     Sender
 	notify func(kind string, v any)
 	now    func() time.Time
 
-	// Window is how long a resolved alert can be reopened by the same key
-	// and how close RED and USE alerts must be to be linked.
 	Window time.Duration
-	// FallbackAfter: an error or critical alert not accepted by PagerDuty
-	// within this time from opening goes to the fallback channels.
+
 	FallbackAfter time.Duration
-	// AutoCMDB adds an unknown CI named by an event to the CMDB (origin
-	// "auto"): a host, linked under the IT service from the "service" label.
-	// It builds the map from monitoring data on a deployment without seed.
+	RetryEvery    time.Duration
+
 	AutoCMDB bool
 }
 
-// New creates the engine. notify may be nil.
 func New(st *store.Store, pd Sender, notify func(kind string, v any)) *Engine {
 	if notify == nil {
 		notify = func(string, any) {}
 	}
-	return &Engine{st: st, pd: pd, notify: notify, now: time.Now, Window: 10 * time.Minute, FallbackAfter: 2 * time.Minute}
+	return &Engine{st: st, pd: pd, notify: notify, now: time.Now, Window: 10 * time.Minute, FallbackAfter: 2 * time.Minute, RetryEvery: time.Minute}
 }
 
-// SetClock overrides time for tests.
 func (e *Engine) SetClock(now func() time.Time) { e.now = now }
 
-// Source identifies the connector that produced events.
 type Source struct {
 	ID   string
 	Name string
 }
 
-// Ingest writes normalized drafts as events and folds them into alerts.
-// It returns the stored events.
 func (e *Engine) Ingest(src Source, drafts []pipeline.Draft) []model.Event {
 	now := e.now()
 	var events []model.Event
@@ -97,8 +82,7 @@ func (e *Engine) Ingest(src Source, drafts []pipeline.Draft) []model.Event {
 				ReceivedAt:  now,
 			}
 			if dup := findInbox(d, src.ID, dr.ExternalID, dr.Status, now); dup {
-				// Same external_id and status already received: the source
-				// retried because our ack was lost. Drop it (inbox dedup).
+
 				continue
 			}
 			ci := ResolveCI(d, dr.CI, dr.Labels)
@@ -139,7 +123,6 @@ func (e *Engine) Ingest(src Source, drafts []pipeline.Draft) []model.Event {
 	return events
 }
 
-// findInbox reports whether the same event was already received recently.
 func findInbox(d *store.Data, connectorID, externalID string, status model.EventStatus, now time.Time) bool {
 	if externalID == "" {
 		return false
@@ -156,8 +139,6 @@ func findInbox(d *store.Data, connectorID, externalID string, status model.Event
 	return false
 }
 
-// ResolveCI finds the CI by stable tag, name or any identity (host, IP,
-// cloud instance id, including old ids kept as history).
 func ResolveCI(d *store.Data, name string, labels map[string]string) *model.CI {
 	if tag := labels["ci"]; tag != "" {
 		name = tag
@@ -188,8 +169,6 @@ func ResolveCI(d *store.Data, name string, labels map[string]string) *model.CI {
 	return nil
 }
 
-// autoCI creates the CI an event names, and its IT service from the
-// "service" label. Call inside Write.
 func autoCI(d *store.Data, dr pipeline.Draft, now time.Time) *model.CI {
 	name := strings.TrimSpace(dr.CI)
 	if tag := dr.Labels["ci"]; tag != "" {
@@ -224,7 +203,6 @@ func autoCI(d *store.Data, dr pipeline.Draft, now time.Time) *model.CI {
 	return ci
 }
 
-// ServiceOf returns the nearest IT service above the CI (or the CI itself).
 func ServiceOf(d *store.Data, ciID string) *model.CI {
 	seen := map[string]bool{}
 	queue := []string{ciID}
@@ -372,8 +350,6 @@ func serviceID(d *store.Data, a *model.Alert) string {
 	return ""
 }
 
-// link connects a RED alert of a service with a USE alert of its CI opened
-// within the window: the USE alert is the probable cause.
 func (e *Engine) link(d *store.Data, a *model.Alert, now time.Time) {
 	if a.Service == "" || (a.Method != model.MethodRED && a.Method != model.MethodUSE) {
 		return
@@ -411,13 +387,15 @@ func (e *Engine) pdCmd(a *model.Alert, action PDAction) *PDCommand {
 	if a.Suppressed {
 		return nil
 	}
+	t := e.now()
+	a.PDAttemptAt = &t
 	return &PDCommand{Action: action, Alert: cloneAlert(a)}
 }
 
-// ErrNotFound is returned for unknown alert ids.
+var ErrPDSkipped = errors.New("ниже порога важности PagerDuty")
+
 var ErrNotFound = fmt.Errorf("тревога не найдена")
 
-// Act applies a user action: ack, resolve or comment.
 func (e *Engine) Act(id, action, actor, text string) (model.Alert, error) {
 	now := e.now()
 	var out model.Alert
@@ -469,10 +447,10 @@ func (e *Engine) Act(id, action, actor, text string) (model.Alert, error) {
 	return out, nil
 }
 
-// PDResult is reported by the gateway after each delivery attempt.
-func (e *Engine) PDResult(alertID string, action PDAction, deliveryErr error) {
+func (e *Engine) PDResult(alertID string, action PDAction, route string, deliveryErr error) {
 	now := e.now()
 	var out model.Alert
+	var follow []PDCommand
 	ok := false
 	e.st.Write(func(d *store.Data) {
 		a := d.Alerts[alertID]
@@ -480,40 +458,78 @@ func (e *Engine) PDResult(alertID string, action PDAction, deliveryErr error) {
 			return
 		}
 		ok = true
-		if deliveryErr != nil {
+		if route != "" {
+			a.PDRoute = route
+		}
+		switch {
+		case errors.Is(deliveryErr, ErrPDSkipped):
+			if action == PDTrigger && a.PDState != model.PDAccepted && a.PDState != model.PDAcked {
+				a.PDState = model.PDSkipped
+				a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "pagerduty", Text: "не отправлена в PagerDuty: " + deliveryErr.Error()})
+			}
+			a.PDRetry, a.PDError = "", ""
+		case deliveryErr != nil:
+			if a.PDError != deliveryErr.Error() {
+				a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "pagerduty", Text: string(action) + " не принят: " + deliveryErr.Error()})
+			}
 			a.PDError = deliveryErr.Error()
+			a.PDRetry = string(action)
 			if action == PDTrigger && a.PDState != model.PDAccepted && a.PDState != model.PDAcked {
 				a.PDState = model.PDFailed
 			}
-			a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "pagerduty", Text: string(action) + " не принят: " + deliveryErr.Error()})
-		} else {
-			a.PDError = ""
+		default:
+			a.PDError, a.PDRetry = "", ""
 			switch action {
 			case PDTrigger:
 				if a.PDState != model.PDAcked {
 					a.PDState = model.PDAccepted
 				}
+				switch a.Status {
+				case model.AlertAcknowledged:
+					if c := e.pdCmd(a, PDAcknowledge); c != nil {
+						follow = append(follow, *c)
+					}
+				case model.AlertResolved:
+					if c := e.pdCmd(a, PDResolve); c != nil {
+						follow = append(follow, *c)
+					}
+				}
 			case PDAcknowledge:
 				a.PDState = model.PDAcked
 			}
-			a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "pagerduty", Text: string(action) + " принят PagerDuty, dedup_key " + a.PDKey})
+			text := string(action) + " принят PagerDuty, dedup_key " + a.PDKey
+			if route != "" {
+				text += ", маршрут «" + route + "»"
+			}
+			a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "pagerduty", Text: text})
 		}
 		out = cloneAlert(a)
 	})
 	if ok {
 		e.notify("alert", out)
 	}
+	for _, c := range follow {
+		e.pd.Send(c)
+	}
 }
 
-// PDInbound applies a status change that came from PagerDuty Webhooks v3.
-func (e *Engine) PDInbound(dedupKey, eventType, actor string) error {
+type PDUpdate struct {
+	DedupKey    string
+	EventType   string
+	Actor       string
+	IncidentID  string
+	IncidentURL string
+	Detail      string
+}
+
+func (e *Engine) PDInbound(u PDUpdate) error {
 	now := e.now()
 	var out model.Alert
 	var err error
 	e.st.Write(func(d *store.Data) {
 		var a *model.Alert
 		for _, cand := range d.Alerts {
-			if cand.PDKey == dedupKey {
+			if cand.PDKey == u.DedupKey {
 				a = cand
 			}
 		}
@@ -521,26 +537,48 @@ func (e *Engine) PDInbound(dedupKey, eventType, actor string) error {
 			err = ErrNotFound
 			return
 		}
-		switch eventType {
+		if u.IncidentID != "" {
+			a.PDIncidentID = u.IncidentID
+		}
+		if u.IncidentURL != "" {
+			a.PDIncidentURL = u.IncidentURL
+		}
+		add := func(text string) {
+			a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "pagerduty", Text: text, Author: u.Actor})
+		}
+		switch u.EventType {
+		case "incident.triggered":
+			if a.PDState == model.PDPending || a.PDState == model.PDFailed {
+				a.PDState = model.PDAccepted
+			}
+			add("инцидент создан в PagerDuty")
 		case "incident.acknowledged":
 			if a.Status == model.AlertOpen {
 				a.Status = model.AlertAcknowledged
-				a.AckedBy = actor
+				a.AckedBy = u.Actor
 			}
 			a.PDState = model.PDAcked
-			a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "pagerduty", Text: "подтверждена в PagerDuty", Author: actor})
+			add("подтверждена в PagerDuty")
 		case "incident.resolved":
 			if a.Status.Active() {
-				e.resolve(a, now, "в PagerDuty", actor)
+				e.resolve(a, now, "в PagerDuty", u.Actor)
 			}
 		case "incident.unacknowledged", "incident.reopened":
 			if a.Status == model.AlertAcknowledged {
 				a.Status = model.AlertOpen
 			}
 			a.PDState = model.PDAccepted
-			a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "pagerduty", Text: "снова открыта в PagerDuty"})
+			add("снова открыта в PagerDuty")
+		case "incident.reassigned":
+			add("переназначена в PagerDuty" + detail(u.Detail))
+		case "incident.escalated":
+			add("эскалирована в PagerDuty" + detail(u.Detail))
+		case "incident.annotated":
+			add("заметка в PagerDuty" + detail(u.Detail))
+		case "incident.priority_updated":
+			add("приоритет изменён в PagerDuty" + detail(u.Detail))
 		default:
-			a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "pagerduty", Text: eventType})
+			add(u.EventType + detail(u.Detail))
 		}
 		out = cloneAlert(a)
 	})
@@ -550,31 +588,38 @@ func (e *Engine) PDInbound(dedupKey, eventType, actor string) error {
 	return err
 }
 
-// Tick runs periodic checks: fallback notification for alerts PagerDuty
-// did not accept in time, and re-sending alerts whose maintenance ended.
+func detail(s string) string {
+	if s == "" {
+		return ""
+	}
+	return ": " + s
+}
+
 func (e *Engine) Tick() {
 	now := e.now()
 	var changed []model.Alert
 	var cmds []PDCommand
 	e.st.Write(func(d *store.Data) {
 		for _, a := range d.Alerts {
-			if !a.Status.Active() {
-				continue
+			if a.Status.Active() {
+				if !a.Fallback && !a.Suppressed && a.Severity.Rank() >= model.SevError.Rank() &&
+					(a.PDState == model.PDPending || a.PDState == model.PDFailed) &&
+					now.Sub(a.FirstSeen) >= e.FallbackAfter {
+					a.Fallback = true
+					a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "fallback",
+						Text: fmt.Sprintf("PagerDuty не принял тревогу за %s: включено резервное оповещение по каналам в режиме «при отказе PagerDuty»", e.FallbackAfter)})
+					changed = append(changed, cloneAlert(a))
+				}
+				if a.Suppressed && inMaintenance(d, a.CIID, serviceID(d, a), now) == nil {
+					a.Suppressed = false
+					a.PDState = model.PDPending
+					a.PDAttemptAt = nil
+					a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "maintenance", Text: "окно обслуживания закончилось, тревога активна"})
+					changed = append(changed, cloneAlert(a))
+				}
 			}
-			if !a.Fallback && !a.Suppressed && a.Severity.Rank() >= model.SevError.Rank() &&
-				(a.PDState == model.PDPending || a.PDState == model.PDFailed) &&
-				now.Sub(a.FirstSeen) >= e.FallbackAfter {
-				a.Fallback = true
-				a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "fallback",
-					Text: fmt.Sprintf("PagerDuty не принял тревогу за %s: резервное оповещение дежурным (почта, webhook)", e.FallbackAfter)})
-				changed = append(changed, cloneAlert(a))
-			}
-			if a.Suppressed && inMaintenance(d, a.CIID, serviceID(d, a), now) == nil {
-				a.Suppressed = false
-				a.PDState = model.PDPending
-				a.Timeline = append(a.Timeline, model.TimelineEntry{At: now, Kind: "maintenance", Text: "окно обслуживания закончилось, тревога активна"})
-				changed = append(changed, cloneAlert(a))
-				cmds = append(cmds, PDCommand{Action: PDTrigger, Alert: cloneAlert(a)})
+			if c := e.retry(a, now); c != nil {
+				cmds = append(cmds, *c)
 			}
 		}
 	})
@@ -586,7 +631,34 @@ func (e *Engine) Tick() {
 	}
 }
 
-// Get returns a copy of the alert.
+func (e *Engine) retry(a *model.Alert, now time.Time) *PDCommand {
+	if a.Suppressed {
+		return nil
+	}
+	if a.PDAttemptAt != nil && now.Sub(*a.PDAttemptAt) < e.RetryEvery {
+		return nil
+	}
+	delivered := a.PDState == model.PDAccepted || a.PDState == model.PDAcked
+	switch {
+	case a.Status == model.AlertResolved:
+		if !delivered || a.PDRetry == "" {
+			a.PDRetry = ""
+			return nil
+		}
+		return e.pdCmd(a, PDResolve)
+	case !delivered:
+		if a.PDState != model.PDPending && a.PDState != model.PDFailed {
+			return nil
+		}
+		return e.pdCmd(a, PDTrigger)
+	case a.PDRetry == string(PDAcknowledge) && a.Status == model.AlertAcknowledged:
+		return e.pdCmd(a, PDAcknowledge)
+	case a.PDRetry == string(PDTrigger):
+		return e.pdCmd(a, PDTrigger)
+	}
+	return nil
+}
+
 func (e *Engine) Get(id string) (model.Alert, bool) {
 	var out model.Alert
 	ok := false
@@ -612,5 +684,4 @@ func cloneAlert(a *model.Alert) model.Alert {
 	return c
 }
 
-// Clone exposes cloneAlert for readers that hold the store lock.
 func Clone(a *model.Alert) model.Alert { return cloneAlert(a) }

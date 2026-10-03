@@ -14,7 +14,7 @@ export const ru = {
     description: 'Источник отправляет события на /api/ingest/{id}. Ответ 2xx уходит только после записи события.',
     fields: {
       auth: { label: 'Проверка' },
-      secret_ref: { label: 'Ссылка на секрет', help: 'Сам токен хранится только в хранилище секретов' },
+      secret_ref: { label: 'Токен источника', help: 'Источник передаёт его в X-Umbrella-Token или Authorization: Bearer; значение хранится только в OpenBao' },
     },
   },
   trigger_schedule: {
@@ -26,13 +26,17 @@ export const ru = {
   },
   fetch_http: {
     title: 'HTTP-запрос',
-    description: 'GET или POST к REST API источника.',
+    description: 'GET или POST к REST API источника. Логины, пароли и токены берутся из OpenBao по ссылке.',
     fields: {
       url: { label: 'URL' },
       method: { label: 'Метод' },
       body: { label: 'Тело запроса' },
-      auth_header: { label: 'Заголовок авторизации' },
-      secret_ref: { label: 'Ссылка на секрет' },
+      auth: { label: 'Авторизация' },
+      username: { label: 'Логин (Basic)' },
+      secret_ref: { label: 'Секрет', help: 'Пароль или токен хранится только в OpenBao' },
+      auth_header: { label: 'Заголовок (режим header)' },
+      headers: { label: 'Заголовки' },
+      tls_skip_verify: { label: 'Не проверять TLS' },
     },
   },
   parse_json: {
@@ -104,7 +108,7 @@ export const ru = {
   },
   ack_response: {
     title: 'Подтверждение получения',
-    description: 'Ответ источнику после записи событий. Для pull — сдвиг курсора.',
+    description: 'Push: ответ 2xx источнику только после записи событий. Pull: повторно полученные события отбрасываются по ID в источнике.',
     fields: {
       mode: { label: 'Способ' },
     },
@@ -130,7 +134,7 @@ export const en: typeof ru = {
     description: 'The source sends events to /api/ingest/{id}. A 2xx response is returned only after the event is stored.',
     fields: {
       auth: { label: 'Verification' },
-      secret_ref: { label: 'Secret reference', help: 'The token itself is kept only in the secret store' },
+      secret_ref: { label: 'Source token', help: 'The source sends it in X-Umbrella-Token or Authorization: Bearer; the value lives only in OpenBao' },
     },
   },
   trigger_schedule: {
@@ -142,13 +146,17 @@ export const en: typeof ru = {
   },
   fetch_http: {
     title: 'HTTP request',
-    description: 'GET or POST to the source REST API.',
+    description: 'GET or POST to the source REST API. Logins, passwords and tokens come from OpenBao by reference.',
     fields: {
       url: { label: 'URL' },
       method: { label: 'Method' },
       body: { label: 'Request body' },
-      auth_header: { label: 'Authorization header' },
-      secret_ref: { label: 'Secret reference' },
+      auth: { label: 'Authorization' },
+      username: { label: 'Username (Basic)' },
+      secret_ref: { label: 'Secret', help: 'The password or token is stored only in OpenBao' },
+      auth_header: { label: 'Header (header mode)' },
+      headers: { label: 'Headers' },
+      tls_skip_verify: { label: 'Skip TLS check' },
     },
   },
   parse_json: {
@@ -220,7 +228,7 @@ export const en: typeof ru = {
   },
   ack_response: {
     title: 'Delivery acknowledgement',
-    description: 'Response to the source after events are stored. For pull, advances the cursor.',
+    description: 'Push: 2xx to the source only after events are stored. Pull: events received again are dropped by their source ID.',
     fields: {
       mode: { label: 'Mode' },
     },

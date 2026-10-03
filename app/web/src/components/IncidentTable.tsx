@@ -1,4 +1,5 @@
 import { fmtDuration, fmtTime, methodLabel, type Incident } from '../api'
+import { useApp } from '../context'
 import { t } from '../i18n'
 import { Empty, PDPill, SevBadge, StatusPill } from './ui'
 
@@ -23,6 +24,7 @@ export function IncidentTable({
   onSort?: (k: SortKey) => void
   compact?: boolean
 }) {
+  const grafana = !!useApp().meta?.grafana
   if (items.length === 0) return <Empty>{t('incidents.table.empty')}</Empty>
   const allChecked = !!selected && items.length > 0 && items.every((i) => selected.has(i.id))
   const th = (k: SortKey, title: string) => (
@@ -76,16 +78,20 @@ export function IncidentTable({
             </td>
             <td className="mono nowrap">{a.id}</td>
             <td className="cell-title">
-              <a
-                className="title-line title-link"
-                href={`/go/incidents/${a.id}/grafana`}
-                target="_blank"
-                rel="noreferrer"
-                title={t('incidents.table.grafanaTitle')}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {a.title}
-              </a>
+              {grafana ? (
+                <a
+                  className="title-line title-link"
+                  href={`/go/incidents/${a.id}/grafana`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={t('incidents.table.grafanaTitle')}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {a.title}
+                </a>
+              ) : (
+                <div className="title-line">{a.title}</div>
+              )}
               <div className="sub-line">
                 <code>{a.signal}</code>
                 {a.method !== 'other' && <span className={`tag tag-${a.method}`}>{methodLabel(a.method)}</span>}

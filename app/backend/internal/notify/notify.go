@@ -1,8 +1,3 @@
-// Package notify sends incident notifications to messenger webhooks:
-// Microsoft Teams (Adaptive Card through an incoming webhook or a Workflows
-// webhook) and Zoom Team Chat (incoming webhook app). PagerDuty stays the
-// primary channel; a channel in "fallback" mode speaks only when PagerDuty
-// did not take the incident in time.
 package notify
 
 import (
@@ -21,19 +16,16 @@ import (
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
-// Secrets resolves openbao:// references.
-type Secrets interface {
-	Resolve(ref string) (string, error)
-}
+type Secrets = secrets.Resolver
 
-// Config of the notifier.
 type Config struct {
-	PublicURL string // Umbrella address for incident links
-	AllowHTTP bool   // allow http:// webhooks (lab and tests only)
-	Retries   int    // attempts per message, default 3
+	PublicURL string
+	AllowHTTP bool
+	Retries   int
 	Backoff   time.Duration
 }
 
@@ -43,7 +35,6 @@ type job struct {
 	event string
 }
 
-// Notifier watches alert changes and delivers notifications.
 type Notifier struct {
 	cfg     Config
 	st      *store.Store
@@ -60,10 +51,9 @@ type state struct {
 	sev        model.Severity
 	fallback   bool
 	suppressed bool
-	opened     bool // an "open" notification went out
+	opened     bool
 }
 
-// New creates the notifier. Call Run to start delivery.
 func New(cfg Config, st *store.Store, secrets Secrets) *Notifier {
 	if cfg.Retries <= 0 {
 		cfg.Retries = 3
@@ -75,7 +65,6 @@ func New(cfg Config, st *store.Store, secrets Secrets) *Notifier {
 		queue: make(chan job, 2000), seen: map[string]state{}}
 }
 
-// Run delivers queued messages until ctx ends.
 func (n *Notifier) Run(ctx context.Context) {
 	for {
 		select {
@@ -88,7 +77,6 @@ func (n *Notifier) Run(ctx context.Context) {
 	}
 }
 
-// Observe takes every live update; alert changes become notification events.
 func (n *Notifier) Observe(kind string, v any) {
 	a, ok := v.(model.Alert)
 	if kind != "alert" || !ok {
@@ -99,7 +87,6 @@ func (n *Notifier) Observe(kind string, v any) {
 	}
 }
 
-// events compares the alert with what was seen before.
 func (n *Notifier) events(a model.Alert) []string {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -109,7 +96,7 @@ func (n *Notifier) events(a model.Alert) []string {
 	active := a.Status.Active()
 	switch {
 	case a.Suppressed:
-		// Maintenance: nobody is told.
+
 	case active && (!known || !prev.opened || !prev.status.Active()):
 		out = append(out, model.NotifyOpen)
 		cur.opened = true
@@ -141,7 +128,6 @@ func (n *Notifier) events(a model.Alert) []string {
 	return out
 }
 
-// dispatch queues the event for every channel that wants it.
 func (n *Notifier) dispatch(a model.Alert, event string) {
 	var targets []model.Channel
 	n.st.Read(func(d *store.Data) {
@@ -160,7 +146,6 @@ func (n *Notifier) dispatch(a model.Alert, event string) {
 	}
 }
 
-// wants applies the channel filters. Call inside a store read.
 func wants(d *store.Data, ch *model.Channel, a model.Alert, event string) bool {
 	if !ch.Enabled || a.Severity.Rank() < ch.MinSeverity.Rank() {
 		return false
@@ -175,7 +160,7 @@ func wants(d *store.Data, ch *model.Channel, a model.Alert, event string) bool {
 		return false
 	}
 	if ch.Mode == model.ChannelFallback {
-		// Only incidents PagerDuty did not take, from the fallback moment on.
+
 		if !a.Fallback || event == model.NotifyOpen || event == model.NotifyEscalate {
 			return false
 		}
@@ -188,7 +173,6 @@ func wants(d *store.Data, ch *model.Channel, a model.Alert, event string) bool {
 	return true
 }
 
-// Test sends a test message right away and records the result.
 func (n *Notifier) Test(ch model.Channel, actor string) model.Delivery {
 	now := time.Now()
 	a := model.Alert{ID: "TEST", Title: "Проверка канала уведомлений Umbrella", CIName: "umbrella", Severity: model.SevInfo,
@@ -216,7 +200,6 @@ func (n *Notifier) record(d model.Delivery) {
 	})
 }
 
-// deliver sends one message with retries.
 func (n *Notifier) deliver(ctx context.Context, ch model.Channel, a model.Alert, event, actor string) model.Delivery {
 	d := model.Delivery{ChannelID: ch.ID, Channel: ch.Name, AlertID: a.ID, Event: event, At: time.Now()}
 	if a.ID == "TEST" {
@@ -242,7 +225,7 @@ func (n *Notifier) deliver(ctx context.Context, ch model.Channel, a model.Alert,
 			return d
 		}
 		d.Error = err.Error()
-		// 4xx other than 429 will not get better.
+
 		if status >= 400 && status < 500 && status != http.StatusTooManyRequests {
 			return d
 		}
@@ -287,7 +270,6 @@ func (n *Notifier) send(ctx context.Context, r request) (int, error) {
 	return resp.StatusCode, nil
 }
 
-// redact keeps webhook secrets (path and query) out of error messages.
 func redact(err error, raw string) error {
 	u, perr := url.Parse(raw)
 	if perr != nil {
@@ -297,14 +279,14 @@ func redact(err error, raw string) error {
 }
 
 func (n *Notifier) resolve(ch model.Channel) (string, string, error) {
-	target, token := ch.URL, ch.Token
-	if ch.URLRef != "" {
-		v, err := n.secrets.Resolve(ch.URLRef)
-		if err != nil {
-			return "", "", err
-		}
-		target = v
+	if ch.URLRef == "" {
+		return "", "", errors.New("адрес webhook канала не задан")
 	}
+	target, err := n.secrets.Resolve(ch.URLRef)
+	if err != nil {
+		return "", "", err
+	}
+	token := ""
 	if ch.TokenRef != "" {
 		v, err := n.secrets.Resolve(ch.TokenRef)
 		if err != nil {
@@ -318,7 +300,6 @@ func (n *Notifier) resolve(ch model.Channel) (string, string, error) {
 	return target, token, nil
 }
 
-// CheckURL accepts https URLs (and http when allowed).
 func CheckURL(raw string, allowHTTP bool) error {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || u.Host == "" {
@@ -330,7 +311,6 @@ func CheckURL(raw string, allowHTTP bool) error {
 	return nil
 }
 
-// Host returns the host of a webhook URL for display.
 func Host(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -338,8 +318,6 @@ func Host(raw string) string {
 	}
 	return u.Host
 }
-
-// ---- messages ----
 
 var eventTitle = map[string]string{
 	model.NotifyOpen:     "Новый инцидент",
@@ -382,7 +360,46 @@ func facts(a model.Alert) []fact {
 	return out
 }
 
+func (n *Notifier) owners(ciID string) string {
+	var names []string
+	n.st.Read(func(d *store.Data) {
+		if ci := d.CIs[ciID]; ci != nil {
+			for _, o := range ci.Owners {
+				v := o.Name
+				if o.Email != "" {
+					v += " <" + o.Email + ">"
+				}
+				names = append(names, v)
+			}
+		}
+	})
+	return strings.Join(names, ", ")
+}
+
+func (n *Notifier) onCall() string {
+	var names []string
+	seen := map[string]bool{}
+	n.st.Read(func(d *store.Data) {
+		for _, e := range d.OnCall.Entries {
+			if e.Level == 1 && !seen[e.UserName] {
+				seen[e.UserName] = true
+				names = append(names, e.UserName)
+			}
+		}
+	})
+	return strings.Join(names, ", ")
+}
+
 func (n *Notifier) build(ch model.Channel, a model.Alert, event, target, token string) (request, error) {
+	fs := facts(a)
+	if owners := n.owners(a.CIID); owners != "" {
+		fs = append(fs, fact{"Ответственные", owners})
+	}
+	if event == model.NotifyFallback {
+		if who := n.onCall(); who != "" {
+			fs = append(fs, fact{"Дежурные PagerDuty", who})
+		}
+	}
 	head := eventTitle[event]
 	if head == "" {
 		head = event
@@ -393,9 +410,9 @@ func (n *Notifier) build(ch model.Channel, a model.Alert, event, target, token s
 	}
 	switch ch.Type {
 	case model.ChannelTeams:
-		var fs []map[string]string
-		for _, f := range facts(a) {
-			fs = append(fs, map[string]string{"title": f.k, "value": f.v})
+		var cardFacts []map[string]string
+		for _, f := range fs {
+			cardFacts = append(cardFacts, map[string]string{"title": f.k, "value": f.v})
 		}
 		color := "Default"
 		switch {
@@ -412,7 +429,7 @@ func (n *Notifier) build(ch model.Channel, a model.Alert, event, target, token s
 			"body": []any{
 				map[string]any{"type": "TextBlock", "text": "Umbrella", "size": "Small", "isSubtle": true},
 				map[string]any{"type": "TextBlock", "text": title, "size": "Medium", "weight": "Bolder", "wrap": true, "color": color},
-				map[string]any{"type": "FactSet", "facts": fs},
+				map[string]any{"type": "FactSet", "facts": cardFacts},
 			},
 			"actions": []any{map[string]any{"type": "Action.OpenUrl", "title": "Открыть в Umbrella", "url": n.link(a)}},
 		}
@@ -430,7 +447,7 @@ func (n *Notifier) build(ch model.Channel, a model.Alert, event, target, token s
 			u.RawQuery = q.Encode()
 		}
 		var items []map[string]string
-		for _, f := range facts(a) {
+		for _, f := range fs {
 			items = append(items, map[string]string{"key": f.k, "value": f.v})
 		}
 		color := sevColor[a.Severity]

@@ -1,12 +1,9 @@
-// Package api is the Core API: REST + WebSocket for the web UI, the ingest
-// endpoint for push sources, the PagerDuty webhook and the Grafana link.
 package api
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"html/template"
 	"io"
 	"net/http"
 	"net/url"
@@ -16,62 +13,88 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/connector"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/integration"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pagerduty"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pipeline"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/rules"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
-// Config of the API.
 type Config struct {
-	WebDir        string // built web UI (index.html); empty disables static
-	GrafanaURL    string // base URL of Grafana for /go/incidents/{id}/grafana
-	WebhookSecret string // PagerDuty Webhooks v3 signing secret
-	SecureCookies bool   // always mark the session cookie Secure (behind TLS)
-	MetricsToken  string // bearer token for /metrics; empty = open
-	// AllowHTTPWebhooks accepts http:// notification webhooks (lab only).
+	DataDir           string
+	SetupToken        string
+	WebDir            string
+	PublicURL         string
+	Version           string
+	SecureCookies     bool
+	MetricsToken      string
 	AllowHTTPWebhooks bool
 }
 
-// Server wires handlers.
-type Server struct {
-	cfg     Config
-	st      *store.Store
-	eng     *alert.Engine
-	rt      *connector.Runtime
-	pd      *pagerduty.Gateway
-	hub      *Hub
-	notify   Notifier
-	sessions *auth.Sessions
-	limiter  *ipLimiter
-	started  time.Time
+type Deps struct {
+	Store        *store.Store
+	Engine       *alert.Engine
+	Runtime      *connector.Runtime
+	PagerDuty    *pagerduty.Gateway
+	Hub          *Hub
+	Vault        *secrets.Client
+	Integrations *integration.Manager
+	Rules        *rules.Engine
 }
 
-// Notifier sends test messages to notification channels.
+type Server struct {
+	cfg          Config
+	st           *store.Store
+	eng          *alert.Engine
+	rt           *connector.Runtime
+	pd           *pagerduty.Gateway
+	hub          *Hub
+	vault        *secrets.Client
+	integrations *integration.Manager
+	rules        *rules.Engine
+	notify       Notifier
+	setupMu      sync.Mutex
+	sessions     *auth.Sessions
+	limiter      *ipLimiter
+	started      time.Time
+}
+
 type Notifier interface {
 	Test(ch model.Channel, actor string) model.Delivery
 }
 
-// New creates the server.
-func New(cfg Config, st *store.Store, eng *alert.Engine, rt *connector.Runtime, pd *pagerduty.Gateway, hub *Hub) *Server {
-	return &Server{cfg: cfg, st: st, eng: eng, rt: rt, pd: pd, hub: hub, sessions: auth.NewSessions(),
-		limiter: &ipLimiter{hits: map[string][]time.Time{}}, started: time.Now()}
+func New(cfg Config, d Deps) *Server {
+	return &Server{cfg: cfg, st: d.Store, eng: d.Engine, rt: d.Runtime, pd: d.PagerDuty, hub: d.Hub, vault: d.Vault,
+		integrations: d.Integrations, rules: d.Rules, sessions: auth.NewSessions(), limiter: &ipLimiter{hits: map[string][]time.Time{}}, started: time.Now()}
 }
 
-// SetNotifier wires the notification sender (test messages).
 func (s *Server) SetNotifier(n Notifier) { s.notify = n }
 
-// Handler returns the HTTP handler.
+func (s *Server) Sessions() *auth.Sessions { return s.sessions }
+
 func (s *Server) Handler() http.Handler {
 	m := http.NewServeMux()
-	// p registers a handler that needs a signed-in user with perm ("" = any).
+
 	p := func(pattern, perm string, h http.HandlerFunc) { m.HandleFunc(pattern, s.require(perm, h)) }
 
+	m.HandleFunc("GET /api/setup/status", s.setupStatus)
+	m.HandleFunc("GET /api/ui-defaults", s.getUIDefaults)
+	m.HandleFunc("POST /api/setup/database/test", s.setupTestDB)
+	m.HandleFunc("POST /api/setup/complete", s.setupComplete)
+	p("GET /api/settings/storage", model.PermUsersAdmin, s.getStorage)
+	p("PUT /api/settings/storage", model.PermUsersAdmin, s.putStorage)
+	p("GET /api/teams", "", s.listTeams)
+	p("POST /api/teams", model.PermUsersAdmin, s.createTeam)
+	p("PUT /api/teams/{id}", model.PermUsersAdmin, s.updateTeam)
+	p("DELETE /api/teams/{id}", model.PermUsersAdmin, s.deleteTeam)
 	m.HandleFunc("POST /api/auth/login", s.authLogin)
 	m.HandleFunc("POST /api/auth/token", s.authToken)
 	p("GET /api/auth/me", "", s.authMe)
@@ -83,11 +106,17 @@ func (s *Server) Handler() http.Handler {
 	p("GET /api/incidents/{id}", model.PermIncidentsView, s.getIncident)
 	p("POST /api/incidents/{id}/{action}", model.PermIncidentsAct, s.actIncident)
 	p("POST /api/incidents/bulk", model.PermIncidentsAct, s.bulkIncidents)
+	p("DELETE /api/incidents/{id}", model.PermUsersAdmin, s.deleteIncident)
+	p("DELETE /api/parse-errors", model.PermConnectorsEdit, s.deleteParseErrors)
 	p("GET /api/events", model.PermEventsView, s.listEvents)
 	p("GET /api/parse-errors", model.PermEventsView, s.listParseErrors)
 	p("GET /api/cis", model.PermCMDBView, s.listCIs)
 	p("POST /api/cis", model.PermCMDBEdit, s.createCI)
 	p("GET /api/cis/{id}", model.PermCMDBView, s.getCI)
+	p("PUT /api/cis/{id}", model.PermCMDBEdit, s.updateCI)
+	p("DELETE /api/cis/{id}", model.PermCMDBEdit, s.deleteCI)
+	p("POST /api/relations", model.PermCMDBEdit, s.createRelation)
+	p("DELETE /api/relations", model.PermCMDBEdit, s.deleteRelation)
 	p("GET /api/cmdb/graph", model.PermCMDBView, s.graph)
 	p("GET /api/heatmap", model.PermIncidentsView, s.heatmap)
 	p("GET /api/blocks", model.PermConnectorsView, s.blocks)
@@ -100,13 +129,47 @@ func (s *Server) Handler() http.Handler {
 	p("POST /api/connectors/{id}/publish", model.PermConnectorsEdit, s.publish)
 	p("POST /api/connectors/{id}/start", model.PermConnectorsEdit, s.setConnectorStatus(model.ConnectorRunning))
 	p("POST /api/connectors/{id}/stop", model.PermConnectorsEdit, s.setConnectorStatus(model.ConnectorStopped))
+	p("POST /api/connectors/{id}/secret", model.PermConnectorsEdit, s.connectorSecret)
+
+	p("GET /api/integration-types", model.PermConnectorsView, s.integrationTypes)
+	p("GET /api/integrations", model.PermConnectorsView, s.listIntegrations)
+	p("POST /api/integrations", model.PermConnectorsEdit, s.createIntegration)
+	p("GET /api/integrations/{id}", model.PermConnectorsView, s.getIntegration)
+	p("PUT /api/integrations/{id}", model.PermConnectorsEdit, s.updateIntegration)
+	p("DELETE /api/integrations/{id}", model.PermConnectorsEdit, s.deleteIntegration)
+	p("POST /api/integrations/{id}/check", model.PermConnectorsEdit, s.checkIntegration)
+	p("POST /api/integrations/{id}/setup", model.PermConnectorsEdit, s.setupIntegration)
+	p("POST /api/integrations/{id}/token", model.PermConnectorsEdit, s.revealIntegrationToken)
+	p("POST /api/integrations/{id}/sync", model.PermConnectorsEdit, s.syncIntegration)
+
+	p("GET /api/rules", model.PermRulesView, s.listRules)
+	p("POST /api/rules", model.PermRulesEdit, s.createRule)
+	p("POST /api/rules/preview", model.PermRulesEdit, s.previewRule)
+	p("PUT /api/rules/{id}", model.PermRulesEdit, s.updateRule)
+	p("DELETE /api/rules/{id}", model.PermRulesEdit, s.deleteRule)
+	p("POST /api/rules/{id}/evaluate", model.PermRulesEdit, s.evaluateRule)
+
+	p("GET /api/pagerduty", model.PermIntegrations, s.getPagerDuty)
+	p("PUT /api/pagerduty", model.PermIntegrations, s.putPagerDuty)
+	p("POST /api/pagerduty/check", model.PermIntegrations, s.checkPagerDuty)
+	p("POST /api/pagerduty/test-event", model.PermIntegrations, s.testPagerDuty)
+	p("GET /api/pagerduty/services", model.PermIntegrations, s.pdServices)
+	p("GET /api/pagerduty/policies", model.PermIntegrations, s.pdPolicies)
+	p("POST /api/pagerduty/service-key", model.PermIntegrations, s.pdServiceKey)
+	p("POST /api/pagerduty/routes", model.PermIntegrations, s.pdSaveRoute)
+	p("DELETE /api/pagerduty/routes/{id}", model.PermIntegrations, s.pdDeleteRoute)
+	p("POST /api/pagerduty/webhook-subscription", model.PermIntegrations, s.pdCreateSubscription)
+	p("DELETE /api/pagerduty/webhook-subscription", model.PermIntegrations, s.pdDeleteSubscription)
+	p("POST /api/pagerduty/oncall/sync", model.PermIntegrations, s.pdSyncOnCall)
+
+	p("GET /api/settings", model.PermIntegrations, s.getSettings)
+	p("PUT /api/settings", model.PermIntegrations, s.putSettings)
+	p("GET /api/openbao", model.PermIntegrations, s.openbaoStatus)
 	p("GET /api/maintenance", model.PermIncidentsView, s.listMaintenance)
 	p("POST /api/maintenance", model.PermMaintenanceEdit, s.createMaintenance)
 	p("DELETE /api/maintenance/{id}", model.PermMaintenanceEdit, s.deleteMaintenance)
-	p("GET /api/rules", model.PermRulesView, s.listRules)
 	p("GET /api/audit", model.PermAuditView, s.listAudit)
 	p("GET /api/selfcheck", model.PermSelfcheckView, s.selfcheck)
-	p("POST /api/selfcheck/pd-outage", model.PermSelfcheckAdmin, s.pdOutage)
 
 	p("GET /api/users", model.PermUsersAdmin, s.listUsers)
 	p("POST /api/users", model.PermUsersAdmin, s.createUser)
@@ -131,18 +194,18 @@ func (s *Server) Handler() http.Handler {
 	p("GET /api/ws", "", s.serveWS)
 	p("GET /go/incidents/{id}/grafana", model.PermIncidentsView, s.grafana)
 
-	// Machine endpoints with their own authentication.
 	m.HandleFunc("POST /api/ingest/{id}", s.ingest)
 	m.HandleFunc("POST /api/pagerduty/webhook", s.pdWebhook)
 	m.HandleFunc("GET /metrics", s.metrics)
-	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Umbrella-Version", s.cfg.Version)
+		w.Write([]byte("ok"))
+	})
 	if s.cfg.WebDir != "" {
 		m.Handle("/", spa(s.cfg.WebDir))
 	}
 	return m
 }
-
-// ---- helpers ----
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -162,7 +225,6 @@ func readJSON(r *http.Request, v any) error {
 	return nil
 }
 
-// actor is the signed-in user name for timelines and the audit log.
 func actor(r *http.Request) string { return me(r).Name() }
 
 func splitList(v string) []string {
@@ -187,45 +249,28 @@ func contains(list []string, v string) bool {
 	return false
 }
 
-// ---- meta ----
-
 func (s *Server) meta(w http.ResponseWriter, _ *http.Request) {
-	// Teams come from the seed and from the CMDB, so a clean install without
-	// demo data still gets its team list from the CIs people create.
 	teams := []model.Team{}
+	var grafana bool
 	s.st.Read(func(d *store.Data) {
-		seen := map[string]bool{}
-		for _, t := range d.Teams {
-			seen[t.ID] = true
-			teams = append(teams, t)
+		for _, v := range teamViews(d) {
+			teams = append(teams, model.Team{ID: v.ID, Name: v.Name, Members: v.Team.Members, Leads: v.Team.Leads})
 		}
-		var extra []string
-		for _, ci := range d.CIs {
-			if ci.Team != "" && !seen[ci.Team] {
-				seen[ci.Team] = true
-				extra = append(extra, ci.Team)
-			}
-		}
-		sort.Strings(extra)
-		for _, id := range extra {
-			teams = append(teams, model.Team{ID: id, Name: id})
-		}
+		grafana = d.Settings.GrafanaURL != ""
 	})
+	pd := s.pd.Status()
 	writeJSON(w, 200, map[string]any{
 		"teams":      teams,
 		"severities": []model.Severity{model.SevCritical, model.SevError, model.SevWarning, model.SevInfo},
-		"grafana":    s.cfg.GrafanaURL != "",
-		"pd_mode":    s.pd.Status().Mode,
-		"version":    "0.2.0-mvp",
+		"grafana":    grafana,
+		"pagerduty":  pd.Enabled,
+		"openbao":    s.vault.Enabled(),
+		"version":    s.cfg.Version,
 	})
 }
 
-// ---- incidents ----
-
-// IncidentQuery filters the incident dashboard. The same fields go into the
-// URL so a view can be shared by link.
 type IncidentQuery struct {
-	View     string // open, closed, all
+	View     string
 	Severity []string
 	Status   []string
 	Team     string
@@ -350,8 +395,7 @@ func (s *Server) listIncidents(w http.ResponseWriter, r *http.Request) {
 	s.st.Read(func(d *store.Data) {
 		var text map[string]string
 		if q.Q != "" {
-			// Full-text over event titles within 30 days (PostgreSQL FTS in
-			// the database-backed store).
+
 			text = map[string]string{}
 			for _, ev := range d.Events {
 				if ev.AlertID != "" && now.Sub(ev.ReceivedAt) <= 30*24*time.Hour {
@@ -364,8 +408,7 @@ func (s *Server) listIncidents(w http.ResponseWriter, r *http.Request) {
 			if !p.SeesCI(a.CIID) {
 				continue
 			}
-			// Indicator tiles count active incidents in the team scope,
-			// independent of the other filters (like operational tiles).
+
 			if a.Status.Active() && (q.Team == "" || q.Team == "all" || a.Team == q.Team) {
 				counts[string(a.Severity)]++
 				counts["total"]++
@@ -425,8 +468,11 @@ func (s *Server) getIncident(w http.ResponseWriter, r *http.Request) {
 	if events == nil {
 		events = []model.Event{}
 	}
-	writeJSON(w, 200, map[string]any{"incident": a, "events": events, "related": related,
-		"grafana_url": "/go/incidents/" + id + "/grafana"})
+	resp := map[string]any{"incident": a, "events": events, "related": related}
+	if s.grafanaURL() != "" {
+		resp["grafana_url"] = "/go/incidents/" + id + "/grafana"
+	}
+	writeJSON(w, 200, resp)
 }
 
 func (s *Server) actIncident(w http.ResponseWriter, r *http.Request) {
@@ -483,8 +529,6 @@ func (s *Server) bulkIncidents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"done": done, "failed": failed})
 }
 
-// ---- events and parse errors ----
-
 func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit <= 0 || limit > 2000 {
@@ -532,15 +576,12 @@ func (s *Server) listParseErrors(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"items": out})
 }
 
-// ---- CMDB ----
-
-// CIView is a CI with its computed status for tables and the graph.
 type CIView struct {
 	model.CI
-	Status      model.Severity `json:"status"`        // worst active alert on the CI or below it; "" = ok
-	OwnStatus   model.Severity `json:"own_status"`    // worst active alert on the CI itself
-	OpenAlerts  int            `json:"open_alerts"`   // active alerts on the CI itself
-	Maintenance bool           `json:"maintenance"`   // an active maintenance window
+	Status      model.Severity `json:"status"`
+	OwnStatus   model.Severity `json:"own_status"`
+	OpenAlerts  int            `json:"open_alerts"`
+	Maintenance bool           `json:"maintenance"`
 	Children    int            `json:"children"`
 	Parents     int            `json:"parents"`
 }
@@ -575,7 +616,7 @@ func ciViews(d *store.Data, now time.Time) map[string]*CIView {
 			v.Maintenance = true
 		}
 	}
-	// Status propagates up: a service is as bad as the worst CI under it.
+
 	var walk func(id string, seen map[string]bool) model.Severity
 	walk = func(id string, seen map[string]bool) model.Severity {
 		if seen[id] {
@@ -601,7 +642,7 @@ func ciViews(d *store.Data, now time.Time) map[string]*CIView {
 func (s *Server) listCIs(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(r.URL.Query().Get("q"))
 	types := splitList(r.URL.Query().Get("type"))
-	state := r.URL.Query().Get("state") // problem, ok
+	state := r.URL.Query().Get("state")
 	team := r.URL.Query().Get("team")
 	out := []CIView{}
 	s.st.Read(func(d *store.Data) {
@@ -635,32 +676,33 @@ func (s *Server) listCIs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) createCI(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		model.CI
+		ciBody
 		Parent string `json:"parent"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeErr(w, 400, err)
 		return
 	}
-	if strings.TrimSpace(body.Name) == "" || body.Type == "" {
-		writeErr(w, 400, errors.New("нужны название и тип КЕ"))
-		return
-	}
 	var ci model.CI
+	var err error
+	now := time.Now()
 	s.st.Write(func(d *store.Data) {
-		ci = body.CI
-		ci.ID = d.NextID("CI")
-		ci.Origin = "manual"
-		ci.CreatedAt = time.Now()
-		if ci.Identities == nil {
-			ci.Identities = []model.Identity{}
+		ci = model.CI{Origin: "manual", CreatedAt: now, Identities: []model.Identity{}, Labels: map[string]string{}}
+		if err = applyCI(d, &ci, body.ciBody, now); err != nil {
+			return
 		}
-		d.CIs[ci.ID] = &ci
+		ci.ID = d.NextID("CI")
+		c := ci
+		d.CIs[ci.ID] = &c
 		if body.Parent != "" && d.CIs[body.Parent] != nil {
 			d.Relations = append(d.Relations, model.Relation{From: body.Parent, To: ci.ID, Type: "depends_on"})
 		}
-		d.AddAudit(store.AuditEntry{At: time.Now().Format(time.RFC3339), Actor: actor(r), Action: "ci.create", Object: ci.ID})
+		d.AddAudit(store.AuditEntry{At: now.Format(time.RFC3339), Actor: actor(r), Action: "ci.create", Object: ci.ID})
 	})
+	if err != nil {
+		writeErr(w, 400, err)
+		return
+	}
 	writeJSON(w, 201, ci)
 }
 
@@ -742,7 +784,7 @@ func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
 				include[id] = true
 			}
 		} else {
-			// Up to services and down to resources, each to the depth.
+
 			include[root] = true
 			frontier := []string{root}
 			for i := 0; i < depth; i++ {
@@ -797,8 +839,6 @@ func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"nodes": nodes, "edges": edges})
 }
 
-// ---- connectors ----
-
 func (s *Server) blocks(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{"items": pipeline.Blocks, "categories": []map[string]string{
 		{"id": "trigger", "title": "Триггеры"}, {"id": "fetch", "title": "Получение"}, {"id": "parse", "title": "Парсинг"},
@@ -839,7 +879,6 @@ func (s *Server) getConnector(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"connector": c, "ingest_url": "/api/ingest/" + c.ID})
 }
 
-// Templates offered when creating a connector.
 func starterGraph(kind string) model.Graph {
 	switch kind {
 	case "pull-http":
@@ -957,13 +996,24 @@ func (s *Server) updateConnector(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) deleteConnector(w http.ResponseWriter, r *http.Request) {
 	found := false
+	var owner string
 	s.st.Write(func(d *store.Data) {
+		for _, it := range d.Integrations {
+			if it.ConnectorID == r.PathValue("id") {
+				owner = it.ID
+				return
+			}
+		}
 		if _, ok := d.Connectors[r.PathValue("id")]; ok {
 			delete(d.Connectors, r.PathValue("id"))
 			found = true
 			d.AddAudit(store.AuditEntry{At: time.Now().Format(time.RFC3339), Actor: actor(r), Action: "connector.delete", Object: r.PathValue("id")})
 		}
 	})
+	if owner != "" {
+		writeErr(w, 409, errors.New("коннектор создан интеграцией "+owner+": удалите интеграцию"))
+		return
+	}
 	if !found {
 		writeErr(w, 404, connector.ErrNotFound)
 		return
@@ -1059,8 +1109,6 @@ func (s *Server) setConnectorStatus(st model.ConnectorStatus) http.HandlerFunc {
 	}
 }
 
-// ---- maintenance, rules, audit ----
-
 func (s *Server) listMaintenance(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	out := []map[string]any{}
@@ -1121,12 +1169,6 @@ func (s *Server) deleteMaintenance(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
-func (s *Server) listRules(w http.ResponseWriter, _ *http.Request) {
-	var out []model.Rule
-	s.st.Read(func(d *store.Data) { out = append(out, d.Rules...) })
-	writeJSON(w, 200, map[string]any{"items": out})
-}
-
 func (s *Server) listAudit(w http.ResponseWriter, _ *http.Request) {
 	out := []store.AuditEntry{}
 	s.st.Read(func(d *store.Data) {
@@ -1137,10 +1179,8 @@ func (s *Server) listAudit(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{"items": out})
 }
 
-// ---- self-check ----
-
-func (s *Server) selfcheck(w http.ResponseWriter, _ *http.Request) {
-	var events, alerts, active, errs, conns, running int
+func (s *Server) selfcheck(w http.ResponseWriter, r *http.Request) {
+	var events, alerts, active, errs, conns, running, retry int
 	var lastEvent *time.Time
 	s.st.Read(func(d *store.Data) {
 		events = len(d.Events)
@@ -1149,6 +1189,9 @@ func (s *Server) selfcheck(w http.ResponseWriter, _ *http.Request) {
 		for _, a := range d.Alerts {
 			if a.Status.Active() {
 				active++
+			}
+			if a.PDRetry != "" || a.Status.Active() && (a.PDState == model.PDFailed || a.PDState == model.PDPending) {
+				retry++
 			}
 		}
 		for _, c := range d.Connectors {
@@ -1163,28 +1206,12 @@ func (s *Server) selfcheck(w http.ResponseWriter, _ *http.Request) {
 		}
 	})
 	writeJSON(w, 200, map[string]any{
-		"uptime_s": int(time.Since(s.started).Seconds()), "events": events, "alerts": alerts, "active_alerts": active,
-		"parse_errors": errs, "connectors": conns, "connectors_running": running, "last_event_at": lastEvent,
-		"pagerduty": s.pd.Status(), "store": "memory", "bus": "in-process",
+		"uptime_s": int(time.Since(s.started).Seconds()), "version": s.cfg.Version, "events": events, "alerts": alerts,
+		"active_alerts": active, "parse_errors": errs, "connectors": conns, "connectors_running": running,
+		"last_event_at": lastEvent, "pagerduty": s.pd.Status(), "pagerduty_outbox": retry,
+		"openbao": s.vault.Status(r.Context()), "persistence": s.st.PersistStatus(),
 	})
 }
-
-func (s *Server) pdOutage(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		On bool `json:"on"`
-	}
-	if err := readJSON(r, &body); err != nil {
-		writeErr(w, 400, err)
-		return
-	}
-	s.pd.SetOutage(body.On)
-	s.st.Write(func(d *store.Data) {
-		d.AddAudit(store.AuditEntry{At: time.Now().Format(time.RFC3339), Actor: actor(r), Action: fmt.Sprintf("selfcheck.pd_outage=%v", body.On), Object: "pagerduty"})
-	})
-	writeJSON(w, 200, s.pd.Status())
-}
-
-// ---- ingest, PagerDuty webhook, Grafana ----
 
 func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 5<<20))
@@ -1205,14 +1232,13 @@ func (s *Server) ingest(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, connector.ErrStopped), errors.Is(err, connector.ErrNotPublished), errors.Is(err, connector.ErrNotWebhook):
 		writeErr(w, 409, err)
 	case err != nil:
-		// Not acknowledged: the source keeps the event and retries.
+
 		writeErr(w, 503, err)
 	default:
 		writeJSON(w, 202, map[string]int{"accepted": n})
 	}
 }
 
-// connectorRef maps a slug (/api/ingest/zabbix) to the connector id.
 func (s *Server) connectorRef(ref string) string {
 	id := ref
 	s.st.Read(func(d *store.Data) {
@@ -1230,7 +1256,6 @@ func (s *Server) connectorRef(ref string) string {
 
 var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,40}$`)
 
-// setSlug validates a slug and checks it is free. Call inside a store write.
 func setSlug(d *store.Data, c *model.Connector, slug string) error {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
@@ -1255,36 +1280,32 @@ func (s *Server) pdWebhook(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err)
 		return
 	}
-	if !pagerduty.VerifySignature(s.cfg.WebhookSecret, body, r.Header.Get("X-PagerDuty-Signature")) {
-		writeErr(w, 401, errors.New("подпись не прошла проверку"))
-		return
-	}
-	var ev pagerduty.WebhookEvent
-	if err := json.Unmarshal(body, &ev); err != nil {
+	n, err := s.pd.HandleWebhook(r.Context(), body, r.Header.Get("X-PagerDuty-Signature"))
+	switch {
+	case errors.Is(err, pagerduty.ErrNoWebhookSecret), errors.Is(err, pagerduty.ErrBadSignature):
+		writeErr(w, 401, err)
+	case err != nil:
 		writeErr(w, 400, err)
-		return
+	default:
+		writeJSON(w, 200, map[string]int{"applied": n})
 	}
-	applied := 0
-	for _, key := range ev.DedupKeys() {
-		if err := s.eng.PDInbound(key, ev.Event.EventType, ev.Event.Agent.Summary); err == nil {
-			applied++
-		}
-	}
-	writeJSON(w, 200, map[string]int{"applied": applied})
 }
 
-var grafanaStub = template.Must(template.New("g").Parse(`<!doctype html><meta charset="utf-8"><title>Контекст {{.ID}}</title>
-<body style="font-family:system-ui;padding:32px;max-width:640px">
-<h2>Контекст инцидента {{.ID}}</h2>
-<p>Grafana не настроена (переменная UMBRELLA_GRAFANA_URL). Когда она задана, эта ссылка перенаправляет на дашборд <code>umb-{{.ID}}</code> с окном
-<b>{{.From}}</b> — <b>{{.To}}</b>.</p>
-<p>КЕ: <b>{{.CI}}</b>, сервис: <b>{{.Service}}</b>, сигнал: <b>{{.Signal}}</b>.</p>
-<p><a href="/incidents?id={{.ID}}">Вернуться к инциденту</a></p></body>`))
+func (s *Server) grafanaURL() string {
+	var u string
+	s.st.Read(func(d *store.Data) { u = d.Settings.GrafanaURL })
+	return u
+}
 
 func (s *Server) grafana(w http.ResponseWriter, r *http.Request) {
 	a, ok := s.eng.Get(r.PathValue("id"))
 	if !ok || !me(r).SeesCI(a.CIID) {
 		writeErr(w, 404, alert.ErrNotFound)
+		return
+	}
+	target := s.grafanaURL()
+	if target == "" {
+		writeErr(w, 404, errors.New("Grafana не подключена"))
 		return
 	}
 	from := a.FirstSeen.Add(-10 * time.Minute)
@@ -1293,29 +1314,20 @@ func (s *Server) grafana(w http.ResponseWriter, r *http.Request) {
 		to = *a.ResolvedAt
 	}
 	to = to.Add(10 * time.Minute)
-	if s.cfg.GrafanaURL == "" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = grafanaStub.Execute(w, map[string]string{"ID": a.ID, "From": from.Format("02.01 15:04"), "To": to.Format("02.01 15:04"), "CI": a.CIName, "Service": a.Service, "Signal": a.Signal})
+	u, err := url.Parse(target)
+	if err != nil {
+		writeErr(w, 500, err)
 		return
 	}
-	// Context Builder (next step) creates the dashboard with uid umb-<id>;
-	// here the link carries the window and variables.
-	v := url.Values{}
+	v := u.Query()
 	v.Set("from", strconv.FormatInt(from.UnixMilli(), 10))
 	v.Set("to", strconv.FormatInt(to.UnixMilli(), 10))
 	v.Set("var-ci", a.CIName)
 	v.Set("var-service", a.Service)
 	v.Set("var-incident", a.ID)
-	// A URL that already names a dashboard (.../d/<uid>) is used as is, e.g.
-	// the provisioned incidents dashboard of the lab.
-	target := strings.TrimRight(s.cfg.GrafanaURL, "/")
-	if !strings.Contains(target, "/d/") {
-		target += "/d/umb-" + strings.ToLower(a.ID)
-	}
-	http.Redirect(w, r, target+"?"+v.Encode(), http.StatusFound)
+	u.RawQuery = v.Encode()
+	http.Redirect(w, r, u.String(), http.StatusFound)
 }
-
-// ---- static ----
 
 func spa(dir string) http.Handler {
 	fs := http.FileServer(http.Dir(dir))

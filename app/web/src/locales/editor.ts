@@ -26,6 +26,9 @@ export const ru = {
   },
   inspector: {
     deleteBlock: 'Удалить блок',
+    secretValue: 'Значение секрета',
+    secretSave: 'Сохранить в OpenBao',
+    secretStored: 'Секрет сохранён в OpenBao, в блок подставлена ссылка',
     lastCheck: 'Последняя проверка',
     trace: 'вход {in} → выход {out}, {ms} мс',
   },
@@ -71,7 +74,7 @@ export const ru = {
     fieldWord: 'поле',
     valueWord: 'значение',
     otherWord: 'другое',
-    secrets: 'Секреты (токены, пароли) не хранятся в коннекторе: в блоке указывается только ссылка на хранилище секретов.',
+    secrets: 'Секреты (токены, пароли) не хранятся в коннекторе: значение сохраняется в OpenBao, а в блоке остаётся ссылка openbao://.',
   },
 }
 
@@ -102,6 +105,9 @@ export const en: typeof ru = {
   },
   inspector: {
     deleteBlock: 'Delete block',
+    secretValue: 'Secret value',
+    secretSave: 'Save to OpenBao',
+    secretStored: 'Secret stored in OpenBao, the block now holds its reference',
     lastCheck: 'Last test',
     trace: 'in {in} → out {out}, {ms} ms',
   },
@@ -147,6 +153,6 @@ export const en: typeof ru = {
     fieldWord: 'field',
     valueWord: 'value',
     otherWord: 'other',
-    secrets: 'Secrets (tokens, passwords) are not stored in the connector: a block holds only a reference to the secret store.',
+    secrets: 'Secrets (tokens, passwords) are not stored in the connector: the value goes to OpenBao and the block keeps an openbao:// reference.',
   },
 }

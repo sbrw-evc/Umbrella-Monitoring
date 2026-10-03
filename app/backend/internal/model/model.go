@@ -1,10 +1,7 @@
-// Package model holds the Umbrella domain types shared by the API, the
-// pipeline and the alert engine.
 package model
 
 import "time"
 
-// Severity follows the four PagerDuty levels.
 type Severity string
 
 const (
@@ -14,7 +11,6 @@ const (
 	SevInfo     Severity = "info"
 )
 
-// Rank orders severities: a higher rank is worse.
 func (s Severity) Rank() int {
 	switch s {
 	case SevCritical:
@@ -29,10 +25,8 @@ func (s Severity) Rank() int {
 	return 0
 }
 
-// Valid reports whether s is one of the four known levels.
 func (s Severity) Valid() bool { return s.Rank() > 0 }
 
-// MaxSeverity returns the worse of a and b.
 func MaxSeverity(a, b Severity) Severity {
 	if b.Rank() > a.Rank() {
 		return b
@@ -40,7 +34,6 @@ func MaxSeverity(a, b Severity) Severity {
 	return a
 }
 
-// Method marks how an alert was formed.
 type Method string
 
 const (
@@ -49,7 +42,6 @@ const (
 	MethodOther Method = "other"
 )
 
-// EventStatus is what the source says about the signal.
 type EventStatus string
 
 const (
@@ -57,7 +49,6 @@ const (
 	EventResolved EventStatus = "resolved"
 )
 
-// Event is one immutable signal from a source after normalization.
 type Event struct {
 	ID          string            `json:"id"`
 	ConnectorID string            `json:"connector_id"`
@@ -78,7 +69,6 @@ type Event struct {
 	Suppressed  bool              `json:"suppressed,omitempty"`
 }
 
-// AlertStatus is the lifecycle of an alert (incident).
 type AlertStatus string
 
 const (
@@ -87,30 +77,25 @@ const (
 	AlertResolved     AlertStatus = "resolved"
 )
 
-// Active reports whether the alert still needs attention.
 func (s AlertStatus) Active() bool { return s == AlertOpen || s == AlertAcknowledged }
 
-// PDState is the delivery state of an alert in PagerDuty.
 type PDState string
 
 const (
-	PDPending  PDState = "pending"  // queued in the outbox
-	PDAccepted PDState = "accepted" // Events API answered 202
-	PDAcked    PDState = "acked"    // acknowledged in PagerDuty
-	PDFailed   PDState = "failed"   // not accepted after retries
-	PDSkipped  PDState = "skipped"  // not sent (suppressed or below threshold)
+	PDPending  PDState = "pending"
+	PDAccepted PDState = "accepted"
+	PDAcked    PDState = "acked"
+	PDFailed   PDState = "failed"
+	PDSkipped  PDState = "skipped"
 )
 
-// TimelineEntry is one line of the incident history.
 type TimelineEntry struct {
 	At     time.Time `json:"at"`
-	Kind   string    `json:"kind"` // event, status, pagerduty, comment, maintenance
+	Kind   string    `json:"kind"`
 	Text   string    `json:"text"`
 	Author string    `json:"author,omitempty"`
 }
 
-// Alert groups every event with the same dedup key. In the MVP an incident
-// on the dashboard is an alert sent to PagerDuty.
 type Alert struct {
 	ID         string            `json:"id"`
 	DedupKey   string            `json:"dedup_key"`
@@ -124,7 +109,7 @@ type Alert struct {
 	Method     Method            `json:"method"`
 	Severity   Severity          `json:"severity"`
 	Status     AlertStatus       `json:"status"`
-	Sources    map[string]string `json:"sources"` // connector -> firing|resolved
+	Sources    map[string]string `json:"sources"`
 	Count      int               `json:"count"`
 	FirstSeen  time.Time         `json:"first_seen"`
 	LastSeen   time.Time         `json:"last_seen"`
@@ -137,9 +122,14 @@ type Alert struct {
 	Fallback   bool              `json:"fallback"`
 	RelatedID  string            `json:"related_id,omitempty"`
 	Timeline   []TimelineEntry   `json:"timeline"`
+
+	PDRoute       string     `json:"pd_route,omitempty"`
+	PDIncidentID  string     `json:"pd_incident_id,omitempty"`
+	PDIncidentURL string     `json:"pd_incident_url,omitempty"`
+	PDRetry       string     `json:"pd_retry,omitempty"`
+	PDAttemptAt   *time.Time `json:"pd_attempt_at,omitempty"`
 }
 
-// CIType values used by the demo model; the set is open.
 const (
 	CIBusinessService = "business_service"
 	CIITService       = "it_service"
@@ -150,9 +140,6 @@ const (
 	CINetwork         = "network"
 )
 
-// Identity is one way a source can name a CI (host name, cloud instance ID,
-// IP). Cloud instance IDs change after reboot, so they are history, not the
-// identity of the CI.
 type Identity struct {
 	Kind  string     `json:"kind"`
 	Value string     `json:"value"`
@@ -160,7 +147,14 @@ type Identity struct {
 	Until *time.Time `json:"until,omitempty"`
 }
 
-// CI is a configuration item of the CMDB map.
+type Owner struct {
+	Name  string `json:"name"`
+	Email string `json:"email,omitempty"`
+	Phone string `json:"phone,omitempty"`
+	Role  string `json:"role,omitempty"`
+	From  string `json:"from,omitempty"`
+}
+
 type CI struct {
 	ID           string            `json:"id"`
 	Name         string            `json:"name"`
@@ -170,41 +164,40 @@ type CI struct {
 	LogicalGroup string            `json:"logical_group,omitempty"`
 	Labels       map[string]string `json:"labels,omitempty"`
 	Identities   []Identity        `json:"identities"`
-	Origin       string            `json:"origin"` // manual, discovery
+	Owners       []Owner           `json:"owners,omitempty"`
+	Origin       string            `json:"origin"`
+	Source       string            `json:"source,omitempty"`
+	ExternalURL  string            `json:"external_url,omitempty"`
 	CreatedAt    time.Time         `json:"created_at"`
+	UpdatedAt    *time.Time        `json:"updated_at,omitempty"`
 }
 
-// Relation links two CIs: From depends on To.
 type Relation struct {
 	From string `json:"from"`
 	To   string `json:"to"`
-	Type string `json:"type"` // depends_on, runs_on, part_of
+	Type string `json:"type"`
 }
 
-// Node is one block of a low-code graph (connector).
 type Node struct {
 	ID       string            `json:"id"`
-	Kind     string            `json:"kind"` // block kind, see pipeline.Blocks
+	Kind     string            `json:"kind"`
 	X        float64           `json:"x"`
 	Y        float64           `json:"y"`
 	Config   map[string]string `json:"config"`
 	Disabled bool              `json:"disabled,omitempty"`
 }
 
-// Edge connects two nodes.
 type Edge struct {
 	ID     string `json:"id"`
 	Source string `json:"source"`
 	Target string `json:"target"`
 }
 
-// Graph is a versioned low-code definition.
 type Graph struct {
 	Nodes []Node `json:"nodes"`
 	Edges []Edge `json:"edges"`
 }
 
-// ConnectorStatus is whether the runtime executes the connector.
 type ConnectorStatus string
 
 const (
@@ -212,10 +205,9 @@ const (
 	ConnectorStopped ConnectorStatus = "stopped"
 )
 
-// Connector is a source connection assembled in the block builder.
 type Connector struct {
 	ID          string          `json:"id"`
-	Slug        string          `json:"slug,omitempty"` // stable ingest name: /api/ingest/<slug>
+	Slug        string          `json:"slug,omitempty"`
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Team        string          `json:"team"`
@@ -232,7 +224,6 @@ type Connector struct {
 	LastEventAt *time.Time      `json:"last_event_at,omitempty"`
 }
 
-// ParseError is an event the connector could not parse (events.dlq).
 type ParseError struct {
 	ID          string    `json:"id"`
 	ConnectorID string    `json:"connector_id"`
@@ -243,7 +234,6 @@ type ParseError struct {
 	At          time.Time `json:"at"`
 }
 
-// Maintenance is a window during which alerts on a CI are suppressed.
 type Maintenance struct {
 	ID        string    `json:"id"`
 	Title     string    `json:"title"`
@@ -255,7 +245,6 @@ type Maintenance struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// State returns planned, active or finished at moment now.
 func (m Maintenance) State(now time.Time) string {
 	switch {
 	case now.Before(m.Start):
@@ -266,20 +255,15 @@ func (m Maintenance) State(now time.Time) string {
 	return "active"
 }
 
-// Rule is a RED or USE alerting rule.
-type Rule struct {
-	ID        string `json:"id"`
-	Method    Method `json:"method"`
-	Signal    string `json:"signal"`
-	Name      string `json:"name"`
-	Condition string `json:"condition"`
-	AppliesTo string `json:"applies_to"`
-	Severity  Severity `json:"severity"`
-	Enabled   bool   `json:"enabled"`
-}
-
-// Team is a directory group that scopes what a user sees.
 type Team struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description,omitempty"`
+	Email       string     `json:"email,omitempty"`
+	Chat        string     `json:"chat,omitempty"`
+	Members     []string   `json:"members"`
+	Leads       []string   `json:"leads"`
+	CreatedAt   *time.Time `json:"created_at,omitempty"`
+	UpdatedAt   *time.Time `json:"updated_at,omitempty"`
+	UpdatedBy   string     `json:"updated_by,omitempty"`
 }

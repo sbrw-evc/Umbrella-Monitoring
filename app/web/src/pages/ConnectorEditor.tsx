@@ -367,8 +367,16 @@ function Editor() {
                     </select>
                   ) : f.type === 'textarea' ? (
                     <textarea rows={4} className="mono" value={sel.data.config[f.key] ?? ''} placeholder={fieldPlaceholder(sel.data.spec!, f)} onChange={(e) => updateConfig(f.key, e.target.value)} />
+                  ) : f.type === 'secret' ? (
+                    <SecretField
+                      connector={id}
+                      name={`${sel.id}_${f.key}`}
+                      value={sel.data.config[f.key] ?? ''}
+                      placeholder={fieldPlaceholder(sel.data.spec!, f)}
+                      onChange={(v) => updateConfig(f.key, v)}
+                    />
                   ) : (
-                    <input className={f.type === 'secret' ? 'mono' : ''} value={sel.data.config[f.key] ?? ''} placeholder={fieldPlaceholder(sel.data.spec!, f)} onChange={(e) => updateConfig(f.key, e.target.value)} />
+                    <input value={sel.data.config[f.key] ?? ''} placeholder={fieldPlaceholder(sel.data.spec!, f)} onChange={(e) => updateConfig(f.key, e.target.value)} />
                   )}
                 </Field>
               ))}
@@ -504,5 +512,33 @@ function ConnectorInfo({ connector }: { connector: Connector | null }) {
   -d @event.json`}</pre>
       <p className="hint">{t('editor.info.retryHint')}</p>
     </div>
+  )
+}
+
+function SecretField({ connector, name, value, placeholder, onChange }: { connector: string; name: string; value: string; placeholder?: string; onChange: (v: string) => void }) {
+  const { toast, meta } = useApp()
+  const [secret, setSecret] = useState('')
+  const store = async () => {
+    try {
+      const r = await api.post<{ ref: string }>(`/api/connectors/${connector}/secret`, { key: name.toLowerCase().replace(/[^a-z0-9_]/g, '_'), value: secret })
+      onChange(r.ref)
+      setSecret('')
+      toast(t('editor.inspector.secretStored'))
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
+  return (
+    <>
+      <input className="mono" value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
+      {meta?.openbao && (
+        <div className="copy-box">
+          <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={t('editor.inspector.secretValue')} autoComplete="new-password" />
+          <button type="button" className="btn btn-sm" disabled={!secret} onClick={store}>
+            {t('editor.inspector.secretSave')}
+          </button>
+        </div>
+      )}
+    </>
   )
 }

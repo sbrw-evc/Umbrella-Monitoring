@@ -390,6 +390,14 @@ export function loadActiveTheme(): string {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
 }
 
+export function hasSavedTheme(): boolean {
+  try {
+    return !!localStorage.getItem(ACTIVE_KEY)
+  } catch {
+    return false
+  }
+}
+
 export function saveActiveTheme(id: string) {
   try {
     localStorage.setItem(ACTIVE_KEY, id)

@@ -9,25 +9,19 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
-// BootstrapConfig seeds access on an empty store.
 type BootstrapConfig struct {
-	AdminUser     string // default "admin"
-	AdminPassword string // empty: a random one is generated and logged once
-	// ServiceTokens are API tokens for service accounts known in advance,
-	// e.g. Grafana: name -> role id + token.
+	AdminUser     string
+	AdminPassword string
+
 	ServiceTokens []ServiceToken
 }
 
-// ServiceToken describes a service account created at start.
 type ServiceToken struct {
 	User  string
 	Role  string
 	Token string
 }
 
-// Bootstrap adds missing built-in roles, the first administrator and the
-// configured service accounts. The MVP store is in memory, so this runs on
-// every start; existing records are kept.
 func Bootstrap(st *store.Store, cfg BootstrapConfig) {
 	now := time.Now()
 	if cfg.AdminUser == "" {
@@ -42,21 +36,29 @@ func Bootstrap(st *store.Store, cfg BootstrapConfig) {
 				d.Roles[rr.ID] = &rr
 			}
 		}
-		if d.UserByName(cfg.AdminUser) == nil {
-			pw, must := cfg.AdminPassword, false
-			if pw == "" {
-				pw, must = RandomToken("", 12), true
-				slog.Warn("created the first administrator with a one-time password; change it after signing in",
-					"user", cfg.AdminUser, "password", pw)
-			} else if err := CheckPolicy(pw, cfg.AdminUser); err != nil {
+		for _, r := range d.Roles {
+			if r.ID == RoleAdmin {
+				r.Permissions = append([]string(nil), model.AllPermissions...)
+				continue
+			}
+			kept := r.Permissions[:0]
+			for _, p := range r.Permissions {
+				if ValidPermission(p) {
+					kept = append(kept, p)
+				}
+			}
+			r.Permissions = kept
+		}
+		if d.UserByName(cfg.AdminUser) == nil && cfg.AdminPassword != "" {
+			if err := CheckPolicy(cfg.AdminPassword, cfg.AdminUser); err != nil {
 				slog.Warn("UMBRELLA_ADMIN_PASSWORD does not meet the password policy; it is used anyway", "err", err)
 			}
-			h, err := HashPassword(pw)
+			h, err := HashPassword(cfg.AdminPassword)
 			if err != nil {
 				panic(err)
 			}
 			u := &model.User{ID: d.NextID("USR"), Username: cfg.AdminUser, Name: "Администратор", Roles: []string{RoleAdmin},
-				BusinessServices: []string{}, MustChangePassword: must, CreatedAt: now, PasswordHash: h, PasswordChangedAt: &now}
+				BusinessServices: []string{}, CreatedAt: now, PasswordHash: h, PasswordChangedAt: &now}
 			d.Users[u.ID] = u
 			d.AddAudit(store.AuditEntry{At: now.Format(time.RFC3339), Actor: "system", Action: "user.bootstrap", Object: u.Username})
 		}
@@ -96,5 +98,4 @@ func prefix(token string) string {
 	return strings.Repeat("•", 4)
 }
 
-// Prefix is the visible part of a token.
 func Prefix(token string) string { return prefix(token) }

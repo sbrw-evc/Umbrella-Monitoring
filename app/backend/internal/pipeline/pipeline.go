@@ -1,7 +1,3 @@
-// Package pipeline executes connectors assembled in the low-code block
-// builder: trigger → parse → transform → output. The same code runs live
-// traffic and dry-run, so what an engineer sees in the builder is what the
-// runtime does.
 package pipeline
 
 import (
@@ -18,7 +14,6 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 )
 
-// BlockSpec describes a block for the builder palette.
 type BlockSpec struct {
 	Kind        string      `json:"kind"`
 	Category    string      `json:"category"`
@@ -27,24 +22,22 @@ type BlockSpec struct {
 	Fields      []FieldSpec `json:"fields"`
 }
 
-// FieldSpec is one setting of a block shown in the inspector.
 type FieldSpec struct {
 	Key         string   `json:"key"`
 	Label       string   `json:"label"`
-	Type        string   `json:"type"` // text, textarea, select, secret
+	Type        string   `json:"type"`
 	Options     []string `json:"options,omitempty"`
 	Default     string   `json:"default,omitempty"`
 	Placeholder string   `json:"placeholder,omitempty"`
 	Help        string   `json:"help,omitempty"`
 }
 
-// Blocks is the palette. Kinds are stable identifiers stored in graphs.
 var Blocks = []BlockSpec{
 	{Kind: "trigger.webhook", Category: "trigger", Title: "Входящий webhook",
 		Description: "Источник отправляет события на /api/ingest/{id}. Ответ 2xx уходит только после записи события.",
 		Fields: []FieldSpec{
 			{Key: "auth", Label: "Проверка", Type: "select", Options: []string{"token", "none"}, Default: "token"},
-			{Key: "secret_ref", Label: "Ссылка на секрет", Type: "secret", Placeholder: "openbao://umbrella/connectors/<id>/token", Help: "Сам токен хранится только в хранилище секретов"},
+			{Key: "secret_ref", Label: "Токен источника", Type: "secret", Placeholder: "openbao://umbrella/connectors/<id>#token", Help: "Источник передаёт его в X-Umbrella-Token или Authorization: Bearer; значение хранится только в OpenBao"},
 		}},
 	{Kind: "trigger.schedule", Category: "trigger", Title: "Расписание",
 		Description: "Запускает получение данных с заданным интервалом (pull).",
@@ -52,13 +45,17 @@ var Blocks = []BlockSpec{
 			{Key: "interval", Label: "Интервал", Type: "text", Default: "60s", Placeholder: "30s, 1m, 5m"},
 		}},
 	{Kind: "fetch.http", Category: "fetch", Title: "HTTP-запрос",
-		Description: "GET или POST к REST API источника.",
+		Description: "GET или POST к REST API источника. Логины, пароли и токены берутся из OpenBao по ссылке.",
 		Fields: []FieldSpec{
 			{Key: "url", Label: "URL", Type: "text", Placeholder: "https://monitoring.example/api/problems"},
 			{Key: "method", Label: "Метод", Type: "select", Options: []string{"GET", "POST"}, Default: "GET"},
 			{Key: "body", Label: "Тело запроса", Type: "textarea"},
-			{Key: "auth_header", Label: "Заголовок авторизации", Type: "text", Placeholder: "Authorization"},
-			{Key: "secret_ref", Label: "Ссылка на секрет", Type: "secret", Placeholder: "openbao://umbrella/connectors/<id>/api"},
+			{Key: "auth", Label: "Авторизация", Type: "select", Options: []string{"none", "bearer", "basic", "apikey", "header"}, Default: "none"},
+			{Key: "username", Label: "Логин (Basic)", Type: "text"},
+			{Key: "secret_ref", Label: "Секрет", Type: "secret", Placeholder: "openbao://umbrella/connectors/<id>#token", Help: "Пароль или токен хранится только в OpenBao"},
+			{Key: "auth_header", Label: "Заголовок (режим header)", Type: "text", Placeholder: "Authorization"},
+			{Key: "headers", Label: "Заголовки", Type: "textarea", Placeholder: "Accept: application/json"},
+			{Key: "tls_skip_verify", Label: "Не проверять TLS", Type: "select", Options: []string{"false", "true"}, Default: "false"},
 		}},
 	{Kind: "parse.json", Category: "parse", Title: "Парсинг JSON",
 		Description: "Разбирает JSON. Путь к массиву разбивает пачку на отдельные события.",
@@ -112,7 +109,7 @@ var Blocks = []BlockSpec{
 			{Key: "value", Label: "Значение", Type: "text", Placeholder: "${value}"},
 		}},
 	{Kind: "ack.response", Category: "ack", Title: "Подтверждение получения",
-		Description: "Ответ источнику после записи событий. Для pull — сдвиг курсора.",
+		Description: "Push: ответ 2xx источнику только после записи событий. Pull: повторно полученные события отбрасываются по ID в источнике.",
 		Fields: []FieldSpec{
 			{Key: "mode", Label: "Способ", Type: "select", Options: []string{"http_2xx", "cursor"}, Default: "http_2xx"},
 		}},
@@ -121,7 +118,6 @@ var Blocks = []BlockSpec{
 		Fields:      []FieldSpec{}},
 }
 
-// Spec returns the palette entry for kind.
 func Spec(kind string) (BlockSpec, bool) {
 	for _, b := range Blocks {
 		if b.Kind == kind {
@@ -131,11 +127,8 @@ func Spec(kind string) (BlockSpec, bool) {
 	return BlockSpec{}, false
 }
 
-// Record is one event candidate flowing through the blocks.
 type Record map[string]any
 
-// Draft is the unified event a connector produces before the alert engine
-// resolves the CI and dedup key.
 type Draft struct {
 	Title      string            `json:"title"`
 	CI         string            `json:"ci"`
@@ -149,7 +142,6 @@ type Draft struct {
 	Raw        string            `json:"raw"`
 }
 
-// StepTrace is what one block did during a run; shown in dry-run.
 type StepTrace struct {
 	NodeID string `json:"node_id"`
 	Kind   string `json:"kind"`
@@ -160,14 +152,12 @@ type StepTrace struct {
 	Millis int64  `json:"ms"`
 }
 
-// Result of running a graph on one input.
 type Result struct {
 	Events []Draft      `json:"events"`
 	Trace  []StepTrace  `json:"trace"`
 	Errors []BlockError `json:"errors"`
 }
 
-// BlockError is a failure inside one block (goes to the parse error list).
 type BlockError struct {
 	NodeID string `json:"node_id"`
 	Kind   string `json:"kind"`
@@ -175,8 +165,6 @@ type BlockError struct {
 	Raw    string `json:"raw"`
 }
 
-// Validate checks that the graph has exactly one trigger, an output and no
-// cycles, and returns nodes in execution order.
 func Validate(g model.Graph) ([]model.Node, error) {
 	byID := map[string]model.Node{}
 	for _, n := range g.Nodes {
@@ -211,7 +199,7 @@ func Validate(g model.Graph) ([]model.Node, error) {
 		}
 		next[e.Source] = append(next[e.Source], e.Target)
 	}
-	// Kahn's algorithm from the trigger; unreachable blocks are skipped.
+
 	order := []model.Node{}
 	queue := []string{triggers[0].ID}
 	seen := map[string]bool{}
@@ -272,9 +260,6 @@ func reachable(from string, next map[string][]string) map[string]bool {
 	return r
 }
 
-// Run executes the graph on one raw input (webhook body or fetched page).
-// Branches are supported: each block receives the union of the records of
-// its parents.
 func Run(g model.Graph, raw string) (Result, error) {
 	order, err := Validate(g)
 	if err != nil {
@@ -325,9 +310,7 @@ func apply(n model.Node, in []Record, res *Result) ([]Record, error) {
 	}
 	switch n.Kind {
 	case "trigger.webhook", "trigger.schedule", "fetch.http", "ack.response":
-		// fetch.http is executed by the runtime before Run; the fetched body
-		// arrives as _raw. ack.response is performed by the caller after the
-		// events are written.
+
 		return in, nil
 	case "parse.json":
 		return parseJSON(in, c["items"])
@@ -433,7 +416,6 @@ func parseKV(in []Record, pairSep, kvSep string) ([]Record, error) {
 	return out, nil
 }
 
-// splitQuoted splits s by sep, keeping double-quoted parts together.
 func splitQuoted(s, sep string) []string {
 	var parts []string
 	var cur strings.Builder
@@ -542,7 +524,6 @@ func filter(in []Record, field, op, value string) []Record {
 	return out
 }
 
-// ParseMapping parses "k=v" lines; "*" is the default.
 func ParseMapping(s string) map[string]string {
 	m := map[string]string{}
 	for _, l := range lines(s) {
@@ -607,28 +588,25 @@ func mapEvent(in []Record, c map[string]string) []Record {
 
 var placeholder = regexp.MustCompile(`\$\{([^}]+)\}`)
 
-// Render substitutes ${path} with values from the record. ${path|default}
-// falls back to default when the field is missing; ${path|$other} falls
-// back to another field.
 func Render(tpl string, r Record) string {
 	return placeholder.ReplaceAllStringFunc(tpl, func(m string) string {
-		expr := m[2 : len(m)-1]
-		path, dflt, _ := strings.Cut(expr, "|")
-		v, ok := Lookup(map[string]any(r), strings.TrimSpace(path))
-		if !ok || Stringify(v) == "" {
-			if alt, isRef := strings.CutPrefix(dflt, "$"); isRef {
-				if av, ok := Lookup(map[string]any(r), alt); ok {
-					return Stringify(av)
-				}
-				return ""
-			}
-			return dflt
+		parts := strings.Split(m[2:len(m)-1], "|")
+		if v, ok := Lookup(map[string]any(r), strings.TrimSpace(parts[0])); ok && Stringify(v) != "" {
+			return Stringify(v)
 		}
-		return Stringify(v)
+		for _, alt := range parts[1:] {
+			ref, isRef := strings.CutPrefix(alt, "$")
+			if !isRef {
+				return alt
+			}
+			if v, ok := Lookup(map[string]any(r), ref); ok && Stringify(v) != "" {
+				return Stringify(v)
+			}
+		}
+		return ""
 	})
 }
 
-// Lookup walks a dot path through maps and arrays ("a.b.0.c").
 func Lookup(v any, path string) (any, bool) {
 	if path == "" {
 		return v, true
@@ -661,7 +639,6 @@ func Lookup(v any, path string) (any, bool) {
 	return cur, true
 }
 
-// Stringify renders a JSON value as text.
 func Stringify(v any) string {
 	switch t := v.(type) {
 	case nil:
@@ -680,7 +657,6 @@ func Stringify(v any) string {
 
 var resolvedWords = map[string]bool{"resolved": true, "ok": true, "closed": true, "recovery": true, "recovered": true, "normal": true, "inactive": true}
 
-// NormalizeSeverity maps common words to the four PagerDuty levels.
 func NormalizeSeverity(s string) model.Severity {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "critical", "crit", "fatal", "disaster", "emergency", "p1", "high":

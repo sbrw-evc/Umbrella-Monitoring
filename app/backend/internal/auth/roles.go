@@ -6,7 +6,6 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 )
 
-// Built-in role ids.
 const (
 	RoleAdmin      = "admin"
 	RoleMonitoring = "monitoring"
@@ -17,16 +16,14 @@ const (
 	RoleReader     = "reader"
 )
 
-// BuiltInRoles returns the default role set. Their permissions can be edited
-// except for admin; they cannot be deleted.
 func BuiltInRoles(now time.Time) []model.Role {
 	p := model.AllPermissions
 	return []model.Role{
 		{ID: RoleAdmin, Name: "Администратор", Description: "Все функции, пользователи и роли", Permissions: append([]string(nil), p...), AllServices: true},
-		{ID: RoleMonitoring, Name: "Инженер мониторинга", Description: "Коннекторы, CMDB, правила, каналы уведомлений", AllServices: true,
+		{ID: RoleMonitoring, Name: "Инженер мониторинга", Description: "Коннекторы, интеграции, CMDB, каналы уведомлений", AllServices: true,
 			Permissions: []string{model.PermIncidentsView, model.PermIncidentsAct, model.PermCMDBView, model.PermCMDBEdit, model.PermConnectorsView,
-				model.PermConnectorsEdit, model.PermEventsView, model.PermMaintenanceEdit, model.PermRulesView, model.PermNotifyEdit,
-				model.PermSelfcheckView, model.PermSelfcheckAdmin}},
+				model.PermConnectorsEdit, model.PermEventsView, model.PermMaintenanceEdit, model.PermNotifyEdit, model.PermRulesView, model.PermRulesEdit,
+				model.PermIntegrations, model.PermSelfcheckView}},
 		{ID: RoleOnCall, Name: "Дежурный инженер", Description: "Работа с инцидентами всех услуг", AllServices: true,
 			Permissions: []string{model.PermIncidentsView, model.PermIncidentsAct, model.PermCMDBView, model.PermEventsView,
 				model.PermMaintenanceEdit, model.PermRulesView, model.PermSelfcheckView}},
@@ -42,7 +39,6 @@ func BuiltInRoles(now time.Time) []model.Role {
 	}
 }
 
-// ValidPermission reports whether p is known.
 func ValidPermission(p string) bool {
 	for _, x := range model.AllPermissions {
 		if x == p {

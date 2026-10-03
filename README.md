@@ -4,7 +4,7 @@ Umbrella — веб-приложение зонтичного мониторин
 
 Код MVP-приложения (Go и React) лежит в [app](app/README.md): там описано, что уже работает, как запустить, и есть [скриншоты](app/README.md#скриншоты).
 
-Готовый стенд Umbrella с Zabbix и агентом, который ставится одной командой, сам настраивает связку и проверяет функции MVP, описан в [deploy/zabbix-lab](deploy/zabbix-lab/README.md).
+Стенд, который ставится одной командой, описан в [deploy/lab](deploy/lab/README.md): Umbrella с OpenBao, Zabbix, Prometheus с cAdvisor, логи PostgreSQL и контейнеров через Telegraf → Kafka → Fluentd → OpenSearch, NetBox с ответственными за КЕ и Grafana. Там же скрипт обновления без потери данных.
 
 ![Инциденты](app/docs/screens/incidents-light-ru.png)
 

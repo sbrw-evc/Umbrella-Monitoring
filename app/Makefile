@@ -1,8 +1,10 @@
-.PHONY: build test run dev-api dev-web image
+.PHONY: build test run dev-api dev-web image openbao-dev
+
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 build:
 	cd web && npm ci && npm run build
-	cd backend && go build -o umbrella ./cmd/umbrella
+	cd backend && go build -ldflags "-X main.version=$(VERSION)" -o umbrella ./cmd/umbrella
 
 test:
 	cd backend && go vet ./... && go test ./...
@@ -18,4 +20,10 @@ dev-web:
 	cd web && npm run dev
 
 image:
-	docker build -t umbrella:mvp .
+	docker build --build-arg VERSION=$(VERSION) -t umbrella:$(VERSION) -t umbrella:mvp .
+
+openbao-dev:
+	docker run -d --rm --name umbrella-openbao-dev -p 127.0.0.1:8200:8200 -e BAO_DEV_ROOT_TOKEN_ID=dev-root openbao/openbao:2.7.1 server -dev -dev-listen-address=0.0.0.0:8200
+	sleep 2
+	docker exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=dev-root umbrella-openbao-dev bao secrets enable -path=umbrella -version=2 kv
+	@echo 'export UMBRELLA_OPENBAO_ADDR=http://127.0.0.1:8200 UMBRELLA_OPENBAO_TOKEN=dev-root'

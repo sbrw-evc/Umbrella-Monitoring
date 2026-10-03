@@ -103,10 +103,10 @@ export function Drawer({
   )
 }
 
-export function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+export function Modal({ title, onClose, children, footer, wide }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }) {
   return (
     <div className="modal-wrap" onMouseDown={onClose}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+      <div className={`modal ${wide ? 'modal-wide' : ''}`} onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3>{title}</h3>
           <button className="icon-btn" onClick={onClose} title={t('common.actions.close')}>
@@ -161,4 +161,16 @@ export function SideList({
       {footer}
     </div>
   )
+}
+
+export function Toggle({ on, onChange, disabled, title }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean; title?: string }) {
+  return (
+    <button type="button" className={`switch ${on ? 'switch-on' : ''}`} onClick={() => onChange(!on)} disabled={disabled} title={title} aria-pressed={on}>
+      <span className="switch-knob" />
+    </button>
+  )
+}
+
+export function StatusDot({ ok, warn }: { ok: boolean; warn?: boolean }) {
+  return <span className={`dot ${ok ? 'dot-ok' : warn ? 'dot-warning' : 'dot-critical'}`} />
 }

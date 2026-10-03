@@ -1,18 +1,24 @@
 package auth
 
 import (
+	"bytes"
+	"encoding/gob"
+	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
-// Session lifetimes.
 var (
 	IdleTimeout = 12 * time.Hour
 	MaxLifetime = 7 * 24 * time.Hour
 )
 
-// Session is a browser sign-in. Sessions live in memory: a restart signs
-// everybody out.
+const sessionsFile = "sessions.gob"
+
 type Session struct {
 	ID       string
 	UserID   string
@@ -21,26 +27,24 @@ type Session struct {
 	LastSeen time.Time
 }
 
-// Sessions is the session table.
 type Sessions struct {
-	mu sync.Mutex
-	m  map[string]*Session
+	mu    sync.Mutex
+	m     map[string]*Session
+	dirty bool
 }
 
-// NewSessions creates an empty table.
 func NewSessions() *Sessions { return &Sessions{m: map[string]*Session{}} }
 
-// Create starts a session for the user.
 func (s *Sessions) Create(userID string) *Session {
 	now := time.Now()
 	ss := &Session{ID: RandomToken("", 32), UserID: userID, CSRF: RandomToken("", 24), Created: now, LastSeen: now}
 	s.mu.Lock()
 	s.m[TokenHash(ss.ID)] = ss
+	s.dirty = true
 	s.mu.Unlock()
 	return ss
 }
 
-// Get returns a live session and extends it.
 func (s *Sessions) Get(id string) *Session {
 	if id == "" {
 		return nil
@@ -55,21 +59,25 @@ func (s *Sessions) Get(id string) *Session {
 	}
 	if now.Sub(ss.LastSeen) > IdleTimeout || now.Sub(ss.Created) > MaxLifetime {
 		delete(s.m, key)
+		s.dirty = true
 		return nil
+	}
+	if now.Sub(ss.LastSeen) > time.Minute {
+		s.dirty = true
 	}
 	ss.LastSeen = now
 	c := *ss
+	c.ID = id
 	return &c
 }
 
-// Delete ends one session.
 func (s *Sessions) Delete(id string) {
 	s.mu.Lock()
 	delete(s.m, TokenHash(id))
+	s.dirty = true
 	s.mu.Unlock()
 }
 
-// DeleteUser ends every session of a user, except keep (may be empty).
 func (s *Sessions) DeleteUser(userID, keep string) {
 	k := ""
 	if keep != "" {
@@ -79,12 +87,12 @@ func (s *Sessions) DeleteUser(userID, keep string) {
 	for key, ss := range s.m {
 		if ss.UserID == userID && key != k {
 			delete(s.m, key)
+			s.dirty = true
 		}
 	}
 	s.mu.Unlock()
 }
 
-// Count returns the number of live sessions per user.
 func (s *Sessions) Count() map[string]int {
 	out := map[string]int{}
 	s.mu.Lock()
@@ -93,4 +101,53 @@ func (s *Sessions) Count() map[string]int {
 	}
 	s.mu.Unlock()
 	return out
+}
+
+func (s *Sessions) Save(dir string) error {
+	if dir == "" {
+		return nil
+	}
+	s.mu.Lock()
+	if !s.dirty {
+		s.mu.Unlock()
+		return nil
+	}
+	out := make(map[string]Session, len(s.m))
+	for k, ss := range s.m {
+		c := *ss
+		c.ID = ""
+		out[k] = c
+	}
+	s.dirty = false
+	s.mu.Unlock()
+	var buf bytes.Buffer
+	if err := gob.NewEncoder(&buf).Encode(out); err != nil {
+		return err
+	}
+	return store.WriteFileAtomic(filepath.Join(dir, sessionsFile), buf.Bytes())
+}
+
+func (s *Sessions) Load(dir string) error {
+	b, err := os.ReadFile(filepath.Join(dir, sessionsFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var in map[string]Session
+	if err := gob.NewDecoder(bytes.NewReader(b)).Decode(&in); err != nil {
+		return err
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, ss := range in {
+		if now.Sub(ss.LastSeen) > IdleTimeout || now.Sub(ss.Created) > MaxLifetime {
+			continue
+		}
+		c := ss
+		s.m[k] = &c
+	}
+	return nil
 }

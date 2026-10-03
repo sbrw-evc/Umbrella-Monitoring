@@ -11,38 +11,58 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/connector"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/demo"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/integration"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pagerduty"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/rules"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets/secretstest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
-
-type nopPD struct{}
-
-func (nopPD) Send(alert.PDCommand) {}
 
 const adminPassword = "Admin-pass-2026"
 
 func init() { auth.Iterations = 1000 }
 
-// token is the bearer token of the current test's administrator.
 var token string
 
-func newServerStore(t *testing.T) (*httptest.Server, *store.Store) {
+type testEnv struct {
+	ts    *httptest.Server
+	st    *store.Store
+	vault *secretstest.Fake
+	srv   *Server
+	rt    *connector.Runtime
+}
+
+func newEnv(t *testing.T, seed bool) *testEnv {
 	t.Helper()
 	st := store.New()
-	demo.Seed(st)
+	if seed {
+		seedFixture(st)
+	}
+	fake, vault := secretstest.New(t)
 	auth.Bootstrap(st, auth.BootstrapConfig{AdminPassword: adminPassword})
-	n := notify.New(notify.Config{AllowHTTP: true, Backoff: time.Millisecond}, st, connector.EnvSecrets{})
-	eng := alert.New(st, nopPD{}, n.Observe)
-	rt := connector.New(st, eng, connector.EnvSecrets{}, n.Observe)
-	srv := New(Config{AllowHTTPWebhooks: true}, st, eng, rt, pagerduty.New(pagerduty.Config{}), NewHub())
+	n := notify.New(notify.Config{AllowHTTP: true, Backoff: time.Millisecond}, st, vault)
+	pd := pagerduty.New(pagerduty.Config{PublicURL: "https://umbrella.example", Backoff: time.Millisecond}, st, vault)
+	eng := alert.New(st, pd, n.Observe)
+	eng.AutoCMDB = !seed
+	pd.SetResult(eng.PDResult)
+	pd.SetInbound(eng.PDInbound)
+	rt := connector.New(st, eng, vault, n.Observe)
+	im := integration.NewManager(st, vault, "https://umbrella.example")
+	srv := New(Config{AllowHTTPWebhooks: true, PublicURL: "https://umbrella.example", Version: "test"},
+		Deps{Store: st, Engine: eng, Runtime: rt, PagerDuty: pd, Hub: NewHub(), Vault: vault, Integrations: im, Rules: rules.New(st, im, eng)})
 	srv.SetNotifier(n)
 	go n.Run(t.Context())
+	go pd.Run(t.Context())
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	token = login(t, ts, "admin", adminPassword)
-	return ts, st
+	return &testEnv{ts: ts, st: st, vault: fake, srv: srv, rt: rt}
+}
+
+func newServerStore(t *testing.T) (*httptest.Server, *store.Store) {
+	e := newEnv(t, true)
+	return e.ts, e.st
 }
 
 func newServer(t *testing.T) *httptest.Server {
@@ -136,3 +156,5 @@ func TestPublishValidates(t *testing.T) {
 		t.Fatalf("publish invalid code = %d", code)
 	}
 }
+
+func jsonDecode(resp *http.Response, out any) error { return json.NewDecoder(resp.Body).Decode(out) }

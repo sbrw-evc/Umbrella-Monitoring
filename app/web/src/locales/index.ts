@@ -12,6 +12,11 @@ import * as incidents from './incidents'
 import * as menu from './menu'
 import * as misc from './misc'
 import * as ops from './ops'
+import * as rules from './rules'
+import * as integrations from './integrations'
+import * as cis from './cis'
+import * as setup from './setup'
+import * as teams from './teams'
 import * as settings from './settings'
 
 type Pair = { ru: Dict; en: Dict }
@@ -36,5 +41,10 @@ export const sections: Record<string, Pair> = {
   editor,
   blocks,
   ...miscSections,
+  rules,
+  integrations,
+  cis,
+  setup,
+  teams,
   settings,
 }

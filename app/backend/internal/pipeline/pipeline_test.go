@@ -107,3 +107,18 @@ func TestRenderDefault(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestRenderFallbackChain(t *testing.T) {
+	r := Record{"labels": map[string]any{"instance": "node:9100", "job": "node"}}
+	cases := map[string]string{
+		"${labels.ci|$labels.host|$labels.instance}": "node:9100",
+		"${labels.job|$labels.instance}":             "node",
+		"${labels.ci|$labels.host|none}":             "none",
+		"${labels.ci|$labels.host}":                  "",
+	}
+	for tpl, want := range cases {
+		if got := Render(tpl, r); got != want {
+			t.Errorf("%s = %q, want %q", tpl, got, want)
+		}
+	}
+}

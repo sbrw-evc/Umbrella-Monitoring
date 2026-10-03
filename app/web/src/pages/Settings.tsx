@@ -1,9 +1,11 @@
-import { Check, Download, Languages, Palette, Sparkles, Trash2, Upload } from 'lucide-react'
+import { Check, Database, Download, Languages, Palette, Sparkles, Trash2, Upload, Users } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { useApp } from '../context'
+import { api, type StorageView } from '../api'
+import { useApp, useFetch } from '../context'
+import { dbFromView, DbFields, type DbForm } from './Setup'
 import { loadMotion, saveMotion, type Motion } from '../motion'
 import { BUILT_IN_LOCALES, coverage, download, localeTemplate, parseLocale, t, type Dict } from '../i18n'
-import { PageHeader, Tabs } from '../components/ui'
+import { Field, PageHeader, Tabs } from '../components/ui'
 import { parseTheme, resolveColors, themeTemplate, THEME_GROUP_HELP, BUILT_IN_THEMES, type Theme } from '../theme'
 
 type Tab = 'themes' | 'languages'
@@ -27,6 +29,8 @@ export function SettingsPage() {
         />
         {tab === 'themes' ? <ThemesSection /> : <LanguagesSection />}
         <MotionSection />
+        <DefaultsSection />
+        <StorageSection />
       </div>
     </div>
   )
@@ -338,5 +342,97 @@ function LanguagesSection() {
         </div>
       </section>
     </>
+  )
+}
+
+function DefaultsSection() {
+  const { can, toast } = useApp()
+  const allowed = can('integrations.edit')
+  const { data, setData } = useFetch<{ settings: { default_theme: string; default_locale: string } }>(allowed ? '/api/settings' : null)
+  if (!allowed || !data) return null
+  const save = async (patch: Record<string, string>) => {
+    try {
+      setData(await api.put<{ settings: { default_theme: string; default_locale: string } }>('/api/settings', patch))
+      toast(t('settings.defaults.saved'))
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
+  return (
+    <section className="card">
+      <div className="card-head">
+        <div>
+          <h3>
+            <Users size={16} /> {t('settings.defaults.title')}
+          </h3>
+          <p className="hint">{t('settings.defaults.intro')}</p>
+        </div>
+      </div>
+      <div className="row2">
+        <Field label={t('settings.defaults.theme')}>
+          <div className="seg">
+            {['light', 'dark'].map((x) => (
+              <button key={x} className={`seg-btn ${data.settings.default_theme === x ? 'seg-active' : ''}`} onClick={() => save({ default_theme: x })}>
+                {t(`setup.look.themes.${x}`)}
+              </button>
+            ))}
+          </div>
+        </Field>
+        <Field label={t('settings.defaults.locale')}>
+          <div className="seg">
+            {[
+              ['ru', 'Русский'],
+              ['en', 'English'],
+            ].map(([id, name]) => (
+              <button key={id} className={`seg-btn ${data.settings.default_locale === id ? 'seg-active' : ''}`} onClick={() => save({ default_locale: id })}>
+                {name}
+              </button>
+            ))}
+          </div>
+        </Field>
+      </div>
+    </section>
+  )
+}
+
+function StorageSection() {
+  const { can, meta, toast } = useApp()
+  const allowed = can('users.admin')
+  const { data, reload } = useFetch<StorageView>(allowed ? '/api/settings/storage' : null)
+  const [db, setDb] = useState<DbForm | null>(null)
+  const [busy, setBusy] = useState(false)
+  if (!allowed || !data) return null
+  const form = db ?? dbFromView(data)
+  const body = () => (form.kind === 'postgres' ? { ...form } : { kind: 'file' })
+  const apply = async () => {
+    setBusy(true)
+    try {
+      const r = await api.put<StorageView & { adopted: boolean }>('/api/settings/storage', body())
+      toast(r.adopted ? t('setup.done.adopted') : t('settings.storage.saved'))
+      setDb(null)
+      reload()
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <section className="card">
+      <div className="card-head">
+        <div>
+          <h3>
+            <Database size={16} /> {t('settings.storage.title')}
+          </h3>
+          <p className="hint">{t('settings.storage.intro')}</p>
+        </div>
+      </div>
+      <DbFields db={form} setDb={(f) => setDb(f(form))} storage={data} openbao={!!meta?.openbao} test={() => api.post('/api/setup/database/test', body())} />
+      <div className="section">
+        <button className="btn btn-primary" onClick={apply} disabled={busy || !db}>
+          {t('settings.storage.apply')}
+        </button>
+      </div>
+    </section>
   )
 }

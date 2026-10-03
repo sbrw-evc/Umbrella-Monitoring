@@ -10,15 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/connector"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pagerduty"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
-// newUser creates a user with a password that need not be changed.
 func newUser(t *testing.T, ts *httptest.Server, username string, roles, services []string) string {
 	t.Helper()
 	b, _ := json.Marshal(map[string]any{"username": username, "name": username, "password": "Secret-pass-77",
@@ -66,7 +59,6 @@ func TestViewerCannotAct(t *testing.T) {
 	}
 }
 
-// An owner bound to "Интернет-банк" sees its dependency tree only.
 func TestOwnerScope(t *testing.T) {
 	ts := newServer(t)
 	newUser(t, ts, "owner1", []string{"owner"}, []string{"CI-2"})
@@ -305,8 +297,6 @@ func TestTeamsAndZoomChannels(t *testing.T) {
 		}
 	}
 
-	// Teams got the test; payments incident: both channels; web incident:
-	// only Teams; a warning is below the Teams threshold.
 	do(t, "POST", ts.URL+"/api/ingest/CON-4", `{"id":"n1","service":"Платёжный шлюз","signal":"red.errors","severity":"critical","state":"firing","title":"pay down"}`, nil)
 	do(t, "POST", ts.URL+"/api/ingest/CON-4", `{"id":"n2","service":"Личный кабинет","signal":"red.errors","severity":"error","state":"firing","title":"lk down"}`, nil)
 	do(t, "POST", ts.URL+"/api/ingest/CON-4", `{"id":"n3","service":"Личный кабинет","signal":"use.errors","severity":"warning","state":"firing","title":"too low"}`, nil)
@@ -350,16 +340,8 @@ func TestMetrics(t *testing.T) {
 	}
 }
 
-// A deployment without demo data: empty CMDB filled from events.
 func TestCleanStartAutoCMDB(t *testing.T) {
-	st := store.New()
-	auth.Bootstrap(st, auth.BootstrapConfig{AdminPassword: adminPassword})
-	eng := alert.New(st, nopPD{}, nil)
-	eng.AutoCMDB = true
-	rt := connector.New(st, eng, connector.EnvSecrets{}, nil)
-	ts := httptest.NewServer(New(Config{}, st, eng, rt, pagerduty.New(pagerduty.Config{}), NewHub()).Handler())
-	t.Cleanup(ts.Close)
-	token = login(t, ts, "admin", adminPassword)
+	ts := newEnv(t, false).ts
 
 	var cis struct {
 		Items []struct{ Name, Origin string }
