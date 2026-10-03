@@ -260,11 +260,18 @@ if [ "$ZABBIX_E2E" = 1 ]; then
       sleep 6
     done
     check "Zabbix agent 2 on $LAB_HOST is available" "$(is "$AVAIL" 1)"
+    MEMITEM=$(zbx item.get "$(jq -nc --arg h "$HOSTID" '{hostids:[$h],filter:{key_:"vm.memory.size[total]"},output:["itemid","lastclock"]}')")
+    MEMID=$(jq -r '.[0].itemid // empty' <<<"$MEMITEM")
+    MEMCLOCK=$(jq -r '.[0].lastclock // "0"' <<<"$MEMITEM")
+    [ -z "$MEMID" ] || zbx task.create "$(jq -nc --arg i "$MEMID" '[{type:6,request:{itemid:$i}}]')" >/dev/null || true
     ZMEM=""
-    for i in $(seq 1 20); do
-      ZMEM=$(zbx item.get "$(jq -nc --arg h "$HOSTID" '{hostids:[$h],filter:{key_:"vm.memory.size[total]"},output:["lastvalue"]}')" | jq -r '.[0].lastvalue // empty')
-      [ -n "$ZMEM" ] && [ "$ZMEM" != 0 ] && break
-      sleep 6
+    for i in $(seq 1 30); do
+      MEMITEM=$(zbx item.get "$(jq -nc --arg h "$HOSTID" '{hostids:[$h],filter:{key_:"vm.memory.size[total]"},output:["lastvalue","lastclock"]}')")
+      if [ "$(jq -r '.[0].lastclock // "0"' <<<"$MEMITEM")" != "$MEMCLOCK" ]; then
+        ZMEM=$(jq -r '.[0].lastvalue // empty' <<<"$MEMITEM")
+        break
+      fi
+      sleep 3
     done
     PMEM=$(http GET "$PROM_URL/api/v1/query?query=node_memory_MemTotal_bytes" | jq -r '.data.result[0].value[1] // empty')
     check "Zabbix and node-exporter see the same host memory (Zabbix $ZMEM, node-exporter $PMEM)" \
