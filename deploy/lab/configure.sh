@@ -112,16 +112,17 @@ for i in $(seq 1 100); do
   [ "$(osd GET /api/status | jq -r '.status.overall.state // empty' 2>/dev/null)" = green ] && break
   sleep 3
 done
+for i in $(seq 1 40); do
+  os_api GET /_index_template/umbrella-logs >/dev/null
+  [ "$(umb_status)" = 200 ] && break
+  sleep 3
+done
+[ "$(umb_status)" = 200 ] || warn "index template umbrella-logs is missing: check docker compose logs fluentd"
 for idx in pg-logs container-logs; do
-  os_api PUT "/_index_template/$idx" "$(jq -nc --arg p "$idx-*" '{index_patterns:[$p],template:{settings:{number_of_shards:1,number_of_replicas:0},
-    mappings:{properties:{"@timestamp":{type:"date"},level:{type:"keyword"},host:{type:"keyword"},service:{type:"keyword"},
-    error_code:{type:"keyword"},sqlstate:{type:"keyword"},pg_level:{type:"keyword"},duration_ms:{type:"float"},
-    container:{type:"keyword"},image:{type:"keyword"},stream:{type:"keyword"},collector:{type:"keyword"},message:{type:"text"}}}}}')" >/dev/null
-  [ "$(umb_status)" = 200 ] || warn "index template $idx answered $(umb_status)"
   osd POST "/api/saved_objects/index-pattern/$idx?overwrite=true" "$(jq -nc --arg t "$idx-*" '{attributes:{title:$t,timeFieldName:"@timestamp"}}')" >/dev/null
 done
 osd POST /api/opensearch-dashboards/settings '{"changes":{"defaultIndex":"container-logs"}}' >/dev/null || true
-log "  index templates and patterns pg-logs-*, container-logs-*"
+log "  index template umbrella-logs (applied by Fluentd), patterns pg-logs-*, container-logs-*"
 
 log "Umbrella: Grafana link"
 umb PUT /api/settings "$(jq -nc --arg u "http://${PUBLIC_HOST:-localhost}:${GRAFANA_PORT:-3000}/d/umbrella-incidents" '{grafana_url:$u}')" >/dev/null
@@ -171,14 +172,14 @@ BS_MON=$(ensure_ci "Мониторинг (стенд)" business_service "$LAB_TE
 BS_CAT=$(ensure_ci "Каталог (NetBox)" business_service infra "Бизнес-услуга: инвентарь и ответственные")
 svc_ci() {
   local id
-  id=$(ensure_ci "$1" it_service "$3" "$4")
+  id=$(ensure_ci "$1" it_service "$3" "$4") || exit 1
   ensure_relation "$2" "$id" depends_on
   printf '%s' "$id"
 }
 IT_METRICS=$(svc_ci "Сбор метрик" "$BS_MON" "$LAB_TEAM" "Zabbix и Prometheus")
 IT_LOGS=$(svc_ci "Сбор логов" "$BS_MON" "$LAB_TEAM" "Telegraf → Kafka → Fluentd → OpenSearch")
-IT_UMB=$(svc_ci "Umbrella" "$BS_MON" "$LAB_TEAM" "Umbrella и OpenBao")
-IT_NB=$(svc_ci "NetBox" "$BS_CAT" infra "NetBox, PostgreSQL, Valkey")
+IT_UMB=$(svc_ci "Платформа Umbrella" "$BS_MON" "$LAB_TEAM" "Umbrella и OpenBao")
+IT_NB=$(svc_ci "Инвентарь NetBox" "$BS_CAT" infra "NetBox, PostgreSQL, Valkey")
 HOST_ID=$(ci_id "$LAB_HOST")
 link() {
   local id

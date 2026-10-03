@@ -19,6 +19,7 @@ type Host struct {
 	Name         string
 	IPs          []string
 	DNS          []string
+	Addresses    []string
 	Instances    []string
 	Type         string
 	Team         string
@@ -67,32 +68,75 @@ func activeIdentity(ci *model.CI, kind, value string) bool {
 	return false
 }
 
-func matchHost(d *store.Data, kind, idv string, h Host) *model.CI {
+func boundElsewhere(ci *model.CI, kind, prefix, idv string) bool {
+	for _, i := range ci.Identities {
+		if i.Kind == kind && i.Until == nil && strings.HasPrefix(i.Value, prefix) && !strings.EqualFold(i.Value, idv) {
+			return true
+		}
+	}
+	return false
+}
+
+func nameMatches(ci *model.CI, n string) bool {
+	if n == "" {
+		return false
+	}
+	short := strings.SplitN(n, ".", 2)[0]
+	return strings.EqualFold(ci.Name, n) || strings.EqualFold(ci.Name, short) || activeIdentity(ci, "hostname", n)
+}
+
+func matchHost(d *store.Data, kind, prefix, idv string, h Host, weak bool) *model.CI {
 	for _, ci := range d.CIs {
 		if activeIdentity(ci, kind, idv) {
 			return ci
 		}
 	}
-	names := append([]string{h.Name}, h.DNS...)
-	for _, n := range names {
-		if n == "" {
-			continue
+	free := func(ci *model.CI) bool { return !boundElsewhere(ci, kind, prefix, idv) }
+	for _, ci := range d.CIs {
+		if free(ci) && nameMatches(ci, h.Name) {
+			return ci
 		}
-		short := strings.SplitN(n, ".", 2)[0]
+	}
+	if !weak {
+		return nil
+	}
+	for _, n := range h.DNS {
 		for _, ci := range d.CIs {
-			if strings.EqualFold(ci.Name, n) || strings.EqualFold(ci.Name, short) || activeIdentity(ci, "hostname", n) {
+			if free(ci) && nameMatches(ci, n) {
 				return ci
 			}
 		}
 	}
 	for _, ip := range h.IPs {
 		for _, ci := range d.CIs {
-			if activeIdentity(ci, "ip", ip) {
+			if free(ci) && activeIdentity(ci, "ip", ip) {
 				return ci
 			}
 		}
 	}
+	for _, a := range h.Addresses {
+		for _, ci := range d.CIs {
+			if free(ci) && (nameMatches(ci, a) || activeIdentity(ci, "address", a)) {
+				return ci
+			}
+		}
+	}
+	for _, ci := range d.CIs {
+		if free(ci) && reachedAt(ci, h.Name) {
+			return ci
+		}
+	}
 	return nil
+}
+
+func reachedAt(ci *model.CI, name string) bool {
+	for _, i := range ci.Identities {
+		if i.Kind == "address" && i.Until == nil &&
+			(strings.EqualFold(i.Value, name) || strings.EqualFold(strings.SplitN(i.Value, ".", 2)[0], name)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) upsertHosts(d *store.Data, it model.Integration, hosts []Host, missing string, now time.Time) discoveryResult {
@@ -100,14 +144,23 @@ func (m *Manager) upsertHosts(d *store.Data, it model.Integration, hosts []Host,
 	authoritative := it.Type == TypeNetBox
 	res := discoveryResult{Found: len(hosts)}
 	seen := map[string]bool{}
+	prefix := it.ID + ":"
+	var strong, rest []Host
 	for _, h := range hosts {
 		h.Name = strings.TrimSpace(h.Name)
 		if h.Name == "" {
 			continue
 		}
+		if matchHost(d, kind, prefix, identityValue(it.ID, h.Key), h, false) != nil {
+			strong = append(strong, h)
+		} else {
+			rest = append(rest, h)
+		}
+	}
+	for _, h := range append(strong, rest...) {
 		idv := identityValue(it.ID, h.Key)
 		seen[idv] = true
-		ci := matchHost(d, kind, idv, h)
+		ci := matchHost(d, kind, prefix, idv, h, true)
 		if ci == nil {
 			typ := h.Type
 			if typ == "" {
@@ -179,6 +232,9 @@ func (m *Manager) upsertHosts(d *store.Data, it model.Integration, hosts []Host,
 		for _, ip := range h.IPs {
 			addIdentity(ci, "ip", ip, now)
 		}
+		for _, a := range h.Addresses {
+			addIdentity(ci, "address", a, now)
+		}
 		for _, in := range h.Instances {
 			addIdentity(ci, "instance", in, now)
 		}
@@ -197,7 +253,6 @@ func (m *Manager) upsertHosts(d *store.Data, it model.Integration, hosts []Host,
 		t := now
 		ci.UpdatedAt = &t
 	}
-	prefix := it.ID + ":"
 	for id, ci := range d.CIs {
 		for i := range ci.Identities {
 			idn := &ci.Identities[i]
@@ -356,8 +411,8 @@ func zabbixHosts(ctx context.Context, it model.Integration, secret string) ([]Ho
 			if in.IP != "" && in.IP != "127.0.0.1" && in.IP != "0.0.0.0" {
 				x.IPs = append(x.IPs, in.IP)
 			}
-			if in.DNS != "" {
-				x.DNS = append(x.DNS, in.DNS)
+			if in.DNS != "" && !strings.EqualFold(in.DNS, h.Host) {
+				x.Addresses = append(x.Addresses, in.DNS)
 			}
 		}
 		var groups []string
@@ -425,8 +480,8 @@ func prometheusHosts(ctx context.Context, it model.Integration, secret string) (
 		h.Instances = append(h.Instances, inst)
 		if ip := net.ParseIP(hostPart); ip != nil {
 			h.IPs = append(h.IPs, hostPart)
-		} else if hostPart != name {
-			h.DNS = append(h.DNS, hostPart)
+		} else if !strings.EqualFold(hostPart, name) {
+			h.Addresses = append(h.Addresses, hostPart)
 		}
 		jobsLabel := h.Labels["prometheus_jobs"]
 		if !strings.Contains(","+jobsLabel+",", ","+t.Labels["job"]+",") {
