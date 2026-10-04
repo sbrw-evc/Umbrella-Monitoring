@@ -12,18 +12,17 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/api"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/app"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/connector"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/integration"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pagerduty"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/rules"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/config"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/setup"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
@@ -41,10 +40,37 @@ func fail(msg string, err error) {
 	os.Exit(1)
 }
 
+type switchHandler struct{ h atomic.Value }
+
+func (s *switchHandler) Set(h http.Handler) { s.h.Store(&h) }
+
+func (s *switchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	(*s.h.Load().(*http.Handler)).ServeHTTP(w, r)
+}
+
+type runtime struct {
+	mu      sync.Mutex
+	cancel  context.CancelFunc
+	done    chan struct{}
+	backend *store.PGBackend
+}
+
+func (rt *runtime) stop() {
+	rt.mu.Lock()
+	cancel, done, backend := rt.cancel, rt.done, rt.backend
+	rt.mu.Unlock()
+	if cancel == nil {
+		return
+	}
+	cancel()
+	<-done
+	backend.Close()
+}
+
 func main() {
 	addr := flag.String("addr", env("UMBRELLA_ADDR", ":8080"), "listen address")
 	web := flag.String("web", env("UMBRELLA_WEB_DIR", "../web/dist"), "built web UI directory")
-	dataDir := flag.String("data", env("UMBRELLA_DATA_DIR", "data"), "state directory; empty keeps state in memory only")
+	dataDir := flag.String("data", env("UMBRELLA_DATA_DIR", "data"), "directory for umbrella.json and sessions")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	healthcheck := flag.Bool("healthcheck", false, "probe /healthz of the running server and exit 0 when it answers")
 	flag.Parse()
@@ -55,182 +81,150 @@ func main() {
 	if *healthcheck {
 		os.Exit(probe(*addr))
 	}
+	if *dataDir == "" {
+		fail("data directory", errors.New("UMBRELLA_DATA_DIR must not be empty"))
+	}
+	if err := os.MkdirAll(*dataDir, 0o700); err != nil {
+		fail("data directory", err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	publicURL := env("UMBRELLA_PUBLIC_URL", "http://localhost:8080")
-
-	vault, err := secrets.New(secrets.Config{
-		Addr:               os.Getenv("UMBRELLA_OPENBAO_ADDR"),
-		Mount:              env("UMBRELLA_OPENBAO_MOUNT", "umbrella"),
-		Namespace:          os.Getenv("UMBRELLA_OPENBAO_NAMESPACE"),
-		Token:              os.Getenv("UMBRELLA_OPENBAO_TOKEN"),
-		TokenFile:          os.Getenv("UMBRELLA_OPENBAO_TOKEN_FILE"),
-		RoleID:             os.Getenv("UMBRELLA_OPENBAO_ROLE_ID"),
-		RoleIDFile:         os.Getenv("UMBRELLA_OPENBAO_ROLE_ID_FILE"),
-		SecretID:           os.Getenv("UMBRELLA_OPENBAO_SECRET_ID"),
-		SecretIDFile:       os.Getenv("UMBRELLA_OPENBAO_SECRET_ID_FILE"),
-		CACert:             os.Getenv("UMBRELLA_OPENBAO_CACERT"),
-		InsecureSkipVerify: env("UMBRELLA_OPENBAO_SKIP_VERIFY", "false") == "true",
-	})
-	if err != nil {
-		fail("openbao client", err)
-	}
-	if vault.Enabled() {
-		wait, err := time.ParseDuration(env("UMBRELLA_OPENBAO_WAIT", "2m"))
-		if err != nil {
-			wait = 2 * time.Minute
-		}
-		if err := vault.Ready(ctx, wait); err != nil {
-			fail("openbao is not ready", err)
-		}
-		slog.Info("openbao connected", "addr", os.Getenv("UMBRELLA_OPENBAO_ADDR"), "mount", vault.Mount())
-		go vault.Run(ctx)
-	} else {
-		slog.Warn("OpenBao is not configured: secrets cannot be stored, PagerDuty, integrations and channels stay unavailable",
-			"hint", "set UMBRELLA_OPENBAO_ADDR and UMBRELLA_OPENBAO_ROLE_ID/SECRET_ID or UMBRELLA_OPENBAO_TOKEN")
-	}
-	secret := func(key string) string {
-		v, err := secrets.Value(vault, os.Getenv(key))
-		if errors.Is(err, secrets.ErrNotFound) {
-			slog.Warn("secret not found in OpenBao, the setting stays empty", "env", key, "ref", os.Getenv(key))
-			return ""
-		}
-		if err != nil {
-			fail(key, err)
-		}
-		return v
-	}
-
-	st := store.New()
-	if *dataDir != "" {
-		cfg, err := store.ReadStorageConfig(*dataDir)
-		if err != nil {
-			fail("storage config", err)
-		}
-		backend, err := openStorage(ctx, cfg, *dataDir, vault)
-		if err != nil {
-			fail("storage", err)
-		}
-		restored, err := st.Attach(ctx, backend)
-		if err != nil {
-			fail("state", err)
-		}
-		if !restored {
-			slog.Info("clean start", "storage", backend.Kind(), "where", backend.Where())
-		}
-	} else {
-		slog.Warn("UMBRELLA_DATA_DIR is empty: state lives in memory and is lost on restart")
-	}
-
-	hub := api.NewHub()
-	if o := env("UMBRELLA_WS_ORIGINS", "localhost:*,127.0.0.1:*"); o != "" {
-		hub.Origins = strings.Split(o, ",")
-	}
-	pd := pagerduty.New(pagerduty.Config{PublicURL: publicURL}, st, vault)
-	notifier := notify.New(notify.Config{PublicURL: publicURL,
-		AllowHTTP: env("UMBRELLA_ALLOW_HTTP_WEBHOOKS", "false") == "true"}, st, vault)
-	publish := func(kind string, v any) {
-		hub.Publish(kind, v)
-		notifier.Observe(kind, v)
-	}
-	eng := alert.New(st, pd, publish)
-	eng.AutoCMDB = env("UMBRELLA_CMDB_AUTO", "true") == "true"
-	pd.SetResult(eng.PDResult)
-	pd.SetInbound(eng.PDInbound)
-	rt := connector.New(st, eng, vault, publish)
-	integrations := integration.NewManager(st, vault, publicURL)
-	integrations.SetFeed(rt.Webhook)
-	ruleEngine := rules.New(st, integrations, eng)
-
-	var tokens []auth.ServiceToken
-	if t := secret("UMBRELLA_GRAFANA_TOKEN"); t != "" {
-		tokens = append(tokens, auth.ServiceToken{User: "grafana", Role: auth.RoleReader, Token: t})
-	}
-	auth.Bootstrap(st, auth.BootstrapConfig{AdminUser: env("UMBRELLA_ADMIN_USER", "admin"),
-		AdminPassword: secret("UMBRELLA_ADMIN_PASSWORD"), ServiceTokens: tokens})
-
-	setupToken := ""
-	st.Read(func(d *store.Data) {
-		if d.Settings.SetupCompleted {
-			return
-		}
-		for _, u := range d.Users {
-			if !u.Service {
-				return
-			}
-		}
-		setupToken = auth.RandomToken("", 9)
-	})
-	if setupToken != "" {
-		if *dataDir != "" {
-			_ = os.MkdirAll(*dataDir, 0o700)
-			_ = os.WriteFile(filepath.Join(*dataDir, api.SetupTokenFile), []byte(setupToken+"\n"), 0o600)
-		}
-		slog.Warn("first start: open the web UI and finish the setup wizard", "setup_code", setupToken,
-			"file", filepath.Join(*dataDir, api.SetupTokenFile))
-	}
 
 	webDir := *web
 	if fi, err := os.Stat(webDir); err != nil || !fi.IsDir() {
 		slog.Warn("web UI not found, serving API only", "dir", webDir)
 		webDir = ""
 	}
-	server := api.New(api.Config{WebDir: webDir, PublicURL: publicURL, Version: version, DataDir: *dataDir, SetupToken: setupToken,
-		SecureCookies:     env("UMBRELLA_SECURE_COOKIES", "false") == "true",
-		MetricsToken:      secret("UMBRELLA_METRICS_TOKEN"),
-		AllowHTTPWebhooks: env("UMBRELLA_ALLOW_HTTP_WEBHOOKS", "false") == "true"},
-		api.Deps{Store: st, Engine: eng, Runtime: rt, PagerDuty: pd, Hub: hub, Vault: vault, Integrations: integrations, Rules: ruleEngine})
-	server.SetNotifier(notifier)
-	sessions := server.Sessions()
-	if *dataDir != "" {
-		if err := sessions.Load(*dataDir); err != nil {
-			slog.Warn("sessions not restored", "err", err)
-		}
+	webHandler := httpx.Web(webDir)
+	opts := app.Options{Version: version, SecureCookies: env("UMBRELLA_SECURE_COOKIES", "false") == "true", Web: webHandler}
+	sessions := auth.NewSessions()
+	if err := sessions.Load(*dataDir); err != nil {
+		slog.Warn("sessions not restored", "err", err)
 	}
 
-	bg, cancelBg := context.WithCancel(context.Background())
-	go pd.Run(bg)
-	go pd.RunSync(bg)
-	go notifier.Run(bg)
-	go rt.Run(bg)
-	go ruleEngine.Run(bg)
-	go integrations.Run(bg)
-	go func() {
-		tk := time.NewTicker(5 * time.Second)
-		defer tk.Stop()
-		for {
-			select {
-			case <-bg.Done():
-				return
-			case <-tk.C:
-				eng.Tick()
-			}
-		}
-	}()
-	saved := make(chan struct{})
-	go func() {
-		st.Run(bg, 2*time.Second, func() error { return sessions.Save(*dataDir) })
-		close(saved)
-	}()
+	rt := &runtime{}
+	handler := &switchHandler{}
+	start := func(cfg config.File, vault *secrets.Client, backend *store.PGBackend, st *store.Store) {
+		bg, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go vault.Run(bg)
+		go func() {
+			st.Run(bg, 2*time.Second, func() error { return sessions.Save(*dataDir) })
+			close(done)
+		}()
+		rt.mu.Lock()
+		rt.cancel, rt.done, rt.backend = cancel, done, backend
+		rt.mu.Unlock()
+		a := app.New(opts, app.Deps{Config: cfg, Vault: vault, Backend: backend, Store: st, Sessions: sessions})
+		handler.Set(a.Handler())
+	}
 
-	srv := &http.Server{Addr: *addr, Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	cfg, found, err := config.Read(*dataDir)
+	if err != nil {
+		fail("configuration", err)
+	}
+	if found && cfg.CompletedAt != nil {
+		vault, backend, st, err := open(ctx, cfg)
+		if err != nil {
+			fail("startup", err)
+		}
+		start(cfg, vault, backend, st)
+		slog.Info("umbrella ready", "openbao", cfg.OpenBao.Addr, "storage", backend.Where())
+	} else {
+		token, err := setupToken(*dataDir)
+		if err != nil {
+			fail("setup code", err)
+		}
+		mod := setup.New(setup.Options{DataDir: *dataDir, Token: token, Version: version, Web: webHandler},
+			func(r setup.Result) { start(r.Config, r.Vault, r.Backend, r.Store) })
+		handler.Set(mod.Handler())
+		slog.Warn("first start: open the web UI and finish the setup wizard", "setup_code", token,
+			"file", filepath.Join(*dataDir, config.SetupTokenFile))
+	}
+
+	srv := &http.Server{Addr: *addr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(sctx)
 	}()
-	slog.Info("umbrella started", "version", version, "addr", *addr, "data_dir", *dataDir, "openbao", vault.Enabled(),
-		"pagerduty", pd.Status().Enabled)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		cancelBg()
-		<-saved
+	slog.Info("umbrella started", "version", version, "addr", *addr, "data_dir", *dataDir)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		rt.stop()
 		fail("server failed", err)
 	}
-	cancelBg()
-	<-saved
-	slog.Info("umbrella stopped, state saved")
+	rt.stop()
+	if err := sessions.Save(*dataDir); err != nil {
+		slog.Warn("sessions not saved", "err", err)
+	}
+	slog.Info("umbrella stopped")
+}
+
+func open(ctx context.Context, cfg config.File) (*secrets.Client, *store.PGBackend, *store.Store, error) {
+	vault, err := cfg.OpenBao.Client()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	wait, err := time.ParseDuration(env("UMBRELLA_STARTUP_WAIT", "2m"))
+	if err != nil {
+		wait = 2 * time.Minute
+	}
+	if err := vault.Ready(ctx, wait); err != nil {
+		return nil, nil, nil, fmt.Errorf("OpenBao %s: %w", cfg.OpenBao.Addr, err)
+	}
+	pg := cfg.Postgres
+	if cfg.PostgresPasswordRef != "" {
+		if pg.Password, err = vault.Resolve(cfg.PostgresPasswordRef); err != nil {
+			return nil, nil, nil, fmt.Errorf("PostgreSQL password: %w", err)
+		}
+	}
+	deadline := time.Now().Add(wait)
+	var backend *store.PGBackend
+	for {
+		backend, err = store.OpenPostgres(ctx, pg)
+		if err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			return nil, nil, nil, err
+		}
+		slog.Info("waiting for PostgreSQL", "err", err)
+		select {
+		case <-ctx.Done():
+			return nil, nil, nil, ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
+	st := store.New()
+	restored, err := st.Attach(ctx, backend)
+	if err != nil {
+		backend.Close()
+		return nil, nil, nil, err
+	}
+	if !restored {
+		backend.Close()
+		return nil, nil, nil, errors.New("the database has no Umbrella state: restore it or remove umbrella.json to run the setup wizard again")
+	}
+	return vault, backend, st, nil
+}
+
+func setupToken(dir string) (string, error) {
+	if t := strings.TrimSpace(os.Getenv("UMBRELLA_SETUP_TOKEN")); t != "" {
+		return t, nil
+	}
+	path := filepath.Join(dir, config.SetupTokenFile)
+	if b, err := os.ReadFile(path); err == nil {
+		if t := strings.TrimSpace(string(b)); t != "" {
+			return t, nil
+		}
+	}
+	t := auth.RandomToken("", 12)
+	if err := store.WriteFileAtomic(path, []byte(t+"\n")); err != nil {
+		return "", err
+	}
+	return t, nil
 }
 
 func probe(addr string) int {
@@ -251,27 +245,4 @@ func probe(addr string) int {
 		return 1
 	}
 	return 0
-}
-
-func openStorage(ctx context.Context, cfg store.StorageConfig, dir string, vault *secrets.Client) (store.Backend, error) {
-	if cfg.Kind != "postgres" {
-		return store.FileBackend{Dir: dir}, nil
-	}
-	deadline := time.Now().Add(2 * time.Minute)
-	for {
-		b, err := cfg.Open(ctx, dir, vault.Resolve)
-		if err == nil {
-			slog.Info("state storage connected", "kind", "postgres", "where", b.Where())
-			return b, nil
-		}
-		if time.Now().After(deadline) {
-			return nil, err
-		}
-		slog.Info("waiting for the state database", "err", err)
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(3 * time.Second):
-		}
-	}
 }

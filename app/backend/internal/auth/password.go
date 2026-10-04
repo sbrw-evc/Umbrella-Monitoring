@@ -1,6 +1,3 @@
-// Package auth holds local accounts: password hashing, sessions, API tokens,
-// built-in roles and the per-request principal with its permissions and
-// service scope.
 package auth
 
 import (
@@ -17,13 +14,10 @@ import (
 	"unicode"
 )
 
-// Iterations is the PBKDF2-SHA256 work factor (OWASP 2023 guidance).
-// Tests lower it.
 var Iterations = 600_000
 
 const saltLen = 16
 
-// HashPassword returns "pbkdf2-sha256$<iter>$<salt>$<hash>".
 func HashPassword(password string) (string, error) {
 	salt := make([]byte, saltLen)
 	if _, err := rand.Read(salt); err != nil {
@@ -37,14 +31,12 @@ func HashPassword(password string) (string, error) {
 	return fmt.Sprintf("pbkdf2-sha256$%d$%s$%s", Iterations, enc.EncodeToString(salt), enc.EncodeToString(key)), nil
 }
 
-// dummyHash keeps the timing of a login for an unknown user close to a real one.
 var dummyHash, _ = HashPassword("umbrella-dummy-password")
 
-// CheckPassword compares in constant time. An empty hash never matches.
 func CheckPassword(hash, password string) bool {
 	if hash == "" {
 		hash = dummyHash
-		password += "\x00" // never matches the dummy
+		password += "\x00"
 	}
 	parts := strings.Split(hash, "$")
 	if len(parts) != 4 || parts[0] != "pbkdf2-sha256" {
@@ -67,10 +59,8 @@ func CheckPassword(hash, password string) bool {
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
-// ErrWeakPassword explains the password policy.
-var ErrWeakPassword = errors.New("пароль: не короче 10 символов, буквы и цифры, не совпадает с логином")
+var ErrWeakPassword = errors.New("password must be at least 10 characters long, contain letters and digits and differ from the username")
 
-// CheckPolicy enforces the minimal password policy.
 func CheckPolicy(password, username string) error {
 	if len([]rune(password)) < 10 || len(password) > 256 {
 		return ErrWeakPassword
@@ -89,8 +79,6 @@ func CheckPolicy(password, username string) error {
 	}
 	return nil
 }
-
-// RandomToken returns a URL-safe random string with the given prefix.
 func RandomToken(prefix string, bytes int) string {
 	b := make([]byte, bytes)
 	if _, err := rand.Read(b); err != nil {
@@ -98,8 +86,6 @@ func RandomToken(prefix string, bytes int) string {
 	}
 	return prefix + base64.RawURLEncoding.EncodeToString(b)
 }
-
-// TokenHash is the stored form of an API token.
 func TokenHash(token string) string {
 	h := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(h[:])

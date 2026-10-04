@@ -25,8 +25,8 @@ type Resolver interface {
 }
 
 var (
-	ErrNotConfigured = errors.New("OpenBao не подключён: задайте UMBRELLA_OPENBAO_ADDR и способ входа (AppRole или токен)")
-	ErrNotFound      = errors.New("секрет не найден в OpenBao")
+	ErrNotConfigured = errors.New("OpenBao is not configured")
+	ErrNotFound      = errors.New("secret not found in OpenBao")
 )
 
 type Config struct {
@@ -44,6 +44,7 @@ type Config struct {
 	AppRolePath  string
 
 	CACert             string
+	CACertPEM          string
 	InsecureSkipVerify bool
 	CacheTTL           time.Duration
 }
@@ -80,14 +81,18 @@ func New(cfg Config) (*Client, error) {
 	}
 	cfg.Addr = strings.TrimRight(cfg.Addr, "/")
 	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: cfg.InsecureSkipVerify}
-	if cfg.CACert != "" {
-		pem, err := os.ReadFile(cfg.CACert)
-		if err != nil {
-			return nil, fmt.Errorf("OpenBao CA: %w", err)
+	if cfg.CACert != "" || cfg.CACertPEM != "" {
+		pem := []byte(cfg.CACertPEM)
+		if cfg.CACert != "" {
+			b, err := os.ReadFile(cfg.CACert)
+			if err != nil {
+				return nil, fmt.Errorf("OpenBao CA: %w", err)
+			}
+			pem = b
 		}
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM(pem) {
-			return nil, errors.New("OpenBao CA: в файле нет сертификатов")
+			return nil, errors.New("OpenBao CA: no certificates found")
 		}
 		tlsCfg.RootCAs = pool
 	}
@@ -107,7 +112,7 @@ func (c *Client) Ref(path, key string) string {
 func ParseRef(ref string) (mount, path, key string, err error) {
 	rest, ok := strings.CutPrefix(strings.TrimSpace(ref), Scheme)
 	if !ok {
-		return "", "", "", fmt.Errorf("ссылка на секрет должна начинаться с %s", Scheme)
+		return "", "", "", fmt.Errorf("secret reference must start with %s", Scheme)
 	}
 	rest, key, _ = strings.Cut(rest, "#")
 	if key == "" {
@@ -115,7 +120,7 @@ func ParseRef(ref string) (mount, path, key string, err error) {
 	}
 	mount, path, _ = strings.Cut(strings.Trim(rest, "/"), "/")
 	if mount == "" || path == "" || strings.Contains(path, "..") {
-		return "", "", "", fmt.Errorf("ссылка на секрет имеет вид %s<mount>/<путь>#<ключ>", Scheme)
+		return "", "", "", fmt.Errorf("secret reference format is %s<mount>/<path>#<key>", Scheme)
 	}
 	return mount, path, key, nil
 }
@@ -133,7 +138,7 @@ func (c *Client) Resolve(ref string) (string, error) {
 	}
 	v, ok := data[key]
 	if !ok {
-		return "", fmt.Errorf("%s: %w (нет ключа %q)", ref, ErrNotFound, key)
+		return "", fmt.Errorf("%s: %w (no key %q)", ref, ErrNotFound, key)
 	}
 	return v, nil
 }
@@ -249,7 +254,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		}
 		return err
 	}
-	return errors.New("OpenBao: доступ запрещён")
+	return errors.New("OpenBao: permission denied")
 }
 
 func (c *Client) raw(ctx context.Context, method, path, token string, body, out any) (int, error) {
@@ -273,7 +278,7 @@ func (c *Client) raw(ctx context.Context, method, path, token string, body, out 
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("OpenBao недоступен: %w", err)
+		return 0, fmt.Errorf("OpenBao is unreachable: %w", err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -281,7 +286,7 @@ func (c *Client) raw(ctx context.Context, method, path, token string, body, out 
 	case resp.StatusCode == http.StatusNotFound:
 		return resp.StatusCode, ErrNotFound
 	case resp.StatusCode == http.StatusServiceUnavailable:
-		return resp.StatusCode, errors.New("OpenBao запечатан или не инициализирован")
+		return resp.StatusCode, errors.New("OpenBao is sealed or not initialized")
 	case resp.StatusCode/100 != 2:
 		var e struct {
 			Errors []string `json:"errors"`
@@ -291,11 +296,11 @@ func (c *Client) raw(ctx context.Context, method, path, token string, body, out 
 		if msg == "" {
 			msg = strings.TrimSpace(string(raw))
 		}
-		return resp.StatusCode, fmt.Errorf("OpenBao ответил %d: %s", resp.StatusCode, msg)
+		return resp.StatusCode, fmt.Errorf("OpenBao answered %d: %s", resp.StatusCode, msg)
 	}
 	if out != nil && len(raw) > 0 {
 		if err := json.Unmarshal(raw, out); err != nil {
-			return resp.StatusCode, fmt.Errorf("OpenBao: неверный ответ: %w", err)
+			return resp.StatusCode, fmt.Errorf("OpenBao: invalid response: %w", err)
 		}
 	}
 	return resp.StatusCode, nil
@@ -356,14 +361,14 @@ func (c *Client) login(ctx context.Context) (string, error) {
 		}
 		if _, err := c.raw(ctx, http.MethodPost, "/v1/auth/"+c.cfg.AppRolePath+"/login",
 			"", map[string]string{"role_id": roleID, "secret_id": secretID}, &out); err != nil {
-			return "", fmt.Errorf("вход в OpenBao по AppRole: %w", err)
+			return "", fmt.Errorf("OpenBao AppRole login: %w", err)
 		}
 		c.setToken(out.Auth.ClientToken, out.Auth.LeaseDuration, out.Auth.Renewable, out.Auth.Policies)
 		return out.Auth.ClientToken, nil
 	case "token":
 		tok, err := readValue(c.cfg.Token, c.cfg.TokenFile)
 		if err != nil {
-			return "", fmt.Errorf("токен OpenBao: %w", err)
+			return "", fmt.Errorf("OpenBao token: %w", err)
 		}
 		info, err := c.lookup(ctx, tok)
 		if err != nil {
@@ -386,7 +391,7 @@ func (c *Client) lookup(ctx context.Context, tok string) (tokenInfo, error) {
 		Data tokenInfo `json:"data"`
 	}
 	if _, err := c.raw(ctx, http.MethodGet, "/v1/auth/token/lookup-self", tok, nil, &out); err != nil {
-		return tokenInfo{}, fmt.Errorf("проверка токена OpenBao: %w", err)
+		return tokenInfo{}, fmt.Errorf("OpenBao token lookup: %w", err)
 	}
 	return out.Data, nil
 }
@@ -509,7 +514,7 @@ func (c *Client) Status(ctx context.Context) Status {
 	}
 	s.Reachable, s.Initialized, s.Sealed, s.Version, s.ClusterName = true, h.Initialized, h.Sealed, h.Version, h.ClusterName
 	if !h.Initialized || h.Sealed {
-		s.Error = "OpenBao запечатан или не инициализирован"
+		s.Error = "OpenBao is sealed or not initialized"
 		return c.withLast(s)
 	}
 	tok, err := c.ensureToken(ctx, false)
@@ -532,7 +537,7 @@ func (c *Client) Status(ctx context.Context) Status {
 	if err == nil || errors.Is(err, ErrNotFound) {
 		s.MountOK = true
 	} else {
-		s.Error = "нет доступа к хранилищу " + c.cfg.Mount + ": " + err.Error()
+		s.Error = "no access to the KV mount " + c.cfg.Mount + ": " + err.Error()
 	}
 	return c.withLast(s)
 }

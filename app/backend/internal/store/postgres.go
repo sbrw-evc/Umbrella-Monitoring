@@ -31,13 +31,13 @@ func (c PGConfig) Normalize() (PGConfig, error) {
 	switch c.SSLMode {
 	case "disable", "allow", "prefer", "require", "verify-ca", "verify-full":
 	default:
-		return c, errors.New("sslmode: disable, prefer, require, verify-ca или verify-full")
+		return c, errors.New("sslmode must be disable, allow, prefer, require, verify-ca or verify-full")
 	}
 	if c.Host == "" || c.Database == "" || c.User == "" {
-		return c, errors.New("нужны хост, база данных и пользователь")
+		return c, errors.New("host, database and user are required")
 	}
 	if c.Port < 1 || c.Port > 65535 {
-		return c, errors.New("неверный порт")
+		return c, errors.New("invalid port")
 	}
 	return c, nil
 }
@@ -88,7 +88,7 @@ func OpenPostgres(ctx context.Context, cfg PGConfig) (*PGBackend, error) {
 	}
 	if _, err := pool.Exec(cctx, pgSchema); err != nil {
 		pool.Close()
-		return nil, fmt.Errorf("PostgreSQL %s: создание таблицы umbrella_state: %w", cfg.Where(), err)
+		return nil, fmt.Errorf("PostgreSQL %s: create table umbrella_state: %w", cfg.Where(), err)
 	}
 	return &PGBackend{cfg: cfg, pool: pool}, nil
 }
@@ -153,4 +153,47 @@ func (p *PGBackend) Save(ctx context.Context, data []byte) error {
 			snapshotFormat, data)
 		return err
 	})
+}
+
+type PGProbe struct {
+	Version   string     `json:"version"`
+	Database  string     `json:"database"`
+	User      string     `json:"user"`
+	CanCreate bool       `json:"can_create"`
+	HasState  bool       `json:"has_state"`
+	SavedAt   *time.Time `json:"saved_at,omitempty"`
+}
+
+func ProbePostgres(ctx context.Context, cfg PGConfig) (PGProbe, error) {
+	var p PGProbe
+	cfg, err := cfg.Normalize()
+	if err != nil {
+		return p, err
+	}
+	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(cctx, cfg.DSN())
+	if err != nil {
+		return p, fmt.Errorf("PostgreSQL %s: %w", cfg.Where(), err)
+	}
+	defer conn.Close(context.Background())
+	var exists bool
+	err = conn.QueryRow(cctx, `SELECT current_setting('server_version'), current_database(), current_user,
+		has_schema_privilege(current_user, current_schema(), 'CREATE'), to_regclass('umbrella_state') IS NOT NULL`).
+		Scan(&p.Version, &p.Database, &p.User, &p.CanCreate, &exists)
+	if err != nil {
+		return p, fmt.Errorf("PostgreSQL %s: %w", cfg.Where(), err)
+	}
+	if !exists {
+		return p, nil
+	}
+	var at time.Time
+	err = conn.QueryRow(cctx, "SELECT saved_at FROM umbrella_state WHERE name = 'current'").Scan(&at)
+	switch {
+	case err == nil:
+		p.HasState, p.SavedAt = true, &at
+	case !errors.Is(err, pgx.ErrNoRows):
+		return p, fmt.Errorf("PostgreSQL %s: %w", cfg.Where(), err)
+	}
+	return p, nil
 }

@@ -12,29 +12,29 @@ import (
 func TestPutResolveDelete(t *testing.T) {
 	f, c := secretstest.New(t)
 	ctx := context.Background()
-	ref, err := c.PutRef(ctx, "pagerduty", "routing_key", "R0UT1NG")
+	ref, err := c.PutRef(ctx, "notify/oncall", "routing_key", "R0UT1NG")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ref != "openbao://umbrella/pagerduty#routing_key" {
+	if ref != "openbao://umbrella/notify/oncall#routing_key" {
 		t.Fatalf("ref = %s", ref)
 	}
-	if _, err := c.PutRef(ctx, "pagerduty", "api_token", "tok"); err != nil {
+	if _, err := c.PutRef(ctx, "notify/oncall", "api_token", "tok"); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.Get("umbrella/pagerduty"); got["routing_key"] != "R0UT1NG" || got["api_token"] != "tok" {
+	if got := f.Get("umbrella/notify/oncall"); got["routing_key"] != "R0UT1NG" || got["api_token"] != "tok" {
 		t.Fatalf("stored = %v", got)
 	}
 	if v, err := c.Resolve(ref); err != nil || v != "R0UT1NG" {
 		t.Fatalf("resolve = %q %v", v, err)
 	}
-	if _, err := c.Resolve("openbao://umbrella/pagerduty#missing"); !errors.Is(err, secrets.ErrNotFound) {
+	if _, err := c.Resolve("openbao://umbrella/notify/oncall#missing"); !errors.Is(err, secrets.ErrNotFound) {
 		t.Fatalf("missing key err = %v", err)
 	}
-	if err := c.Delete(ctx, "pagerduty"); err != nil {
+	if err := c.Delete(ctx, "notify/oncall"); err != nil {
 		t.Fatal(err)
 	}
-	if f.Get("umbrella/pagerduty") != nil {
+	if f.Get("umbrella/notify/oncall") != nil {
 		t.Fatal("secret not deleted")
 	}
 	if _, err := c.Resolve(ref); err == nil {

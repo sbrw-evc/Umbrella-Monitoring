@@ -43,6 +43,16 @@ func (f *Fake) Get(path string) map[string]any {
 	return f.data[path]
 }
 
+func (f *Fake) Paths() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.data))
+	for k := range f.data {
+		out = append(out, k)
+	}
+	return out
+}
+
 func (f *Fake) Set(path string, v map[string]any) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -20,7 +20,7 @@ dev-web:
 	cd web && npm run dev
 
 image:
-	docker build --build-arg VERSION=$(VERSION) -t umbrella:$(VERSION) -t umbrella:mvp .
+	docker build --build-arg VERSION=$(VERSION) -t umbrella-monitoring:$(VERSION) -t umbrella-monitoring:latest .
 
 openbao-dev:
 	docker run -d --rm --name umbrella-openbao-dev -p 127.0.0.1:8200:8200 -e BAO_DEV_ROOT_TOKEN_ID=dev-root openbao/openbao:2.7.1 server -dev -dev-listen-address=0.0.0.0:8200

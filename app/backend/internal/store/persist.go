@@ -12,12 +12,9 @@ import (
 	"time"
 )
 
-const (
-	snapshotFile   = "umbrella.gob"
-	snapshotFormat = 1
-)
+const snapshotFormat = 2
 
-var ErrNoState = errors.New("сохранённого состояния нет")
+var ErrNoState = errors.New("no saved state")
 
 type Backend interface {
 	Kind() string
@@ -39,48 +36,9 @@ func decode(b []byte) (snapshot, error) {
 		return snap, err
 	}
 	if snap.Format != snapshotFormat {
-		return snap, fmt.Errorf("неизвестный формат снимка %d", snap.Format)
+		return snap, fmt.Errorf("unsupported state format %d", snap.Format)
 	}
 	return snap, nil
-}
-
-type FileBackend struct{ Dir string }
-
-func (f FileBackend) Kind() string  { return "file" }
-func (f FileBackend) Where() string { return f.Dir }
-func (f FileBackend) Close()        {}
-
-func (f FileBackend) Load(context.Context) ([][]byte, error) {
-	if err := os.MkdirAll(f.Dir, 0o700); err != nil {
-		return nil, fmt.Errorf("каталог данных %s: %w", f.Dir, err)
-	}
-	var out [][]byte
-	main := filepath.Join(f.Dir, snapshotFile)
-	for _, p := range []string{main, main + ".bak"} {
-		b, err := os.ReadFile(p)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, b)
-	}
-	if len(out) == 0 {
-		return nil, ErrNoState
-	}
-	return out, nil
-}
-
-func (f FileBackend) Save(_ context.Context, data []byte) error {
-	if err := os.MkdirAll(f.Dir, 0o700); err != nil {
-		return err
-	}
-	return WriteFileAtomic(filepath.Join(f.Dir, snapshotFile), data)
-}
-
-func (s *Store) Open(dir string) (bool, error) {
-	return s.Attach(context.Background(), FileBackend{Dir: dir})
 }
 
 func (s *Store) Attach(ctx context.Context, b Backend) (bool, error) {
@@ -106,11 +64,10 @@ func (s *Store) Attach(ctx context.Context, b Backend) (bool, error) {
 		s.persistMu.Lock()
 		s.backend = b
 		s.persistMu.Unlock()
-		slog.Info("state restored", "backend", b.Kind(), "where", b.Where(), "saved_at", snap.SavedAt,
-			"alerts", len(snap.Data.Alerts), "connectors", len(snap.Data.Connectors))
+		slog.Info("state restored", "backend", b.Kind(), "where", b.Where(), "saved_at", snap.SavedAt, "users", len(snap.Data.Users))
 		return true, nil
 	}
-	return false, fmt.Errorf("снимок состояния повреждён, запуск остановлен, чтобы не перезаписать его: %w", lastErr)
+	return false, fmt.Errorf("saved state is unreadable, refusing to overwrite it: %w", lastErr)
 }
 
 func (s *Store) install(snap snapshot) {
@@ -125,53 +82,6 @@ func (s *Store) install(snap snapshot) {
 	s.persistMu.Unlock()
 }
 
-func (s *Store) Switch(ctx context.Context, b Backend, adopt bool) (bool, error) {
-	if adopt {
-		if cands, err := b.Load(ctx); err == nil {
-			for _, c := range cands {
-				if snap, err := decode(c); err == nil {
-					s.install(snap)
-					s.replaceBackend(b)
-					return true, nil
-				}
-			}
-			return false, errors.New("в базе есть снимок Umbrella, но его нельзя прочитать")
-		} else if !errors.Is(err, ErrNoState) {
-			return false, err
-		}
-	}
-	data, err := s.encode()
-	if err != nil {
-		return false, err
-	}
-	if err := b.Save(ctx, data); err != nil {
-		return false, err
-	}
-	s.replaceBackend(b)
-	return false, nil
-}
-
-func (s *Store) replaceBackend(b Backend) {
-	s.persistMu.Lock()
-	old := s.backend
-	s.backend = b
-	s.mu.RLock()
-	s.saved = s.version
-	s.mu.RUnlock()
-	s.persistMu.Unlock()
-	if old != nil && old != b {
-		old.Close()
-	}
-}
-
-func (s *Store) encode() ([]byte, error) {
-	var buf bytes.Buffer
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	err := gob.NewEncoder(&buf).Encode(snapshot{Format: snapshotFormat, SavedAt: time.Now(), Data: s.d})
-	return buf.Bytes(), err
-}
-
 func (s *Store) Persistent() bool {
 	s.persistMu.Lock()
 	defer s.persistMu.Unlock()
@@ -182,7 +92,6 @@ type PersistStatus struct {
 	Enabled bool   `json:"enabled"`
 	Kind    string `json:"kind,omitempty"`
 	Where   string `json:"where,omitempty"`
-	Dir     string `json:"dir,omitempty"`
 	Pending bool   `json:"pending"`
 	Error   string `json:"error,omitempty"`
 }
@@ -196,7 +105,7 @@ func (s *Store) PersistStatus() PersistStatus {
 	s.mu.RUnlock()
 	st := PersistStatus{Enabled: b != nil, Pending: b != nil && v != saved}
 	if b != nil {
-		st.Kind, st.Where, st.Dir = b.Kind(), b.Where(), b.Where()
+		st.Kind, st.Where = b.Kind(), b.Where()
 	}
 	if err != nil {
 		st.Error = err.Error()

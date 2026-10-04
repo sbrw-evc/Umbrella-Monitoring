@@ -5,7 +5,7 @@ RUN npm ci
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.24-alpine AS backend
+FROM golang:1.25-alpine AS backend
 ARG VERSION=dev
 WORKDIR /src
 COPY backend/go.mod backend/go.sum ./

@@ -2,3 +2,4 @@ web/node_modules/
 web/dist/
 backend/umbrella
 backend/data/
+web/*.tsbuildinfo
