@@ -7,11 +7,9 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 var Iterations = 600_000
@@ -59,26 +57,6 @@ func CheckPassword(hash, password string) bool {
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
-var ErrWeakPassword = errors.New("password must be at least 10 characters long, contain letters and digits and differ from the username")
-
-func CheckPolicy(password, username string) error {
-	if len([]rune(password)) < 10 || len(password) > 256 {
-		return ErrWeakPassword
-	}
-	var letter, digit bool
-	for _, r := range password {
-		switch {
-		case unicode.IsLetter(r):
-			letter = true
-		case unicode.IsDigit(r):
-			digit = true
-		}
-	}
-	if !letter || !digit || strings.EqualFold(password, username) {
-		return ErrWeakPassword
-	}
-	return nil
-}
 func RandomToken(prefix string, bytes int) string {
 	b := make([]byte, bytes)
 	if _, err := rand.Read(b); err != nil {

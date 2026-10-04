@@ -1,5 +1,8 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
+import { flushSync } from 'react-dom'
+import { animate } from 'motion/react'
 import { ApiError, type Locale } from './api'
+import { reducedMotion } from './fx'
 
 export type Dict = Record<Locale, Record<string, string>>
 
@@ -14,10 +17,10 @@ export const common: Dict = {
     'lang.en': 'English',
     'lang.ru': 'Русский',
     'lang.toggle': 'Language',
-    'yes': 'Yes',
-    'no': 'No',
-    'loading': 'Loading…',
-    'retry': 'Retry',
+    yes: 'Yes',
+    no: 'No',
+    loading: 'Loading…',
+    retry: 'Retry',
     'err.network': 'The server does not answer. Check the connection and try again.',
     'err.bad_request': 'The request was rejected as invalid.',
     'err.internal': 'Internal server error.',
@@ -31,6 +34,7 @@ export const common: Dict = {
     'err.invalid_name': 'The display name is too long.',
     'err.invalid_locale': 'Choose English or Russian.',
     'err.invalid_theme': 'Choose the light or dark theme.',
+    'err.invalid_timezone': 'Unknown time zone.',
     'err.openbao_invalid': 'OpenBao settings are incomplete.',
     'err.openbao_unavailable': 'Umbrella cannot work with OpenBao using these settings.',
     'err.openbao_write_failed': 'Umbrella could not save secrets to OpenBao.',
@@ -48,6 +52,13 @@ export const common: Dict = {
     'err.unauthenticated': 'Your session has ended. Sign in again.',
     'err.forbidden': 'Not enough permissions.',
     'err.csrf': 'The session token is outdated. Reload the page.',
+    'err.invalid_password_policy': 'The password policy is inconsistent.',
+    'err.wrong_password': 'The current password is wrong.',
+    'err.same_password': 'The new password must differ from the current one.',
+    'err.managed_by_directory': 'This account is managed by the directory (LDAP / AD).',
+    'err.avatar_invalid': 'The file is not a supported image (PNG, JPEG, GIF or WebP).',
+    'err.avatar_too_large': 'The image is larger than 5 MB.',
+    'err.secrets_unavailable': 'The password store (OpenBao) is unavailable. Try again later.',
     'err.unknown': 'Something went wrong.',
   },
   ru: {
@@ -58,10 +69,10 @@ export const common: Dict = {
     'lang.en': 'English',
     'lang.ru': 'Русский',
     'lang.toggle': 'Язык',
-    'yes': 'Да',
-    'no': 'Нет',
-    'loading': 'Загрузка…',
-    'retry': 'Повторить',
+    yes: 'Да',
+    no: 'Нет',
+    loading: 'Загрузка…',
+    retry: 'Повторить',
     'err.network': 'Сервер не отвечает. Проверьте подключение и повторите.',
     'err.bad_request': 'Запрос отклонён как некорректный.',
     'err.internal': 'Внутренняя ошибка сервера.',
@@ -75,6 +86,7 @@ export const common: Dict = {
     'err.invalid_name': 'Слишком длинное имя.',
     'err.invalid_locale': 'Выберите английский или русский язык.',
     'err.invalid_theme': 'Выберите светлую или тёмную тему.',
+    'err.invalid_timezone': 'Неизвестный часовой пояс.',
     'err.openbao_invalid': 'Настройки OpenBao заполнены не полностью.',
     'err.openbao_unavailable': 'С этими настройками Umbrella не может работать с OpenBao.',
     'err.openbao_write_failed': 'Umbrella не смогла сохранить секреты в OpenBao.',
@@ -92,6 +104,13 @@ export const common: Dict = {
     'err.unauthenticated': 'Сессия завершилась. Войдите снова.',
     'err.forbidden': 'Недостаточно прав.',
     'err.csrf': 'Токен сессии устарел. Обновите страницу.',
+    'err.invalid_password_policy': 'Парольная политика противоречива.',
+    'err.wrong_password': 'Текущий пароль указан неверно.',
+    'err.same_password': 'Новый пароль должен отличаться от текущего.',
+    'err.managed_by_directory': 'Эта учётная запись управляется каталогом (LDAP / AD).',
+    'err.avatar_invalid': 'Файл не является поддерживаемым изображением (PNG, JPEG, GIF или WebP).',
+    'err.avatar_too_large': 'Изображение больше 5 МБ.',
+    'err.secrets_unavailable': 'Хранилище паролей (OpenBao) недоступно. Повторите позже.',
     'err.unknown': 'Что-то пошло не так.',
   },
 }
@@ -115,9 +134,29 @@ export function browserLocale(): Locale {
 
 export function LocaleProvider({ initial, children }: { initial: Locale; children: ReactNode }) {
   const [locale, set] = useState<Locale>(initial)
+  const current = useRef(initial)
+  const busy = useRef(false)
   const setLocale = useCallback((l: Locale, persist = true) => {
-    set(l)
-    document.documentElement.lang = l
+    const apply = () => {
+      current.current = l
+      flushSync(() => set(l))
+      document.documentElement.lang = l
+    }
+    const root = document.getElementById('root')
+    if (l === current.current || !root || reducedMotion() || busy.current) {
+      apply()
+    } else {
+      busy.current = true
+      animate(root, { opacity: 0, filter: 'blur(3px)' }, { duration: 0.14, ease: 'easeIn' })
+        .then(() => {
+          apply()
+          return animate(root, { opacity: 1, filter: 'blur(0px)' }, { duration: 0.24, ease: [0.22, 1, 0.36, 1] })
+        })
+        .finally(() => {
+          root.style.filter = ''
+          busy.current = false
+        })
+    }
     if (!persist) return
     try {
       localStorage.setItem(KEY, l)

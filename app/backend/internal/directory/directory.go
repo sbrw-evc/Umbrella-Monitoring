@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -45,16 +46,25 @@ type Config struct {
 	UsernameAttr    string `json:"username_attr"`
 	NameAttr        string `json:"name_attr"`
 	EmailAttr       string `json:"email_attr"`
+	FirstNameAttr   string `json:"first_name_attr"`
+	LastNameAttr    string `json:"last_name_attr"`
+	MiddleNameAttr  string `json:"middle_name_attr"`
+	TitleAttr       string `json:"title_attr"`
+	DepartmentAttr  string `json:"department_attr"`
+	ManagerAttr     string `json:"manager_attr"`
+	PhotoAttr       string `json:"photo_attr"`
 	AdminGroupDN    string `json:"admin_group_dn,omitempty"`
 }
 
 func Defaults(kind string) Config {
 	if kind == KindOpenLDAP {
 		return Config{Kind: KindOpenLDAP, UserFilter: "(&(objectClass=inetOrgPerson)(uid={username}))",
-			UsernameAttr: "uid", NameAttr: "cn", EmailAttr: "mail"}
+			UsernameAttr: "uid", NameAttr: "cn", EmailAttr: "mail", FirstNameAttr: "givenName", LastNameAttr: "sn",
+			TitleAttr: "title", DepartmentAttr: "departmentNumber", ManagerAttr: "manager", PhotoAttr: "jpegPhoto"}
 	}
 	return Config{Kind: KindAD, UserFilter: "(&(objectCategory=person)(objectClass=user)(sAMAccountName={username}))",
-		UsernameAttr: "sAMAccountName", NameAttr: "displayName", EmailAttr: "mail"}
+		UsernameAttr: "sAMAccountName", NameAttr: "displayName", EmailAttr: "mail", FirstNameAttr: "givenName", LastNameAttr: "sn",
+		MiddleNameAttr: "middleName", TitleAttr: "title", DepartmentAttr: "department", ManagerAttr: "manager", PhotoAttr: "thumbnailPhoto"}
 }
 
 func (c Config) Normalize() (Config, error) {
@@ -75,6 +85,14 @@ func (c Config) Normalize() (Config, error) {
 	c.UsernameAttr = firstSet(strings.TrimSpace(c.UsernameAttr), d.UsernameAttr)
 	c.NameAttr = firstSet(strings.TrimSpace(c.NameAttr), d.NameAttr)
 	c.EmailAttr = firstSet(strings.TrimSpace(c.EmailAttr), d.EmailAttr)
+	for _, f := range []*string{&c.FirstNameAttr, &c.LastNameAttr, &c.MiddleNameAttr, &c.TitleAttr, &c.DepartmentAttr, &c.ManagerAttr, &c.PhotoAttr} {
+		*f = strings.TrimSpace(*f)
+	}
+	for _, a := range c.attrs() {
+		if !attrRe.MatchString(a) {
+			return c, fmt.Errorf("attribute name %q is invalid", a)
+		}
+	}
 	c.UserFilter = firstSet(c.UserFilter, d.UserFilter)
 
 	u, err := url.Parse(c.URL)
@@ -120,11 +138,19 @@ func (c Config) TLSMode() string {
 }
 
 type Identity struct {
-	DN       string `json:"dn"`
-	Username string `json:"username"`
-	Name     string `json:"name"`
-	Email    string `json:"email,omitempty"`
-	Admin    bool   `json:"admin"`
+	DN         string `json:"dn"`
+	Username   string `json:"username"`
+	Name       string `json:"name"`
+	Email      string `json:"email,omitempty"`
+	FirstName  string `json:"first_name,omitempty"`
+	LastName   string `json:"last_name,omitempty"`
+	MiddleName string `json:"middle_name,omitempty"`
+	Title      string `json:"title,omitempty"`
+	Department string `json:"department,omitempty"`
+	Manager    string `json:"manager,omitempty"`
+	Photo      []byte `json:"-"`
+	HasPhoto   bool   `json:"has_photo"`
+	Admin      bool   `json:"admin"`
 }
 
 type Probe struct {
@@ -180,7 +206,7 @@ func Test(c Config, bindPassword, username, password string) (Probe, error) {
 	if err != nil {
 		return p, err
 	}
-	id := identity(c, e, username, admin)
+	id := identity(conn, c, e, username, admin)
 	p.User = &id
 	return p, nil
 }
@@ -215,7 +241,7 @@ func Authenticate(c Config, bindPassword, username, password string) (Identity, 
 	if err != nil {
 		return Identity{}, err
 	}
-	return identity(c, e, username, admin), nil
+	return identity(conn, c, e, username, admin), nil
 }
 
 func connect(c Config, bindPassword string) (*ldap.Conn, error) {
@@ -264,7 +290,7 @@ func exists(conn *ldap.Conn, dn string) error {
 func findUser(conn *ldap.Conn, c Config, username string) (*ldap.Entry, error) {
 	filter := strings.ReplaceAll(c.UserFilter, Placeholder, ldap.EscapeFilter(username))
 	res, err := conn.Search(ldap.NewSearchRequest(c.BaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 2, seconds(), false,
-		filter, []string{c.UsernameAttr, c.NameAttr, c.EmailAttr}, nil))
+		filter, c.attrs(), nil))
 	if ldap.IsErrorWithCode(err, ldap.LDAPResultSizeLimitExceeded) {
 		return nil, ErrAmbiguousUser
 	}
@@ -303,9 +329,62 @@ func isAdmin(conn *ldap.Conn, c Config, e *ldap.Entry, username string) (bool, e
 	return len(res.Entries) > 0, nil
 }
 
-func identity(c Config, e *ldap.Entry, username string, admin bool) Identity {
-	return Identity{DN: e.DN, Username: firstSet(e.GetAttributeValue(c.UsernameAttr), username),
-		Name: firstSet(e.GetAttributeValue(c.NameAttr), username), Email: e.GetAttributeValue(c.EmailAttr), Admin: admin}
+var attrRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9-]{0,63}$`)
+
+func (c Config) attrs() []string {
+	var out []string
+	for _, a := range []string{c.UsernameAttr, c.NameAttr, c.EmailAttr, c.FirstNameAttr, c.LastNameAttr, c.MiddleNameAttr,
+		c.TitleAttr, c.DepartmentAttr, c.ManagerAttr, c.PhotoAttr} {
+		if a != "" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func value(e *ldap.Entry, attr string) string {
+	if attr == "" {
+		return ""
+	}
+	return strings.TrimSpace(e.GetAttributeValue(attr))
+}
+
+func managerName(conn *ldap.Conn, c Config, dn string) string {
+	if dn == "" {
+		return ""
+	}
+	parsed, err := ldap.ParseDN(dn)
+	if err != nil {
+		return dn
+	}
+	res, err := conn.Search(ldap.NewSearchRequest(dn, ldap.ScopeBaseObject, ldap.NeverDerefAliases, 1, seconds(), false,
+		"(objectClass=*)", []string{c.NameAttr}, nil))
+	if err == nil && len(res.Entries) == 1 {
+		if n := value(res.Entries[0], c.NameAttr); n != "" {
+			return n
+		}
+	}
+	if len(parsed.RDNs) > 0 && len(parsed.RDNs[0].Attributes) > 0 {
+		return parsed.RDNs[0].Attributes[0].Value
+	}
+	return dn
+}
+
+const maxPhoto = 5 << 20
+
+func identity(conn *ldap.Conn, c Config, e *ldap.Entry, username string, admin bool) Identity {
+	id := Identity{DN: e.DN, Username: firstSet(value(e, c.UsernameAttr), username), Name: firstSet(value(e, c.NameAttr), username),
+		Email: value(e, c.EmailAttr), FirstName: value(e, c.FirstNameAttr), LastName: value(e, c.LastNameAttr),
+		MiddleName: value(e, c.MiddleNameAttr), Title: value(e, c.TitleAttr), Department: value(e, c.DepartmentAttr), Admin: admin}
+	if c.ManagerAttr != "" {
+		id.Manager = managerName(conn, c, value(e, c.ManagerAttr))
+	}
+	if c.PhotoAttr != "" {
+		if raw := e.GetRawAttributeValue(c.PhotoAttr); len(raw) > 0 && len(raw) <= maxPhoto {
+			id.Photo, id.HasPhoto = raw, true
+		}
+	}
+	return id
 }
 
 func bindError(err error) error {

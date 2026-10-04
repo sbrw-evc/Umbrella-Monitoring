@@ -1,0 +1,211 @@
+package app
+
+import (
+	"bytes"
+	"context"
+	"time"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/avatar"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/credentials"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
+)
+
+type UserService struct {
+	st        *store.Store
+	passwords *credentials.Passwords
+	now       func() time.Time
+}
+
+func NewUserService(st *store.Store, passwords *credentials.Passwords) *UserService {
+	return &UserService{st: st, passwords: passwords, now: func() time.Time { return time.Now().UTC() }}
+}
+
+func (s *UserService) Get(id string) (model.User, error) {
+	var out model.User
+	found := false
+	s.st.Read(func(d *store.Data) {
+		if u := d.Users[id]; u != nil {
+			out, found = *u, true
+		}
+	})
+	if !found {
+		return out, ErrNotFound
+	}
+	return out, nil
+}
+
+func (s *UserService) update(id string, fn func(d *store.Data, u *model.User)) (model.User, error) {
+	var out model.User
+	found := false
+	s.st.Write(func(d *store.Data) {
+		u := d.Users[id]
+		if u == nil {
+			return
+		}
+		fn(d, u)
+		out, found = *u, true
+	})
+	if !found {
+		return out, ErrNotFound
+	}
+	return out, nil
+}
+
+func (s *UserService) local(id string) (model.User, error) {
+	u, err := s.Get(id)
+	if err != nil {
+		return u, err
+	}
+	if u.Source != model.SourceLocal {
+		return u, ErrManagedByDirectory
+	}
+	return u, nil
+}
+
+func (s *UserService) UpdateProfile(id string, in model.Profile) (model.User, error) {
+	if _, err := s.local(id); err != nil {
+		return model.User{}, err
+	}
+	p, err := in.Normalize()
+	if err != nil {
+		return model.User{}, invalid("invalid_name", err)
+	}
+	if !model.ValidEmail(p.Email) {
+		return model.User{}, invalid("invalid_email", nil)
+	}
+	return s.update(id, func(d *store.Data, u *model.User) {
+		u.Profile, u.Name = p, p.DisplayName(u.Username)
+		d.AddAudit(store.AuditEntry{Actor: u.Username, Action: "user.profile", Object: u.ID})
+	})
+}
+
+func (s *UserService) ChangePassword(ctx context.Context, id, current, next string) error {
+	u, err := s.local(id)
+	if err != nil {
+		return err
+	}
+	ok, err := s.passwords.Verify(u.PasswordRef, current)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrWrongPassword
+	}
+	var policy model.PasswordPolicy
+	s.st.Read(func(d *store.Data) { policy = d.Settings.Password })
+	if err := policy.Validate(next, u.Username); err != nil {
+		return err
+	}
+	if next == current {
+		return ErrSamePassword
+	}
+	ref, err := s.passwords.Set(ctx, u.ID, next)
+	if err != nil {
+		return err
+	}
+	_, err = s.update(id, func(d *store.Data, u *model.User) {
+		u.PasswordRef = ref
+		d.AddAudit(store.AuditEntry{Actor: u.Username, Action: "user.password", Object: u.ID})
+	})
+	return err
+}
+
+func (s *UserService) SetAvatar(id string, data []byte) (model.User, error) {
+	img, err := avatar.Normalize(data)
+	if err != nil {
+		return model.User{}, ErrAvatarInvalid
+	}
+	now := s.now()
+	return s.update(id, func(d *store.Data, u *model.User) {
+		u.Avatar, u.AvatarSource, u.AvatarAt = img, model.AvatarUpload, &now
+		d.AddAudit(store.AuditEntry{Actor: u.Username, Action: "user.avatar", Object: u.ID, Detail: "upload"})
+	})
+}
+
+func (s *UserService) RemoveAvatar(id string) (model.User, error) {
+	return s.update(id, func(d *store.Data, u *model.User) {
+		if u.AvatarSource != model.AvatarUpload {
+			return
+		}
+		u.Avatar, u.AvatarSource, u.AvatarAt = nil, "", nil
+		d.AddAudit(store.AuditEntry{Actor: u.Username, Action: "user.avatar", Object: u.ID, Detail: "removed"})
+	})
+}
+
+func (s *UserService) Avatar(id string) ([]byte, time.Time, error) {
+	u, err := s.Get(id)
+	if err != nil || len(u.Avatar) == 0 {
+		return nil, time.Time{}, ErrNotFound
+	}
+	var at time.Time
+	if u.AvatarAt != nil {
+		at = *u.AvatarAt
+	}
+	return u.Avatar, at, nil
+}
+
+func (s *UserService) SetTimezone(id string, tz string) (model.User, error) {
+	if tz != "" && !model.ValidTimezone(tz) {
+		return model.User{}, invalid("invalid_timezone", nil)
+	}
+	return s.update(id, func(d *store.Data, u *model.User) {
+		if u.Timezone == tz {
+			return
+		}
+		u.Timezone = tz
+		detail := tz
+		if detail == "" {
+			detail = "default"
+		}
+		d.AddAudit(store.AuditEntry{Actor: u.Username, Action: "user.preferences", Object: u.ID, Detail: "timezone " + detail})
+	})
+}
+
+func (s *UserService) SyncDirectory(id directory.Identity) (model.User, error) {
+	role := model.RoleUser
+	if id.Admin {
+		role = model.RoleAdmin
+	}
+	var photo []byte
+	if id.HasPhoto {
+		if img, err := avatar.Normalize(id.Photo); err == nil {
+			photo = img
+		}
+	}
+	profile, _ := model.Profile{LastName: id.LastName, FirstName: id.FirstName, MiddleName: id.MiddleName, Title: id.Title,
+		Department: id.Department, Manager: id.Manager, Email: id.Email}.Normalize()
+	if !model.ValidEmail(profile.Email) {
+		profile.Email = ""
+	}
+	now := s.now()
+	var out model.User
+	s.st.Write(func(d *store.Data) {
+		x := d.UserByName(id.Username)
+		if x == nil {
+			x = &model.User{ID: d.NextID("USR"), Username: id.Username, Source: model.SourceLDAP, CreatedAt: now}
+			d.Users[x.ID] = x
+		}
+		if x.Source != model.SourceLDAP {
+			out = *x
+			return
+		}
+		x.Profile, x.Role, x.Name = profile, role, id.Name
+		if id.Name == id.Username {
+			x.Name = profile.DisplayName(id.Username)
+		}
+		switch {
+		case x.AvatarSource == model.AvatarUpload:
+		case photo != nil && !bytes.Equal(photo, x.Avatar):
+			x.Avatar, x.AvatarSource, x.AvatarAt = photo, model.AvatarLDAP, &now
+		case photo == nil && x.AvatarSource == model.AvatarLDAP:
+			x.Avatar, x.AvatarSource, x.AvatarAt = nil, "", nil
+		}
+		out = *x
+	})
+	if out.Source != model.SourceLDAP {
+		return model.User{}, ErrInvalidCredentials
+	}
+	return out, nil
+}

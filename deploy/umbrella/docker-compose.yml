@@ -3,8 +3,9 @@ name: umbrella
 services:
   umbrella:
     image: ${UMBRELLA_IMAGE:-umbrella-monitoring:latest}
+    pull_policy: build
     build:
-      context: ../app
+      context: ../../app
       args:
         VERSION: ${UMBRELLA_VERSION:-dev}
     restart: unless-stopped
@@ -18,11 +19,16 @@ services:
       - umbrella-data:/data
     extra_hosts:
       - host.docker.internal:host-gateway
+    networks: [umbrella]
     logging:
       driver: json-file
       options:
         max-size: 10m
         max-file: "3"
+
+networks:
+  umbrella:
+    name: umbrella
 
 volumes:
   umbrella-data:

@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/app"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
@@ -206,6 +207,10 @@ func open(ctx context.Context, cfg config.File) (*secrets.Client, *store.PGBacke
 	if !restored {
 		backend.Close()
 		return nil, nil, nil, errors.New("the database has no Umbrella state: restore it or remove umbrella.json to run the setup wizard again")
+	}
+	if err := app.Migrate(ctx, st, vault); err != nil {
+		backend.Close()
+		return nil, nil, nil, fmt.Errorf("move password hashes to OpenBao: %w", err)
 	}
 	return vault, backend, st, nil
 }

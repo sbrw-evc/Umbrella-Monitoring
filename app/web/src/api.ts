@@ -1,3 +1,5 @@
+import type { PasswordPolicy } from './policy'
+
 export type Theme = 'light' | 'dark'
 export type Locale = 'en' | 'ru'
 
@@ -6,7 +8,10 @@ export type Meta = {
   version: string
   default_theme: Theme
   default_locale: Locale
+  default_timezone: string
   ldap_enabled?: boolean
+  container?: boolean
+  password_policy?: PasswordPolicy
 }
 
 export class ApiError extends Error {
@@ -45,6 +50,23 @@ export async function api<T>(method: string, path: string, body?: unknown, heade
     throw new ApiError(0, 'network', e instanceof Error ? e.message : String(e))
   }
   if (res.status === 204) return undefined as T
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new ApiError(res.status, data.error ?? `http_${res.status}`, data.detail)
+  return data as T
+}
+
+export async function upload<T>(method: string, path: string, body: Blob): Promise<T> {
+  let res: Response
+  try {
+    res = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: { 'Content-Type': body.type || 'application/octet-stream', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) },
+      body,
+    })
+  } catch (e) {
+    throw new ApiError(0, 'network', e instanceof Error ? e.message : String(e))
+  }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new ApiError(res.status, data.error ?? `http_${res.status}`, data.detail)
   return data as T

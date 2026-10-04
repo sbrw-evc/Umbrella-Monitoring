@@ -40,7 +40,7 @@ function Boot() {
   return (
     <LocaleProvider key={meta.mode} initial={locale}>
       <ThemeProvider initial={theme}>
-        <Suspense fallback={<BootScreen failed={false} retry={load} />}>{setup ? <SetupApp meta={meta} /> : <MainApp meta={meta} />}</Suspense>
+        <Suspense fallback={<BootScreen failed={false} retry={load} />}>{setup ? <SetupApp meta={meta} onReady={load} /> : <MainApp meta={meta} />}</Suspense>
       </ThemeProvider>
     </LocaleProvider>
   )
@@ -50,7 +50,7 @@ function BootScreen({ failed, retry }: { failed: boolean; retry: () => void }) {
   const t = useT()
   return (
     <div className="center-page">
-      <img src="/umbrella.svg" alt="" width={40} height={40} />
+      <img src="/logo.svg" alt="" width={48} height={48} />
       {failed ? (
         <>
           <p className="muted">{t('err.network')}</p>
