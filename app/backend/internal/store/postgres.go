@@ -114,6 +114,48 @@ func (p *PGBackend) Info(ctx context.Context) (PGInfo, error) {
 	return info, nil
 }
 
+// PGHealth is what the system status page shows about the server and the connection pool.
+type PGHealth struct {
+	Database       string     `json:"database"`
+	User           string     `json:"user"`
+	Size           int64      `json:"size_bytes"`
+	StartedAt      *time.Time `json:"started_at,omitempty"`
+	Connections    int        `json:"connections"`
+	MaxConnections int        `json:"max_connections"`
+	SSL            bool       `json:"ssl"`
+	Pool           PoolStats  `json:"pool"`
+}
+
+type PoolStats struct {
+	Total        int32 `json:"total"`
+	Idle         int32 `json:"idle"`
+	Acquired     int32 `json:"acquired"`
+	Max          int32 `json:"max"`
+	Acquires     int64 `json:"acquires"`
+	EmptyWaits   int64 `json:"empty_waits"`
+	AcquireAvgMs int64 `json:"acquire_avg_ms"`
+}
+
+func (p *PGBackend) Health(ctx context.Context) (PGHealth, error) {
+	var h PGHealth
+	st := p.pool.Stat()
+	h.Pool = PoolStats{Total: st.TotalConns(), Idle: st.IdleConns(), Acquired: st.AcquiredConns(), Max: st.MaxConns(),
+		Acquires: st.AcquireCount(), EmptyWaits: st.EmptyAcquireCount()}
+	if n := st.AcquireCount(); n > 0 {
+		h.Pool.AcquireAvgMs = st.AcquireDuration().Milliseconds() / n
+	}
+	var maxConn string
+	err := p.pool.QueryRow(ctx, `SELECT current_database(), current_user, pg_database_size(current_database()), pg_postmaster_start_time(),
+			(SELECT count(*)::int FROM pg_stat_activity WHERE datname = current_database()), current_setting('max_connections'),
+			coalesce((SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()), false)`).
+		Scan(&h.Database, &h.User, &h.Size, &h.StartedAt, &h.Connections, &maxConn, &h.SSL)
+	if err != nil {
+		return h, err
+	}
+	h.MaxConnections, _ = strconv.Atoi(maxConn)
+	return h, nil
+}
+
 // Pool is shared with the connector intake and its workers.
 func (p *PGBackend) Pool() *pgxpool.Pool { return p.pool }
 

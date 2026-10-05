@@ -1,10 +1,13 @@
 .PHONY: build test run dev-api dev-web image openbao-dev
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null)
+BUILT_AT ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS = -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.builtAt=$(BUILT_AT)
 
 build:
 	cd web && npm ci && npm run build
-	cd backend && go build -ldflags "-X main.version=$(VERSION)" -o umbrella ./cmd/umbrella
+	cd backend && go build -ldflags "$(LDFLAGS)" -o umbrella ./cmd/umbrella
 
 test:
 	cd backend && go vet ./... && go test ./...
@@ -20,7 +23,7 @@ dev-web:
 	cd web && npm run dev
 
 image:
-	docker build --build-arg VERSION=$(VERSION) -t umbrella-monitoring:$(VERSION) -t umbrella-monitoring:latest .
+	docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILT_AT=$(BUILT_AT) -t umbrella-monitoring:$(VERSION) -t umbrella-monitoring:latest .
 
 openbao-dev:
 	docker run -d --rm --name umbrella-openbao-dev -p 127.0.0.1:8200:8200 -e BAO_DEV_ROOT_TOKEN_ID=dev-root openbao/openbao:2.7.1 server -dev -dev-listen-address=0.0.0.0:8200
