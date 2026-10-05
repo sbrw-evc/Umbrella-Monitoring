@@ -86,6 +86,10 @@ var pages = []Page{
 		{"edit", Text{"Change the connection and synchronization settings", "Изменение подключения и настроек синхронизации"}},
 		{"sync", Text{"Run synchronization", "Запуск синхронизации"}},
 	}},
+	{"rules", GroupAuto, Text{"RED/USE rules", "Правила RED/USE"}, []Feature{
+		view,
+		{"edit", Text{"Create, change and delete rules and metric sources", "Создание, изменение и удаление правил и источников метрик"}},
+	}},
 	{"users", GroupOrg, Text{"Users", "Пользователи"}, []Feature{
 		view,
 		{"create", Text{"Create local users", "Создание локальных пользователей"}},

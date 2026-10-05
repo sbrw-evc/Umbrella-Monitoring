@@ -12,14 +12,16 @@ import (
 const MaxAudit = 5000
 
 type Data struct {
-	Users       map[string]*model.User
-	Roles       map[string]*model.Role
-	Teams       map[string]*model.Team
-	Services    map[string]*model.Service
-	Connectors  map[string]*model.Connector
-	Credentials map[string]*model.Credential
-	ConfigItems map[string]*model.ConfigItem
-	Maintenance map[string]*model.Maintenance
+	Users         map[string]*model.User
+	Roles         map[string]*model.Role
+	Teams         map[string]*model.Team
+	Services      map[string]*model.Service
+	Connectors    map[string]*model.Connector
+	Credentials   map[string]*model.Credential
+	ConfigItems   map[string]*model.ConfigItem
+	Maintenance   map[string]*model.Maintenance
+	MetricSources map[string]*model.MetricSource
+	Rules         map[string]*model.Rule
 	// NetBoxContacts maps NetBox contact IDs to the user accounts made or found for them.
 	NetBoxContacts map[int]string
 	NetBoxSync     model.SyncState
@@ -79,6 +81,12 @@ func (d *Data) init() {
 	if d.Maintenance == nil {
 		d.Maintenance = map[string]*model.Maintenance{}
 	}
+	if d.MetricSources == nil {
+		d.MetricSources = map[string]*model.MetricSource{}
+	}
+	if d.Rules == nil {
+		d.Rules = map[string]*model.Rule{}
+	}
 	if d.NetBoxContacts == nil {
 		d.NetBoxContacts = map[int]string{}
 	}
@@ -98,6 +106,16 @@ func (s *Store) Write(f func(d *Data)) {
 	defer s.mu.Unlock()
 	s.version++
 	f(&s.d)
+}
+
+// Update is Write for changes that often turn out to be none: f reports whether it changed
+// anything, and only then do readers and persistence see a new version.
+func (s *Store) Update(f func(d *Data) bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if f(&s.d) {
+		s.version++
+	}
 }
 
 // Version changes with every write, so readers can tell whether a copy they keep is stale.
