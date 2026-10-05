@@ -22,12 +22,18 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/config"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/logbuf"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/setup"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
-var version = "dev"
+// Set at build time with -ldflags "-X main.version=... -X main.commit=... -X main.builtAt=...".
+var (
+	version = "dev"
+	commit  string
+	builtAt string
+)
 
 func env(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -121,6 +127,7 @@ func (maintenance) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	slog.SetDefault(slog.New(logbuf.Wrap(slog.NewTextHandler(os.Stderr, nil))))
 	addr := flag.String("addr", env("UMBRELLA_ADDR", ":8080"), "listen address")
 	web := flag.String("web", env("UMBRELLA_WEB_DIR", "../web/dist"), "built web UI directory")
 	dataDir := flag.String("data", env("UMBRELLA_DATA_DIR", "data"), "directory for umbrella.json and sessions")
@@ -150,7 +157,7 @@ func main() {
 		webDir = ""
 	}
 	webHandler := httpx.Web(webDir)
-	opts := app.Options{Version: version, SecureCookies: env("UMBRELLA_SECURE_COOKIES", "false") == "true", Web: webHandler}
+	opts := app.Options{Version: version, Commit: commit, BuiltAt: builtAt, SecureCookies: env("UMBRELLA_SECURE_COOKIES", "false") == "true", Web: webHandler}
 	sessions := auth.NewSessions()
 	if err := sessions.Load(*dataDir); err != nil {
 		slog.Warn("sessions not restored", "err", err)

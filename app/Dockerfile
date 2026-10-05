@@ -7,11 +7,13 @@ RUN npm run build
 
 FROM golang:1.26-alpine AS backend
 ARG VERSION=dev
+ARG COMMIT=
+ARG BUILT_AT=
 WORKDIR /src
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /umbrella ./cmd/umbrella \
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.builtAt=${BUILT_AT}" -o /umbrella ./cmd/umbrella \
  && mkdir -p /out/data
 
 FROM gcr.io/distroless/static-debian12:nonroot

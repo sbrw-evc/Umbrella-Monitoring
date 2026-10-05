@@ -53,7 +53,6 @@ var groups = []Group{
 }
 
 var pages = []Page{
-	{"status", GroupMain, Text{"System status", "Состояние системы"}, []Feature{view, {"defaults", Text{"Change default theme, language and time zone", "Изменение темы, языка и часового пояса по умолчанию"}}}},
 	{"cis", GroupOverview, Text{"Configuration items", "Конфигурационные единицы"}, []Feature{
 		view,
 		{"edit", Text{"Create, change and delete configuration items, also in NetBox", "Создание, изменение и удаление КЕ, в том числе в NetBox"}},
@@ -85,6 +84,7 @@ var pages = []Page{
 	{"roles", GroupOrg, Text{"Roles", "Роли"}, []Feature{view, edit}},
 	{"teams", GroupOrg, Text{"Teams", "Команды"}, []Feature{view, edit}},
 	{"services", GroupOrg, Text{"Business services", "Бизнес-сервисы"}, []Feature{view, edit}},
+	{"status", GroupSettings, Text{"System status", "Состояние системы"}, []Feature{view, {"defaults", Text{"Change default theme, language and time zone", "Изменение темы, языка и часового пояса по умолчанию"}}}},
 	{"settings.postgres", GroupSettings, Text{"PostgreSQL", "PostgreSQL"}, []Feature{view, test, migrate}},
 	{"settings.openbao", GroupSettings, Text{"OpenBao", "OpenBao"}, []Feature{view, test, migrate}},
 	{"settings.ldap", GroupSettings, Text{"LDAP / AD", "LDAP / AD"}, []Feature{view, test, {"edit", Text{"Change the connection", "Изменение подключения"}}}},

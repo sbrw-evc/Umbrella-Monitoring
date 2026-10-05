@@ -30,9 +30,10 @@ export type PageDef = {
 export const HOME_PATH = '/'
 export const PROFILE_PATH = '/profile'
 export const SETTINGS_PATH = '/settings'
+// Old addresses of pages that moved, so bookmarks keep working.
+const MOVED: Record<string, string> = { '/status': '/settings/status' }
 
 export const PAGES: PageDef[] = [
-  { id: 'status', path: '/status', group: 'main', icon: Activity, Component: SystemStatus },
   { id: 'cis', path: '/cis', group: 'overview', icon: Boxes, Component: CIsPage, subtitle: 'page.cis.subtitle' },
   { id: 'connectors', path: '/connectors', group: 'automation', icon: Cable, Component: ConnectorsPage, nested: true },
   { id: 'credentials', path: '/credentials', group: 'automation', icon: LockKeyhole, Component: CredentialsPage, subtitle: 'page.credentials.subtitle' },
@@ -41,6 +42,7 @@ export const PAGES: PageDef[] = [
   { id: 'roles', path: '/roles', group: 'org', icon: UserCog, Component: RolesPage, subtitle: 'page.roles.subtitle' },
   { id: 'teams', path: '/teams', group: 'org', icon: UsersRound, Component: TeamsPage, subtitle: 'page.teams.subtitle' },
   { id: 'services', path: '/services', group: 'org', icon: Briefcase, Component: ServicesPage, subtitle: 'page.services.subtitle' },
+  { id: 'status', path: '/settings/status', group: 'settings', icon: Activity, Component: SystemStatus },
   { id: 'settings.postgres', path: '/settings/postgresql', group: 'settings', icon: Database, Component: PostgresSettings, subtitle: 'page.settings.subtitle' },
   { id: 'settings.openbao', path: '/settings/openbao', group: 'settings', icon: KeyRound, Component: OpenBaoSettings, subtitle: 'page.settings.subtitle' },
   { id: 'settings.ldap', path: '/settings/ldap', group: 'settings', icon: Network, Component: DirectorySettings, subtitle: 'page.settings.subtitle' },
@@ -72,6 +74,7 @@ export type Resolved = { kind: 'page'; page: PageDef } | { kind: 'profile' } | {
 
 export function resolve(path: string, can: Can): Resolved {
   if (path === PROFILE_PATH) return { kind: 'profile' }
+  if (MOVED[path]) return { kind: 'redirect', to: MOVED[path] }
   const visible = visiblePages(can)
   const page = visible.find((p) => owns(p, path))
   if (page) return { kind: 'page', page }
