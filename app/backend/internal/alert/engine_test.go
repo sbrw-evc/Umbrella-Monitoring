@@ -378,7 +378,10 @@ func TestRedUseLink(t *testing.T) {
 	if len(p.Alerts) != 1 || p.Alerts[0].RelatedID == "" {
 		t.Fatalf("red linked to use: %+v", p.Alerts)
 	}
-	if p.Counts.Active != 2 || p.Counts.BySeverity["error"] != 1 || p.Counts.PDNotTaken != 2 {
-		t.Errorf("counts = %+v", p.Counts)
+	if p.Counts.Active != 1 || p.Counts.BySeverity["error"] != 1 || p.Counts.PDNotTaken != 1 {
+		t.Errorf("counts follow the method filter = %+v", p.Counts)
+	}
+	if p, _ = e.List(ctx, alert.Filter{Status: "active"}); p.Counts.Active != 2 || p.Counts.PDNotTaken != 2 {
+		t.Errorf("counts without filters = %+v", p.Counts)
 	}
 }

@@ -291,6 +291,15 @@ func (f Filter) where() (string, []any) {
 	return strings.Join(conds, " AND "), args
 }
 
+// forCounts is the filter behind the incident tiles: active alerts narrowed by
+// everything except the fields the tiles themselves toggle (status,
+// severities, PagerDuty, fallback, suppressed), so each tile shows how many
+// alerts it would list together with the other filters.
+func (f Filter) forCounts() Filter {
+	f.Status, f.Severities, f.PD, f.Fallback, f.Suppressed, f.Limit = "active", nil, "", false, false, 0
+	return f
+}
+
 func list(ctx context.Context, q querier, f Filter) (Page, error) {
 	out := Page{Alerts: []Alert{}, Counts: Counts{BySeverity: map[string]int{}}}
 	limit := f.Limit
@@ -318,8 +327,9 @@ func list(ctx context.Context, q querier, f Filter) (Page, error) {
 		out.Alerts, out.More = out.Alerts[:limit], true
 	}
 	c := &out.Counts
+	cwhere, cargs := f.forCounts().where()
 	rows, err = q.Query(ctx, `SELECT status, severity, pd_state, (doc->>'fallback')::boolean, (doc->>'suppressed')::boolean, ci_id = '', count(*)::int
-		FROM alerts WHERE status <> 'resolved' GROUP BY 1, 2, 3, 4, 5, 6`)
+		FROM alerts WHERE `+cwhere+` GROUP BY 1, 2, 3, 4, 5, 6`, cargs...)
 	if err != nil {
 		return out, err
 	}
