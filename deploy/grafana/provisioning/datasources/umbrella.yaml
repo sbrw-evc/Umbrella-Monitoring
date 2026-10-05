@@ -1,0 +1,33 @@
+# Data sources of the Umbrella lab Grafana. ${VAR} is taken from the Grafana
+# container environment (docker-compose.yml passes UMBRELLA_GRAFANA_TOKEN).
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+
+  # Umbrella REST API through the Infinity plugin. The token belongs to the
+  # service account "grafana" (role reader: read-only, all services), which
+  # Umbrella creates at start from UMBRELLA_GRAFANA_TOKEN.
+  - name: Umbrella API
+    uid: umbrella-api
+    type: yesoreyeram-infinity-datasource
+    access: proxy
+    url: http://umbrella:8080
+    editable: false
+    jsonData:
+      auth_method: bearerToken
+      allowedHosts:
+        - http://umbrella:8080
+      customHealthCheckEnabled: true
+      customHealthCheckUrl: http://umbrella:8080/api/auth/me
+      timeoutInSeconds: 30
+    secureJsonData:
+      bearerToken: ${UMBRELLA_GRAFANA_TOKEN}
