@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -206,6 +207,9 @@ func (s *EntraService) Complete(ctx context.Context, state, code string) (model.
 	if err != nil {
 		return model.User{}, fmt.Errorf("%w: client secret: %v", ErrDirectoryUnavailable, err)
 	}
+	s.st.Read(func(d *store.Data) {
+		cfg.ReadGroups = slices.ContainsFunc(d.Settings.Groups.Mappings, func(m model.GroupMapping) bool { return m.Source == model.SourceEntra })
+	})
 	acc, err := entra.SignIn(ctx, cfg, secret, code, req, time.Now())
 	switch {
 	case errors.Is(err, entra.ErrNotAllowed):

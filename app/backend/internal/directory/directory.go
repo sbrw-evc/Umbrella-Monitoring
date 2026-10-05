@@ -151,6 +151,11 @@ type Identity struct {
 	Photo      []byte `json:"-"`
 	HasPhoto   bool   `json:"has_photo"`
 	Admin      bool   `json:"admin"`
+	// Groups are the normalized DNs (or Entra object IDs) of the groups the user belongs to,
+	// nested ones included. GroupsKnown is false when they could not be read.
+	Groups      []string `json:"groups,omitempty"`
+	GroupsKnown bool     `json:"groups_known"`
+	GroupsError string   `json:"groups_error,omitempty"`
 }
 
 type Probe struct {
@@ -207,6 +212,7 @@ func Test(c Config, bindPassword, username, password string) (Probe, error) {
 		return p, err
 	}
 	id := identity(conn, c, e, username, admin)
+	withGroups(conn, c, &id, e.DN, username)
 	p.User = &id
 	return p, nil
 }
@@ -241,7 +247,9 @@ func Authenticate(c Config, bindPassword, username, password string) (Identity, 
 	if err != nil {
 		return Identity{}, err
 	}
-	return identity(conn, c, e, username, admin), nil
+	id := identity(conn, c, e, username, admin)
+	withGroups(conn, c, &id, e.DN, username)
+	return id, nil
 }
 
 func connect(c Config, bindPassword string) (*ldap.Conn, error) {

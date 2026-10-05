@@ -22,6 +22,7 @@ type Data struct {
 	// NetBoxContacts maps NetBox contact IDs to the user accounts made or found for them.
 	NetBoxContacts map[int]string
 	NetBoxSync     model.SyncState
+	GroupSync      model.GroupSyncState
 	Settings       model.Settings
 	Audit          []AuditEntry
 	Seq            map[string]int

@@ -63,6 +63,7 @@ type App struct {
 	netbox    *NetBoxService
 	cis       *CIService
 	cmdb      *CMDBService
+	groups    *GroupsService
 
 	creds      *CredentialsService
 	connectors *ConnectorsService
@@ -116,6 +117,7 @@ func New(opt Options, deps Deps) *App {
 		services:   NewServicesService(deps.Store, nb),
 		netbox:     nb,
 		cis:        NewCIService(deps.Store, nb),
+		groups:     NewGroupsService(deps.Store, vault, dir),
 	}
 	var firing firingSource
 	if queue != nil {
@@ -148,7 +150,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerCMDB} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerCMDB, a.registerGroups} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })
@@ -156,10 +158,11 @@ func (a *App) Handler() http.Handler {
 	return httpx.Secure(mux)
 }
 
-// Run synchronizes NetBox on its schedule, prepares the ingest tables and processes received
+// Run synchronizes NetBox and directory groups on their schedules, prepares the ingest tables and processes received
 // requests until ctx ends. Without PostgreSQL (tests) the intake answers 503.
 func (a *App) Run(ctx context.Context) {
 	go a.netbox.Run(ctx)
+	go a.groups.Run(ctx)
 	if a.queue == nil {
 		return
 	}

@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"strings"
 	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/avatar"
@@ -219,11 +220,8 @@ func (s *UserService) syncExternal(source, externalID string, id directory.Ident
 			}
 		}
 		x.Profile, x.Name = profile, id.Name
-		switch {
-		case id.Admin:
-			x.Role = model.RoleAdmin
-		case x.Role == "" || x.Role == model.RoleAdmin || d.Roles[x.Role] == nil:
-			x.Role = model.RoleUser
+		if changes := assignFromGroups(d, x, source, id.Admin, id.Groups, id.GroupsKnown); len(changes) > 0 && !x.CreatedAt.Equal(now) {
+			d.AddAudit(store.AuditEntry{At: now, Actor: groupSyncActor, Action: "user.groups", Object: x.ID, Detail: x.Username + " " + strings.Join(changes, ", ")})
 		}
 		if id.Name == id.Username {
 			x.Name = profile.DisplayName(id.Username)

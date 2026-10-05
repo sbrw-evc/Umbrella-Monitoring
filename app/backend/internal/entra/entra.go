@@ -54,6 +54,9 @@ type Config struct {
 	RedirectURL     string `json:"redirect_url"`
 	AdminGroupID    string `json:"admin_group_id,omitempty"`
 	UserGroupID     string `json:"user_group_id,omitempty"`
+	// ReadGroups asks the sign-in to read the group list even when no group is configured here,
+	// for the group mapping table. It is set on a copy at sign-in and never saved.
+	ReadGroups bool `json:"-"`
 }
 
 func (c Config) Normalize() (Config, error) {
