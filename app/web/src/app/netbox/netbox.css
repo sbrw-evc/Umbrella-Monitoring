@@ -23,3 +23,7 @@
 .nb-error {
   color: var(--error);
 }
+
+.nb-stepper {
+  max-width: 220px;
+}

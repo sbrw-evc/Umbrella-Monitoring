@@ -192,7 +192,9 @@ export function NetBoxPage() {
                 <fieldset className="plain-fieldset stack" disabled={!canEdit}>
                   <Field label={t('nb.interval')} hint={t('nb.interval.hint')}>
                     {(id) => (
-                      <Stepper id={id} value={draft.sync_minutes} min={0} max={10080} suffix={t('nb.minutes')} onChange={(v) => set({ sync_minutes: v })} />
+                      <div className="nb-stepper">
+                        <Stepper id={id} value={draft.sync_minutes} min={0} max={10080} suffix={t('nb.minutes')} onChange={(v) => set({ sync_minutes: v })} />
+                      </div>
                     )}
                   </Field>
                   <div className="nb-group">
