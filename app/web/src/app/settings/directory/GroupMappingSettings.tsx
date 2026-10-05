@@ -191,6 +191,7 @@ export function GroupMappingSettings() {
       <p className="hint">{t('gm.manual')}</p>
       {!anyDirectory && <Banner kind="info" title={t('gm.off')} />}
       <Rows
+        align="end"
         rows={
           [
             [

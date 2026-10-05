@@ -25,6 +25,7 @@ export function CurrentConnection({ overview, sizeBytes }: { overview: PostgresO
   return (
     <ConnectionCard
       title={t('pgs.current')}
+      text={t('pgs.current.text')}
       ok={overview.ok && !overview.persist.error}
       problem={problem}
       onTest={can('settings.postgres:test') ? runTest : undefined}

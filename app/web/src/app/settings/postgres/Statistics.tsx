@@ -232,16 +232,14 @@ export function Statistics({ stats, error, busy, reload }: { stats: PostgresStat
   const rate = useTransactionRate(stats)
   return (
     <section className="card status-card" aria-label={t('pgs.stats')}>
-      <header className="conn-head">
-        <div>
-          <h2>{t('pgs.stats')}</h2>
-          <p className="muted">{t('pgs.stats.text')}</p>
-        </div>
+      <header>
+        <h2>{t('pgs.stats')}</h2>
         <Button onClick={reload} busy={busy}>
           {!busy && <RefreshCw size={16} />}
           {t('conn.refresh')}
         </Button>
       </header>
+      <p className="muted">{t('pgs.stats.text')}</p>
       <div className="pg-sub-row">
         <Switch checked={auto} onChange={setAuto} label={t('pgs.stats.auto')} />
         {stats && <span className="hint">{t('pgs.stats.collected', { at: formatDate(stats.collected_at, locale, timezone) })}</span>}

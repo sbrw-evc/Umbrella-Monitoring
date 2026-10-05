@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
 import { PlugZap } from 'lucide-react'
 import { errorText, useT, type Dict } from '../i18n'
-import { Banner, Button, Rows } from '../ui'
+import { Banner, Button } from '../ui'
+import { ProfileCard } from '../app/profile/ProfileCard'
+import { SummaryCard } from '../app/profile/SummaryCard'
 import { connectionStrings } from './connectionStrings'
 import './connections.css'
 
@@ -23,6 +25,7 @@ export function ErrorBanner({ error, strings }: { error: unknown; strings?: Dict
 
 export function ConnectionCard({
   title,
+  text,
   ok,
   rows,
   problem,
@@ -31,6 +34,7 @@ export function ConnectionCard({
   children,
 }: {
   title: string
+  text?: string
   ok: boolean
   rows: [ReactNode, ReactNode][]
   problem?: string
@@ -40,37 +44,32 @@ export function ConnectionCard({
 }) {
   const t = useT(connectionStrings)
   return (
-    <section className="card status-card" aria-label={title}>
-      <header>
-        <h2>{title}</h2>
-        <StatePill ok={ok} />
-      </header>
-      <Rows rows={rows} />
-      {problem && <Banner kind="error" title={problem} />}
-      {children}
-      {onTest && (
-        <div className="card-actions">
+    <SummaryCard
+      title={title}
+      badge={<StatePill ok={ok} />}
+      text={text}
+      rows={rows}
+      footer={
+        onTest && (
           <Button onClick={onTest} busy={testing}>
             {!testing && <PlugZap size={16} />}
             {t('conn.test')}
           </Button>
-        </div>
-      )}
-    </section>
+        )
+      }
+    >
+      {problem && <Banner kind="error" title={problem} />}
+      {children}
+    </SummaryCard>
   )
 }
 
 export function MigrationCard({ title, text, children }: { title: string; text: string; children: ReactNode }) {
   return (
-    <section className="card status-card" aria-label={title}>
-      <header className="conn-head">
-        <div>
-          <h2>{title}</h2>
-          <p className="muted">{text}</p>
-        </div>
-      </header>
+    <ProfileCard title={title}>
+      <p className="muted">{text}</p>
       {children}
-    </section>
+    </ProfileCard>
   )
 }
 

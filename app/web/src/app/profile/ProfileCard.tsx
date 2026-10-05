@@ -4,6 +4,7 @@ import type { Action } from './useAction'
 
 export function ProfileCard({
   title,
+  badge,
   action,
   footer,
   onSubmit,
@@ -11,6 +12,7 @@ export function ProfileCard({
   children,
 }: {
   title: string
+  badge?: ReactNode
   action?: Action
   footer?: ReactNode
   onSubmit?: () => void
@@ -21,6 +23,7 @@ export function ProfileCard({
     <>
       <header>
         <h2>{title}</h2>
+        {badge}
       </header>
       {children}
       {action?.notice && <Banner kind="ok" title={action.notice} />}

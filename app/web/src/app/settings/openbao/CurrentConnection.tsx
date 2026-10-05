@@ -26,6 +26,7 @@ export function CurrentConnection({ overview }: { overview: OpenBaoOverview }) {
   return (
     <ConnectionCard
       title={t('obs.current')}
+      text={t('obs.current.text')}
       ok={s.token_ok === true && s.mount_ok === true}
       problem={s.error || overview.list_error}
       onTest={can('settings.openbao:test') ? runTest : undefined}

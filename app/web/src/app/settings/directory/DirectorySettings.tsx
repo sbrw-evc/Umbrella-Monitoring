@@ -5,8 +5,9 @@ import type { Check } from '../../../connections/CheckResult'
 import { LdapCheckResult, LdapForm } from '../../../connections/LdapForm'
 import { ldapCheckKey, ldapComplete, ldapConfig, ldapDraft, ldapTestBody, type LdapConfig, type LdapDraft, type LdapReport } from '../../../connections/ldap'
 import { useLocale, useT } from '../../../i18n'
-import { Banner, Button, formatDate, Rows, Switch } from '../../../ui'
+import { Banner, Button, formatDate, Switch } from '../../../ui'
 import { ProfileCard } from '../../profile/ProfileCard'
+import { SummaryCard } from '../../profile/SummaryCard'
 import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { EntraSettings } from './EntraSettings'
@@ -89,27 +90,26 @@ export function DirectorySettings() {
 
   return (
     <>
-      <ProfileCard title={t('dir.title')}>
-        <p className="muted">{t('dir.text')}</p>
-        <Rows
-          rows={[
-            [t('dir.state'), <span className={`pill pill-${saved.enabled ? 'ok' : 'off'}`}>{t(saved.enabled ? 'dir.state.on' : 'dir.state.off')}</span>],
-            ...(saved.url
-              ? ([
-                  [t('ld.kind'), t(`ld.kind.${saved.kind}`)],
-                  [t('dir.server'), <code key="u">{saved.url}</code>],
-                  [t('dir.tls'), saved.url.startsWith('ldaps://') ? 'LDAPS' : saved.start_tls ? 'StartTLS' : t('dir.tls.none')],
-                  [t('ld.baseDn'), saved.base_dn],
-                  [t('ld.adminGroup'), saved.admin_group_dn],
-                  [t('dir.password'), t(view.bind_password_set ? 'dir.password.set' : 'dir.password.unset')],
-                ] as [string, ReactNode][])
-              : []),
-            [t('dir.users'), t('dir.users.value', { total: view.users.total, admins: view.users.admins, disabled: view.users.disabled })],
-            [t('dir.lastSignIn'), <LastSignIn key="l" at={view.users.last_sign_in} />],
-            [t('dir.localAdmins'), String(view.local_admins)],
-          ]}
-        />
-      </ProfileCard>
+      <SummaryCard
+        title={t('dir.title')}
+        text={t('dir.text')}
+        rows={[
+          [t('dir.state'), <span className={`pill pill-${saved.enabled ? 'ok' : 'off'}`}>{t(saved.enabled ? 'dir.state.on' : 'dir.state.off')}</span>],
+          ...(saved.url
+            ? ([
+                [t('ld.kind'), t(`ld.kind.${saved.kind}`)],
+                [t('dir.server'), <code key="u">{saved.url}</code>],
+                [t('dir.tls'), saved.url.startsWith('ldaps://') ? 'LDAPS' : saved.start_tls ? 'StartTLS' : t('dir.tls.none')],
+                [t('ld.baseDn'), saved.base_dn],
+                [t('ld.adminGroup'), saved.admin_group_dn],
+                [t('dir.password'), t(view.bind_password_set ? 'dir.password.set' : 'dir.password.unset')],
+              ] as [string, ReactNode][])
+            : []),
+          [t('dir.users'), t('dir.users.value', { total: view.users.total, admins: view.users.admins, disabled: view.users.disabled })],
+          [t('dir.lastSignIn'), <LastSignIn key="l" at={view.users.last_sign_in} />],
+          [t('dir.localAdmins'), String(view.local_admins)],
+        ]}
+      />
       <ProfileCard
         title={t('dir.settings')}
         action={saver}

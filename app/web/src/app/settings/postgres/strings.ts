@@ -5,6 +5,7 @@ import { postgresStrings } from '../../../connections/postgresStrings'
 const page: Dict = {
   en: {
     'pgs.current': 'Current connection',
+    'pgs.current.text': 'The PostgreSQL database where Umbrella saves its state.',
     'pgs.host': 'Host',
     'pgs.port': 'Port',
     'pgs.database': 'Database',
@@ -100,6 +101,7 @@ const page: Dict = {
   },
   ru: {
     'pgs.current': 'Текущее подключение',
+    'pgs.current.text': 'База PostgreSQL, в которой Umbrella сохраняет своё состояние.',
     'pgs.host': 'Хост',
     'pgs.port': 'Порт',
     'pgs.database': 'База данных',
