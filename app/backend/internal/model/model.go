@@ -9,6 +9,7 @@ import (
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/entra"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/netbox"
 )
 
 const (
@@ -115,6 +116,7 @@ type Settings struct {
 	Password      PasswordPolicy   `json:"password_policy"`
 	LDAP          directory.Config `json:"ldap"`
 	Entra         entra.Config     `json:"entra"`
+	NetBox        netbox.Config    `json:"netbox"`
 	SetupAt       time.Time        `json:"setup_at"`
 	SetupBy       string           `json:"setup_by"`
 }

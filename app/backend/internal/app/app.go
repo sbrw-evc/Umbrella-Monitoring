@@ -58,6 +58,8 @@ type App struct {
 	roles     *RolesService
 	teams     *TeamsService
 	services  *ServicesService
+	netbox    *NetBoxService
+	cis       *CIService
 
 	creds      *CredentialsService
 	connectors *ConnectorsService
@@ -78,6 +80,7 @@ func New(opt Options, deps Deps) *App {
 		vault = deps.Vault
 	}
 	creds := NewCredentialsService(deps.Store, vault)
+	nb := NewNetBoxService(deps.Store, vault)
 	var queue *ingest.Queue
 	if deps.Backend != nil {
 		queue = ingest.New(deps.Backend.Pool())
@@ -103,6 +106,8 @@ func New(opt Options, deps Deps) *App {
 		roles:      NewRolesService(deps.Store),
 		teams:      NewTeamsService(deps.Store),
 		services:   NewServicesService(deps.Store),
+		netbox:     nb,
+		cis:        NewCIService(deps.Store, nb),
 	}
 }
 
@@ -123,7 +128,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })
@@ -131,9 +136,10 @@ func (a *App) Handler() http.Handler {
 	return httpx.Secure(mux)
 }
 
-// Run prepares the ingest tables and processes received requests until ctx ends. Without
-// PostgreSQL (tests) it returns at once and the intake answers 503.
+// Run synchronizes NetBox on its schedule, prepares the ingest tables and processes received
+// requests until ctx ends. Without PostgreSQL (tests) the intake answers 503.
 func (a *App) Run(ctx context.Context) {
+	go a.netbox.Run(ctx)
 	if a.queue == nil {
 		return
 	}

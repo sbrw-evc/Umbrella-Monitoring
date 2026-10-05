@@ -18,9 +18,13 @@ type Data struct {
 	Services    map[string]*model.Service
 	Connectors  map[string]*model.Connector
 	Credentials map[string]*model.Credential
-	Settings    model.Settings
-	Audit       []AuditEntry
-	Seq         map[string]int
+	ConfigItems map[string]*model.ConfigItem
+	// NetBoxContacts maps NetBox contact IDs to the user accounts made or found for them.
+	NetBoxContacts map[int]string
+	NetBoxSync     model.SyncState
+	Settings       model.Settings
+	Audit          []AuditEntry
+	Seq            map[string]int
 }
 
 type AuditEntry struct {
@@ -66,6 +70,12 @@ func (d *Data) init() {
 	}
 	if d.Credentials == nil {
 		d.Credentials = map[string]*model.Credential{}
+	}
+	if d.ConfigItems == nil {
+		d.ConfigItems = map[string]*model.ConfigItem{}
+	}
+	if d.NetBoxContacts == nil {
+		d.NetBoxContacts = map[int]string{}
 	}
 	if d.Seq == nil {
 		d.Seq = map[string]int{}

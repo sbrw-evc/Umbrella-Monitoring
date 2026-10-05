@@ -1,0 +1,123 @@
+package model
+
+import (
+	"slices"
+	"time"
+)
+
+const (
+	SourceNetBox = "netbox"
+
+	CIKindDevice  = "device"
+	CIKindVM      = "vm"
+	CIKindService = "service"
+	CIKindOther   = "other"
+
+	CIStatusActive          = "active"
+	CIStatusPlanned         = "planned"
+	CIStatusStaged          = "staged"
+	CIStatusOffline         = "offline"
+	CIStatusFailed          = "failed"
+	CIStatusDecommissioning = "decommissioning"
+
+	DirectoryMatched = "matched"
+	DirectoryMissing = "missing"
+)
+
+var (
+	CIKinds    = []string{CIKindDevice, CIKindVM, CIKindService, CIKindOther}
+	CIStatuses = []string{CIStatusActive, CIStatusPlanned, CIStatusStaged, CIStatusOffline, CIStatusFailed, CIStatusDecommissioning}
+)
+
+func ValidCIKind(v string) bool   { return slices.Contains(CIKinds, v) }
+func ValidCIStatus(v string) bool { return slices.Contains(CIStatuses, v) }
+
+// CIOwner is a person responsible for a configuration item, with the role NetBox gives them.
+type CIOwner struct {
+	UserID string `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+// CIAttrs are the descriptive fields NetBox fills in.
+type CIAttrs struct {
+	Site       string `json:"site,omitempty"`
+	Role       string `json:"role,omitempty"`
+	DeviceType string `json:"device_type,omitempty"`
+	Cluster    string `json:"cluster,omitempty"`
+	Tenant     string `json:"tenant,omitempty"`
+	Platform   string `json:"platform,omitempty"`
+	Parent     string `json:"parent,omitempty"`
+	Ports      string `json:"ports,omitempty"`
+	Serial     string `json:"serial,omitempty"`
+}
+
+// NetBoxRef points at the NetBox object a configuration item is kept in.
+type NetBoxRef struct {
+	Kind string `json:"kind"`
+	ID   int    `json:"id"`
+	URL  string `json:"url"`
+}
+
+// CIDirectory is the computer object of the domain controller matched to the item.
+type CIDirectory struct {
+	Status    string     `json:"status"`
+	DN        string     `json:"dn,omitempty"`
+	DNSName   string     `json:"dns_name,omitempty"`
+	OS        string     `json:"os,omitempty"`
+	OSVersion string     `json:"os_version,omitempty"`
+	LastLogon *time.Time `json:"last_logon,omitempty"`
+	Disabled  bool       `json:"disabled"`
+	CheckedAt time.Time  `json:"checked_at"`
+}
+
+// ConfigItem is a configuration item (CI): a device, virtual machine, service or other
+// object monitoring refers to. Items imported from NetBox are kept read-only here.
+type ConfigItem struct {
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Kind        string       `json:"kind"`
+	Status      string       `json:"status"`
+	Description string       `json:"description"`
+	Source      string       `json:"source"`
+	Owners      []CIOwner    `json:"-"`
+	IPs         []string     `json:"ips"`
+	Tags        []string     `json:"tags"`
+	Attrs       CIAttrs      `json:"attrs"`
+	NetBox      *NetBoxRef   `json:"netbox,omitempty"`
+	Directory   *CIDirectory `json:"directory,omitempty"`
+	CreatedAt   time.Time    `json:"created_at"`
+	CreatedBy   string       `json:"created_by"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+	UpdatedBy   string       `json:"updated_by"`
+	SyncedAt    *time.Time   `json:"synced_at,omitempty"`
+}
+
+// Imported items mirror NetBox and change only there.
+func (c *ConfigItem) Imported() bool { return c.Source == SourceNetBox }
+
+// SyncStats counts what one NetBox synchronization changed.
+type SyncStats struct {
+	Objects          int    `json:"objects"`
+	Created          int    `json:"created"`
+	Updated          int    `json:"updated"`
+	Deleted          int    `json:"deleted"`
+	Unlinked         int    `json:"unlinked"`
+	Contacts         int    `json:"contacts"`
+	UsersCreated     int    `json:"users_created"`
+	UsersUpdated     int    `json:"users_updated"`
+	UsersLinked      int    `json:"users_linked"`
+	DirectoryChecked bool   `json:"directory_checked"`
+	DirectoryMatched int    `json:"directory_matched"`
+	DirectoryMissing int    `json:"directory_missing"`
+	DirectoryError   string `json:"directory_error,omitempty"`
+}
+
+// SyncState is the last NetBox synchronization.
+type SyncState struct {
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at"`
+	OK         bool      `json:"ok"`
+	Error      string    `json:"error,omitempty"`
+	Actor      string    `json:"actor"`
+	Stats      SyncStats `json:"stats"`
+}
