@@ -1,18 +1,3 @@
-.conn-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.conn-head h2 {
-  margin: 0 0 4px;
-}
-
-.conn-head p {
-  margin: 0;
-}
-
 .conn-actions {
   display: flex;
   justify-content: flex-end;

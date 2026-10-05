@@ -5,6 +5,7 @@ import { openBaoStrings } from '../../../connections/openbaoStrings'
 const page: Dict = {
   en: {
     'obs.current': 'Current connection',
+    'obs.current.text': 'The OpenBao server where Umbrella keeps passwords, tokens and other secrets.',
     'obs.addr': 'Address',
     'obs.version': 'Server version',
     'obs.mount': 'KV v2 mount',
@@ -49,6 +50,7 @@ const page: Dict = {
   },
   ru: {
     'obs.current': 'Текущее подключение',
+    'obs.current.text': 'Сервер OpenBao, в котором Umbrella хранит пароли, токены и другие секреты.',
     'obs.addr': 'Адрес',
     'obs.version': 'Версия сервера',
     'obs.mount': 'Хранилище KV v2',

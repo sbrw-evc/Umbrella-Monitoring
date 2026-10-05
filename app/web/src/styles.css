@@ -802,8 +802,10 @@ code {
 
 .rows.rows-end > div {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: 2px 16px;
   padding: 8px 0;
   border-top: 1px solid var(--border);
 }
@@ -813,6 +815,8 @@ code {
 }
 
 .rows.rows-end dd {
+  margin-left: auto;
+  overflow-wrap: break-word;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   text-align: right;

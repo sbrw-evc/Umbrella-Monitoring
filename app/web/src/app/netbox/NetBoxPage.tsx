@@ -4,8 +4,9 @@ import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api'
 import { CheckResult, type Check } from '../../connections/CheckResult'
 import { useLocale, useT } from '../../i18n'
-import { Banner, Button, Field, formatDate, Input, Password, Rows, Select, Stepper, Switch } from '../../ui'
+import { Banner, Button, Field, formatDate, Input, Password, Select, Stepper, Switch } from '../../ui'
 import { ProfileCard } from '../profile/ProfileCard'
+import { SummaryCard } from '../profile/SummaryCard'
 import { useAction } from '../profile/useAction'
 import { useSession } from '../session'
 import { strings } from './strings'
@@ -298,8 +299,10 @@ function SyncCard({ view, onSynced }: { view: NetBoxView; onSynced: (v: NetBoxVi
   }
 
   return (
-    <ProfileCard
+    <SummaryCard
       title={t('nb.sync')}
+      text={t('nb.state.text')}
+      rows={rows}
       action={syncer}
       footer={
         on &&
@@ -311,11 +314,9 @@ function SyncCard({ view, onSynced }: { view: NetBoxView; onSynced: (v: NetBoxVi
         )
       }
     >
-      <p className="muted">{t('nb.state.text')}</p>
-      <Rows rows={rows} />
       {!ran(sync.started_at) && on && <p className="hint">{t('nb.sync.never')}</p>}
       {ran(sync.started_at) && !sync.ok && sync.error && <Banner kind="error" title={t('nb.sync.failed')}>{sync.error}</Banner>}
-    </ProfileCard>
+    </SummaryCard>
   )
 }
 

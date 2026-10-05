@@ -6,6 +6,7 @@ import { CheckResult, type Check } from '../../../connections/CheckResult'
 import { useLocale, useT } from '../../../i18n'
 import { Banner, Button, Field, formatDate, Input, Password, Rows, Switch } from '../../../ui'
 import { ProfileCard } from '../../profile/ProfileCard'
+import { SummaryCard } from '../../profile/SummaryCard'
 import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { DIRECTORY_CHANGED } from './GroupMappingSettings'
@@ -149,25 +150,24 @@ export function EntraSettings() {
 
   return (
     <>
-      <ProfileCard title={t('en.title')}>
-        <p className="muted">{t('en.text')}</p>
-        <Rows
-          rows={[
-            [t('en.state'), <span className={`pill pill-${saved.enabled ? 'ok' : 'off'}`}>{t(saved.enabled ? 'dir.state.on' : 'dir.state.off')}</span>],
-            ...(saved.tenant_id
-              ? ([
-                  [t('en.tenant'), <code key="t">{saved.tenant_id}</code>],
-                  [t('en.client'), <code key="c">{saved.client_id}</code>],
-                  [t('en.adminGroup'), saved.admin_group_id && <code key="a">{saved.admin_group_id}</code>],
-                  [t('en.userGroup'), saved.user_group_id ? <code key="u">{saved.user_group_id}</code> : t('en.userGroup.any')],
-                  [t('en.secret'), t(view.client_secret_set ? 'dir.password.set' : 'dir.password.unset')],
-                ] as [string, ReactNode][])
-              : []),
-            [t('en.users'), t('dir.users.value', { total: view.users.total, admins: view.users.admins, disabled: view.users.disabled })],
-            [t('en.lastSignIn'), <LastSignIn key="l" at={view.users.last_sign_in} />],
-          ]}
-        />
-      </ProfileCard>
+      <SummaryCard
+        title={t('en.title')}
+        text={t('en.text')}
+        rows={[
+          [t('en.state'), <span className={`pill pill-${saved.enabled ? 'ok' : 'off'}`}>{t(saved.enabled ? 'dir.state.on' : 'dir.state.off')}</span>],
+          ...(saved.tenant_id
+            ? ([
+                [t('en.tenant'), <code key="t">{saved.tenant_id}</code>],
+                [t('en.client'), <code key="c">{saved.client_id}</code>],
+                [t('en.adminGroup'), saved.admin_group_id && <code key="a">{saved.admin_group_id}</code>],
+                [t('en.userGroup'), saved.user_group_id ? <code key="u">{saved.user_group_id}</code> : t('en.userGroup.any')],
+                [t('en.secret'), t(view.client_secret_set ? 'dir.password.set' : 'dir.password.unset')],
+              ] as [string, ReactNode][])
+            : []),
+          [t('en.users'), t('dir.users.value', { total: view.users.total, admins: view.users.admins, disabled: view.users.disabled })],
+          [t('en.lastSignIn'), <LastSignIn key="l" at={view.users.last_sign_in} />],
+        ]}
+      />
       <ProfileCard
         title={t('en.settings')}
         action={saver}

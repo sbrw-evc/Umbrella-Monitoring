@@ -4,8 +4,9 @@ import { useT } from '../../../i18n'
 import { PolicyChecklist } from '../../../PolicyChecklist'
 import { PolicyEditor } from '../../../PolicyEditor'
 import { defaultPolicy, policyError, type PasswordPolicy } from '../../../policy'
-import { Banner, Button, Field, Password, Rows } from '../../../ui'
+import { Banner, Button, Field, Password } from '../../../ui'
 import { ProfileCard } from '../../profile/ProfileCard'
+import { SummaryCard } from '../../profile/SummaryCard'
 import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { strings } from './strings'
@@ -57,17 +58,15 @@ export function PolicySettings() {
 
   return (
     <>
-      <ProfileCard title={t('ps.title')}>
-        <p className="muted">{t('ps.text')}</p>
-        <Rows
-          align="end"
-          rows={[
-            [t('ps.accounts'), String(summary.local_users)],
-            [t('ps.expired'), String(summary.expired_users)],
-            [t('ps.expiring'), String(summary.expiring_users)],
-          ]}
-        />
-      </ProfileCard>
+      <SummaryCard
+        title={t('ps.title')}
+        text={t('ps.text')}
+        rows={[
+          [t('ps.accounts'), String(summary.local_users)],
+          [t('ps.expired'), String(summary.expired_users)],
+          [t('ps.expiring'), String(summary.expiring_users)],
+        ]}
+      />
       <ProfileCard
         title={t('ps.rules')}
         action={saver}
