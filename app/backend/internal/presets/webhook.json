@@ -1,0 +1,39 @@
+{
+  "id": "webhook",
+  "title": {"en": "Generic webhook", "ru": "Универсальный webhook"},
+  "description": {
+    "en": "Any system that posts JSON with title, host, signal, severity, status and id fields, one object or an array.",
+    "ru": "Любая система, отправляющая JSON с полями title, host, signal, severity, status и id: один объект или массив."
+  },
+  "document": {
+    "format": "umbrella.connector",
+    "format_version": 1,
+    "name": "Webhook",
+    "graph": {
+      "nodes": [
+        {"id": "webhook", "type": "trigger.webhook", "type_version": 1, "params": {"credential": ""}, "position": {"x": 0, "y": 120}},
+        {"id": "parse", "type": "parse.json", "type_version": 1, "params": {}, "position": {"x": 260, "y": 120}},
+        {"id": "map", "type": "map.event", "type_version": 1, "params": {
+          "title": "${title}",
+          "ci": "${host|$ci}",
+          "signal": "${signal}",
+          "method": "other",
+          "severity": "${severity|warning}",
+          "status": "${status}",
+          "external_id": "${id}",
+          "value": "${value}"
+        }, "position": {"x": 520, "y": 120}},
+        {"id": "event", "type": "out.event", "type_version": 1, "params": {}, "position": {"x": 780, "y": 120}}
+      ],
+      "edges": [
+        {"id": "e1", "source": "webhook", "source_output": "main", "target": "parse"},
+        {"id": "e2", "source": "parse", "source_output": "main", "target": "map"},
+        {"id": "e3", "source": "map", "source_output": "main", "target": "event"}
+      ]
+    },
+    "credentials": [{"slot": "webhook.credential", "node": "webhook", "param": "credential", "types": ["bearer", "basic", "header", "hmac"]}],
+    "samples": [
+      {"name": "Disk full", "headers": {"content-type": "application/json"}, "body": "{\"id\":\"x1\",\"host\":\"db-01\",\"signal\":\"use.disk\",\"severity\":\"critical\",\"status\":\"firing\",\"title\":\"Disk is full\",\"value\":\"99%\"}"}
+    ]
+  }
+}

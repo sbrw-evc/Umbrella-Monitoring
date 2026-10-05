@@ -50,6 +50,16 @@ var groups = []Group{
 
 var pages = []Page{
 	{"status", GroupMain, Text{"System status", "Состояние системы"}, []Feature{view, {"defaults", Text{"Change default theme, language and time zone", "Изменение темы, языка и часового пояса по умолчанию"}}}},
+	{"connectors", GroupMain, Text{"Connectors", "Коннекторы"}, []Feature{
+		view,
+		{"edit", Text{"Create and change drafts, samples and test runs", "Создание и изменение черновиков, образцов и тестовых прогонов"}},
+		{"publish", Text{"Publish and stop connectors", "Публикация и остановка коннекторов"}},
+		{"payload", Text{"See request bodies, samples and failed records", "Просмотр тел запросов, образцов и ошибочных записей"}},
+	}},
+	{"credentials", GroupMain, Text{"Credentials", "Учётные данные"}, []Feature{
+		view,
+		{"edit", Text{"Create, replace and delete credentials", "Создание, замена и удаление учётных данных"}},
+	}},
 	{"users", GroupOrg, Text{"Users", "Пользователи"}, []Feature{
 		view,
 		{"create", Text{"Create local users", "Создание локальных пользователей"}},

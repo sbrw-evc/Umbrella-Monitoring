@@ -1,0 +1,53 @@
+{
+  "id": "grafana",
+  "title": {"en": "Grafana Alerting", "ru": "Grafana Alerting"},
+  "description": {
+    "en": "Grafana contact point of type webhook: one record per alert instance, value from valueString.",
+    "ru": "Точка контакта Grafana типа webhook: запись на каждый экземпляр алерта, значение из valueString."
+  },
+  "document": {
+    "format": "umbrella.connector",
+    "format_version": 1,
+    "name": "Grafana Alerting",
+    "tags": ["grafana"],
+    "graph": {
+      "nodes": [
+        {"id": "webhook", "type": "trigger.webhook", "type_version": 1, "params": {"credential": ""}, "position": {"x": 0, "y": 120}},
+        {"id": "parse", "type": "parse.json", "type_version": 1, "params": {"items": "alerts", "root_as": "batch"}, "position": {"x": 260, "y": 120}},
+        {"id": "severity", "type": "map.severity", "type_version": 1, "params": {
+          "source": "${labels.severity|$labels.priority}",
+          "mapping": [{"from": "*", "to": "warning"}]
+        }, "position": {"x": 520, "y": 120}},
+        {"id": "labels", "type": "enrich.labels", "type_version": 1, "params": {
+          "labels": [
+            {"key": "source", "value": "grafana"},
+            {"key": "folder", "value": "${labels.grafana_folder}"},
+            {"key": "dashboard", "value": "${dashboardURL}"}
+          ]
+        }, "position": {"x": 780, "y": 120}},
+        {"id": "map", "type": "map.event", "type_version": 1, "params": {
+          "title": "${annotations.summary|$labels.alertname}",
+          "ci": "${labels.instance|$labels.host|$labels.service|$labels.grafana_folder}",
+          "signal": "${labels.alertname}",
+          "method": "other",
+          "severity": "${severity}",
+          "status": "${status}",
+          "external_id": "${fingerprint}",
+          "value": "${valueString}"
+        }, "position": {"x": 1040, "y": 120}},
+        {"id": "event", "type": "out.event", "type_version": 1, "params": {}, "position": {"x": 1300, "y": 120}}
+      ],
+      "edges": [
+        {"id": "e1", "source": "webhook", "source_output": "main", "target": "parse"},
+        {"id": "e2", "source": "parse", "source_output": "main", "target": "severity"},
+        {"id": "e3", "source": "severity", "source_output": "main", "target": "labels"},
+        {"id": "e4", "source": "labels", "source_output": "main", "target": "map"},
+        {"id": "e5", "source": "map", "source_output": "main", "target": "event"}
+      ]
+    },
+    "credentials": [{"slot": "webhook.credential", "node": "webhook", "param": "credential", "types": ["bearer", "basic", "header", "hmac"]}],
+    "samples": [
+      {"name": "Firing: API latency", "headers": {"content-type": "application/json"}, "body": "{\"receiver\":\"umbrella\",\"status\":\"firing\",\"orgId\":1,\"alerts\":[{\"status\":\"firing\",\"labels\":{\"alertname\":\"API latency\",\"grafana_folder\":\"Payments\",\"service\":\"payments-api\",\"severity\":\"error\"},\"annotations\":{\"summary\":\"p95 latency of payments-api is above 800 ms\"},\"startsAt\":\"2026-10-05T10:00:00Z\",\"generatorURL\":\"http://grafana/alerting/grafana/abc/view\",\"fingerprint\":\"b7d0e5f4a3c21908\",\"dashboardURL\":\"http://grafana/d/payments\",\"valueString\":\"[ var='A' labels={service=payments-api} value=912 ]\"}],\"groupLabels\":{\"alertname\":\"API latency\"},\"commonLabels\":{\"alertname\":\"API latency\"},\"title\":\"[FIRING:1] API latency\",\"state\":\"alerting\",\"message\":\"p95 latency is high\"}"}
+    ]
+  }
+}

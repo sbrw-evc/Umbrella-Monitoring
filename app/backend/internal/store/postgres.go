@@ -75,7 +75,7 @@ func OpenPostgres(ctx context.Context, cfg PGConfig) (*PGBackend, error) {
 	if err != nil {
 		return nil, err
 	}
-	pc.MaxConns = 4
+	pc.MaxConns = 12
 	pool, err := pgxpool.NewWithConfig(ctx, pc)
 	if err != nil {
 		return nil, err
@@ -113,6 +113,9 @@ func (p *PGBackend) Info(ctx context.Context) (PGInfo, error) {
 	}
 	return info, nil
 }
+
+// Pool is shared with the connector intake and its workers.
+func (p *PGBackend) Pool() *pgxpool.Pool { return p.pool }
 
 func (p *PGBackend) Kind() string  { return "postgres" }
 func (p *PGBackend) Where() string { return p.cfg.Where() }

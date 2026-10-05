@@ -12,13 +12,15 @@ import (
 const MaxAudit = 5000
 
 type Data struct {
-	Users    map[string]*model.User
-	Roles    map[string]*model.Role
-	Teams    map[string]*model.Team
-	Services map[string]*model.Service
-	Settings model.Settings
-	Audit    []AuditEntry
-	Seq      map[string]int
+	Users       map[string]*model.User
+	Roles       map[string]*model.Role
+	Teams       map[string]*model.Team
+	Services    map[string]*model.Service
+	Connectors  map[string]*model.Connector
+	Credentials map[string]*model.Credential
+	Settings    model.Settings
+	Audit       []AuditEntry
+	Seq         map[string]int
 }
 
 type AuditEntry struct {
@@ -58,6 +60,12 @@ func (d *Data) init() {
 	}
 	if d.Services == nil {
 		d.Services = map[string]*model.Service{}
+	}
+	if d.Connectors == nil {
+		d.Connectors = map[string]*model.Connector{}
+	}
+	if d.Credentials == nil {
+		d.Credentials = map[string]*model.Credential{}
 	}
 	if d.Seq == nil {
 		d.Seq = map[string]int{}
