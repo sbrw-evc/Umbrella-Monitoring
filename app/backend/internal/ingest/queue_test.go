@@ -180,3 +180,60 @@ func TestMaintain(t *testing.T) {
 		t.Errorf("partitions are created ahead: %v %v", exists, err)
 	}
 }
+
+func TestResolvedClosesFiring(t *testing.T) {
+	ctx := context.Background()
+	db := pool(t)
+	q := ingest.New(db)
+	g := flow.Graph{
+		Nodes: []flow.Node{
+			{ID: "in", Type: "trigger.webhook", TypeVersion: 1, Params: map[string]any{"anonymous": true}},
+			{ID: "parse", Type: "parse.json", TypeVersion: 1, Params: map[string]any{}},
+			{ID: "map", Type: "map.event", TypeVersion: 1, Params: map[string]any{"title": "${name}", "ci": "${host}", "signal": "${signal}",
+				"severity": "${sev}", "status": "${status}", "external_id": "${id}"}},
+			{ID: "out", Type: "out.event", TypeVersion: 1},
+		},
+		Edges: []flow.Edge{{ID: "1", Source: "in", Target: "parse"}, {ID: "2", Source: "parse", Target: "map"}, {ID: "3", Source: "map", Target: "out"}},
+	}
+	p, issues := flow.Compile(g, flow.CompileOptions{})
+	if p == nil {
+		t.Fatal(issues)
+	}
+	process := func(ctx context.Context, r ingest.Request) (ingest.Outcome, error) {
+		res, err := p.Run(ctx, flow.Input{RequestID: fmt.Sprint(r.ID), Body: r.Body}, flow.RunOptions{})
+		return ingest.Outcome{Version: r.Version, Result: res}, err
+	}
+	for _, body := range []string{
+		`{"id":"z1","name":"Problem: CPU","host":"app-01","sev":"error","status":"firing"}`,
+		`{"id":"z1","name":"Problem: CPU","host":"app-01","sev":"error","status":"firing"}`,
+		`{"id":"z1","name":"Resolved: CPU","host":"app-01","sev":"error","status":"resolved"}`,
+		`{"name":"Disk","host":"db-01","signal":"disk","sev":"warning","status":"firing"}`,
+		`{"name":"Disk is fine again","host":"db-01","signal":"disk","sev":"warning","status":"ok"}`,
+	} {
+		if _, _, err := q.Enqueue(ctx, ingest.Request{ConnectorID: "CON-1", Version: 1, Body: []byte(body)}, ""); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := q.Drain(ctx, process); err != nil {
+			t.Fatal(err)
+		}
+	}
+	events, err := q.Events(ctx, "CON-1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("firing and resolved of one alert are one event, got %+v", events)
+	}
+	for _, e := range events {
+		if e.Status != flow.StatusResolved {
+			t.Errorf("resolved replaced firing: %+v", e)
+		}
+	}
+	if firing, err := q.Firing(ctx, time.Now().Add(-time.Hour)); err != nil || len(firing) != 0 {
+		t.Errorf("nothing fires after recovery: %+v, %v", firing, err)
+	}
+	stats, _ := q.Stats(ctx, "CON-1", time.Now().Add(-time.Hour), time.Hour)
+	if len(stats) != 1 || stats[0].Events != 4 || stats[0].Duplicates != 1 {
+		t.Errorf("status changes are events, only the repeated firing is a duplicate: %+v", stats)
+	}
+}
