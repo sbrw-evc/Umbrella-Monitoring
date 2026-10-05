@@ -9,10 +9,10 @@ import (
 )
 
 func (a *App) registerOpenBao(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/settings/openbao", a.authed(a.admin(a.openbaoOverview)))
-	mux.HandleFunc("POST /api/settings/openbao/test", a.authed(a.admin(a.openbaoTest)))
-	mux.HandleFunc("POST /api/settings/openbao/probe", a.authed(a.admin(a.openbaoProbe)))
-	mux.HandleFunc("POST /api/settings/openbao/migrate", a.authed(a.admin(a.openbaoMigrate)))
+	mux.HandleFunc("GET /api/settings/openbao", a.authed(a.can("settings.openbao:view", a.openbaoOverview)))
+	mux.HandleFunc("POST /api/settings/openbao/test", a.authed(a.can("settings.openbao:test", a.openbaoTest)))
+	mux.HandleFunc("POST /api/settings/openbao/probe", a.authed(a.can("settings.openbao:migrate", a.openbaoProbe)))
+	mux.HandleFunc("POST /api/settings/openbao/migrate", a.authed(a.can("settings.openbao:migrate", a.openbaoMigrate)))
 }
 
 func (a *App) openbaoOverview(w http.ResponseWriter, r *http.Request) {

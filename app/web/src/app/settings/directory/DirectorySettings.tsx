@@ -25,6 +25,9 @@ function sameAccount(a: LdapDraft, b: LdapDraft) {
 
 export function DirectorySettings() {
   const t = useT(strings)
+  const { can } = useSession()
+  const canEdit = can('settings.ldap:edit')
+  const canTest = can('settings.ldap:test')
   const [view, setView] = useState<DirectoryView | null>(null)
   const [draft, setDraft] = useState<LdapDraft>(() => ldapDraft())
   const [check, setCheck] = useState<Check<LdapReport>>(null)
@@ -111,18 +114,22 @@ export function DirectorySettings() {
         footer={
           <div className="row directory-actions">
             {draft.enabled && <span className="hint">{t('dir.save.hint')}</span>}
-            {draft.enabled && (
+            {draft.enabled && canTest && (
               <Button onClick={test} busy={tester.busy} disabled={!complete || !passwordReady}>
                 {tester.busy ? t('dir.checking') : t('dir.check')}
               </Button>
             )}
-            <Button type="submit" variant="primary" busy={saver.busy} disabled={!dirty || blocked || (draft.enabled && (!complete || !passwordReady))}>
-              {t('dir.save')}
-            </Button>
+            {canEdit && (
+              <Button type="submit" variant="primary" busy={saver.busy} disabled={!dirty || blocked || (draft.enabled && (!complete || !passwordReady))}>
+                {t('dir.save')}
+              </Button>
+            )}
           </div>
         }
       >
-        <Switch checked={draft.enabled} onChange={(v) => setDraft({ ...draft, enabled: v })} label={t('dir.enable')} hint={t('dir.enable.hint')} />
+        <fieldset className="plain-fieldset" disabled={!canEdit}>
+          <Switch checked={draft.enabled} onChange={(v) => setDraft({ ...draft, enabled: v })} label={t('dir.enable')} hint={t('dir.enable.hint')} />
+        </fieldset>
         <AnimatePresence initial={false} mode="wait">
           {draft.enabled ? (
             <motion.div
@@ -134,7 +141,9 @@ export function DirectorySettings() {
               transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
             >
               <div className="stack">
-                <LdapForm value={draft} onChange={setDraft} passwordHint={passwordHint} />
+                <fieldset className="plain-fieldset" disabled={!canEdit && !canTest}>
+                  <LdapForm value={draft} onChange={setDraft} passwordHint={passwordHint} />
+                </fieldset>
                 <LdapCheckResult check={check} draft={draft} />
                 {tester.error && (
                   <Banner kind="error" title={tester.error.message}>

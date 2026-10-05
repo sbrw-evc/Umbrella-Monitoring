@@ -12,7 +12,7 @@ import type { PostgresOverview, PostgresTest } from './types'
 export function CurrentConnection({ overview, sizeBytes }: { overview: PostgresOverview; sizeBytes?: number }) {
   const t = useT(strings)
   const { locale } = useLocale()
-  const { timezone } = useSession()
+  const { timezone, can } = useSession()
   const test = useAction()
   const [result, setResult] = useState<PostgresTest | null>(null)
   const c = overview.connection
@@ -27,7 +27,7 @@ export function CurrentConnection({ overview, sizeBytes }: { overview: PostgresO
       title={t('pgs.current')}
       ok={overview.ok && !overview.persist.error}
       problem={problem}
-      onTest={runTest}
+      onTest={can('settings.postgres:test') ? runTest : undefined}
       testing={test.busy}
       rows={[
         [t('pgs.host'), c.host],

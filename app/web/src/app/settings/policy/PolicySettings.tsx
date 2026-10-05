@@ -16,7 +16,8 @@ const samePolicy = (a: PasswordPolicy, b: PasswordPolicy) => JSON.stringify(a) =
 
 export function PolicySettings() {
   const t = useT(strings)
-  const { setPolicy, refresh } = useSession()
+  const { setPolicy, refresh, can } = useSession()
+  const canEdit = can('settings.policy:edit')
   const [summary, setSummary] = useState<PolicySummary | null>(null)
   const [draft, setDraft] = useState<PasswordPolicy>(defaultPolicy)
   const [sample, setSample] = useState('')
@@ -59,6 +60,7 @@ export function PolicySettings() {
       <ProfileCard title={t('ps.title')}>
         <p className="muted">{t('ps.text')}</p>
         <Rows
+          align="end"
           rows={[
             [t('ps.accounts'), String(summary.local_users)],
             [t('ps.expired'), String(summary.expired_users)],
@@ -71,17 +73,21 @@ export function PolicySettings() {
         action={saver}
         onSubmit={save}
         footer={
-          <div className="row">
-            <Button variant="ghost" onClick={() => setDraft(summary.policy)} disabled={!dirty || saver.busy}>
-              {t('ps.reset')}
-            </Button>
-            <Button type="submit" variant="primary" busy={saver.busy} disabled={!dirty || policyError(draft) !== null}>
-              {t('ps.save')}
-            </Button>
-          </div>
+          canEdit && (
+            <div className="row">
+              <Button variant="ghost" onClick={() => setDraft(summary.policy)} disabled={!dirty || saver.busy}>
+                {t('ps.reset')}
+              </Button>
+              <Button type="submit" variant="primary" busy={saver.busy} disabled={!dirty || policyError(draft) !== null}>
+                {t('ps.save')}
+              </Button>
+            </div>
+          )
         }
       >
-        <PolicyEditor value={draft} onChange={setDraft} />
+        <fieldset className="plain-fieldset" disabled={!canEdit}>
+          <PolicyEditor value={draft} onChange={setDraft} />
+        </fieldset>
         <Banner kind="info" title={t('ps.applies')} />
       </ProfileCard>
       <ProfileCard title={t('ps.preview')}>

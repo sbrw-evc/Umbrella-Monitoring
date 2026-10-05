@@ -1,0 +1,66 @@
+import { useMemo } from 'react'
+import { AnimatePresence, motion } from 'motion/react'
+import { Avatar } from '../../Avatar'
+import { useLocale, useT } from '../../i18n'
+import { formatDate } from '../../ui'
+import { useSession } from '../session'
+import { roleLabel } from '../types'
+import { SourcePill, StatusPill } from './Badges'
+import { teamOptions, type ManagedUser, type Refs } from './model'
+import { strings } from './strings'
+
+export function UsersList({ users, refs, onOpen }: { users: ManagedUser[]; refs: Refs; onOpen: (u: ManagedUser) => void }) {
+  const t = useT(strings)
+  const { locale } = useLocale()
+  const { timezone, user: me } = useSession()
+  const paths = useMemo(() => new Map(teamOptions(refs.teams).map((o) => [o.id, o.path])), [refs.teams])
+
+  return (
+    <div className="card usr-list">
+      <div className="usr-row usr-head" aria-hidden>
+        {['usr.col.user', 'usr.col.role', 'usr.col.team', 'usr.col.source', 'usr.col.status', 'usr.col.lastLogin'].map((k) => (
+          <span key={k}>{t(k)}</span>
+        ))}
+      </div>
+      <AnimatePresence initial={false}>
+        {users.map((u) => (
+          <motion.button
+            key={u.id}
+            type="button"
+            className={`usr-row usr-item ${u.disabled ? 'usr-disabled' : ''}`}
+            onClick={() => onOpen(u)}
+            layout="position"
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, height: 0, paddingTop: 0, paddingBottom: 0 }}
+            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <span className="usr-who">
+              <Avatar user={u} size={34} />
+              <span className="usr-names">
+                <strong>
+                  {u.display_name}
+                  {u.id === me.id && <span className="muted"> ({t('usr.you')})</span>}
+                </strong>
+                <small className="muted">{u.username}</small>
+              </span>
+            </span>
+            <span data-label={t('usr.col.role')}>{roleLabel(t, u.role, u.role_name)}</span>
+            <span data-label={t('usr.col.team')} className={u.team_id ? '' : 'muted'}>
+              {u.team_id ? (paths.get(u.team_id) ?? u.team_name ?? u.team_id) : t('usr.noTeam')}
+            </span>
+            <span data-label={t('usr.col.source')}>
+              <SourcePill user={u} />
+            </span>
+            <span data-label={t('usr.col.status')}>
+              <StatusPill user={u} />
+            </span>
+            <span data-label={t('usr.col.lastLogin')} className="muted">
+              {formatDate(u.last_login_at, locale, timezone) || t('usr.never')}
+            </span>
+          </motion.button>
+        ))}
+      </AnimatePresence>
+    </div>
+  )
+}

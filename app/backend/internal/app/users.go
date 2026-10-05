@@ -107,7 +107,7 @@ func (s *UserService) ChangePassword(ctx context.Context, id, current, next stri
 	}
 	now := s.now()
 	_, err = s.update(id, func(d *store.Data, u *model.User) {
-		u.PasswordRef, u.PasswordChangedAt = ref, now
+		u.PasswordRef, u.PasswordChangedAt, u.MustChangePassword = ref, now, false
 		d.AddAudit(store.AuditEntry{Actor: u.Username, Action: "user.password", Object: u.ID})
 	})
 	return err
@@ -165,10 +165,6 @@ func (s *UserService) SetTimezone(id string, tz string) (model.User, error) {
 }
 
 func (s *UserService) SyncDirectory(id directory.Identity) (model.User, error) {
-	role := model.RoleUser
-	if id.Admin {
-		role = model.RoleAdmin
-	}
 	var photo []byte
 	if id.HasPhoto {
 		if img, err := avatar.Normalize(id.Photo); err == nil {
@@ -192,7 +188,13 @@ func (s *UserService) SyncDirectory(id directory.Identity) (model.User, error) {
 			out = *x
 			return
 		}
-		x.Profile, x.Role, x.Name = profile, role, id.Name
+		x.Profile, x.Name = profile, id.Name
+		switch {
+		case id.Admin:
+			x.Role = model.RoleAdmin
+		case x.Role == "" || x.Role == model.RoleAdmin || d.Roles[x.Role] == nil:
+			x.Role = model.RoleUser
+		}
 		if id.Name == id.Username {
 			x.Name = profile.DisplayName(id.Username)
 		}

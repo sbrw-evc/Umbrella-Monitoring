@@ -34,7 +34,7 @@ export function ConnectionCard({
   ok: boolean
   rows: [ReactNode, ReactNode][]
   problem?: string
-  onTest: () => void
+  onTest?: () => void
   testing: boolean
   children?: ReactNode
 }) {
@@ -48,12 +48,14 @@ export function ConnectionCard({
       <Rows rows={rows} />
       {problem && <Banner kind="error" title={problem} />}
       {children}
-      <div className="card-actions">
-        <Button onClick={onTest} busy={testing}>
-          {!testing && <PlugZap size={16} />}
-          {t('conn.test')}
-        </Button>
-      </div>
+      {onTest && (
+        <div className="card-actions">
+          <Button onClick={onTest} busy={testing}>
+            {!testing && <PlugZap size={16} />}
+            {t('conn.test')}
+          </Button>
+        </div>
+      )}
     </section>
   )
 }

@@ -13,6 +13,9 @@ const MaxAudit = 5000
 
 type Data struct {
 	Users    map[string]*model.User
+	Roles    map[string]*model.Role
+	Teams    map[string]*model.Team
+	Services map[string]*model.Service
 	Settings model.Settings
 	Audit    []AuditEntry
 	Seq      map[string]int
@@ -47,6 +50,15 @@ func (d *Data) init() {
 	if d.Users == nil {
 		d.Users = map[string]*model.User{}
 	}
+	if d.Roles == nil {
+		d.Roles = map[string]*model.Role{}
+	}
+	if d.Teams == nil {
+		d.Teams = map[string]*model.Team{}
+	}
+	if d.Services == nil {
+		d.Services = map[string]*model.Service{}
+	}
 	if d.Seq == nil {
 		d.Seq = map[string]int{}
 	}
@@ -78,6 +90,36 @@ func (d *Data) AddAudit(a AuditEntry) {
 	if len(d.Audit) > MaxAudit {
 		d.Audit = append([]AuditEntry(nil), d.Audit[len(d.Audit)-MaxAudit:]...)
 	}
+}
+
+func (d *Data) EnsureSystemRoles(now time.Time) bool {
+	added := false
+	for _, r := range model.SystemRoles(now) {
+		if d.Roles[r.ID] == nil {
+			d.Roles[r.ID] = r
+			added = true
+		}
+	}
+	return added
+}
+
+func (d *Data) RoleOf(u *model.User) *model.Role {
+	if r := d.Roles[u.Role]; r != nil {
+		return r
+	}
+	id := model.RoleUser
+	if u.Role == model.RoleAdmin {
+		id = model.RoleAdmin
+	}
+	if r := d.Roles[id]; r != nil {
+		return r
+	}
+	for _, r := range model.SystemRoles(time.Time{}) {
+		if r.ID == id {
+			return r
+		}
+	}
+	return nil
 }
 
 func (d *Data) UserByName(username string) *model.User {

@@ -5,12 +5,14 @@ import { useT } from '../../../i18n'
 import { CurrentConnection } from './CurrentConnection'
 import { Migration } from './Migration'
 import { Statistics } from './Statistics'
+import { useSession } from '../../session'
 import { strings } from './strings'
 import type { PostgresOverview, PostgresStats } from './types'
 import './postgres.css'
 
 export function PostgresSettings() {
   const t = useT(strings)
+  const { can } = useSession()
   const [epoch, setEpoch] = useState(0)
   const overview = useResource<PostgresOverview>('/api/settings/postgres', epoch)
   const stats = useResource<PostgresStats>('/api/settings/postgres/stats', epoch)
@@ -21,7 +23,7 @@ export function PostgresSettings() {
     <>
       <CurrentConnection overview={overview.data} sizeBytes={stats.data?.database.size_bytes} />
       <Statistics stats={stats.data} error={stats.error} busy={stats.busy} reload={stats.reload} />
-      <Migration current={overview.data.where} onMigrated={() => setEpoch((e) => e + 1)} />
+      {can('settings.postgres:migrate') && <Migration current={overview.data.where} onMigrated={() => setEpoch((e) => e + 1)} />}
     </>
   )
 }

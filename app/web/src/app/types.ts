@@ -13,7 +13,11 @@ export type User = ProfileFields & {
   username: string
   name: string
   source: 'local' | 'ldap'
-  role: 'admin' | 'user'
+  role: string
+  role_name?: string
+  permissions?: string[]
+  team_id?: string
+  must_change_password?: boolean
   timezone: string
   last_login_at?: string
   csrf?: string
@@ -30,6 +34,16 @@ export const PROFILE_KEYS: (keyof ProfileFields)[] = ['last_name', 'first_name',
 
 export function profileOf(u: ProfileFields): ProfileFields {
   return Object.fromEntries(PROFILE_KEYS.map((k) => [k, u[k] ?? ''])) as ProfileFields
+}
+
+export function profileChanged(a: ProfileFields, b: ProfileFields) {
+  return PROFILE_KEYS.some((k) => a[k] !== b[k])
+}
+
+export const SYSTEM_ROLES = ['admin', 'user']
+
+export function roleLabel(t: (k: string) => string, id: string, name?: string) {
+  return SYSTEM_ROLES.includes(id) ? t(`role.${id}`) : name || id
 }
 
 export function fullName(u: User) {

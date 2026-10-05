@@ -1,5 +1,6 @@
 :root {
   --bg: #f4f6f9;
+  --chrome: #e9edf2;
   --surface: #ffffff;
   --surface-2: #f8fafc;
   --text: #0f172a;
@@ -24,6 +25,7 @@
 
 :root[data-theme='dark'] {
   --bg: #0b1220;
+  --chrome: #070b14;
   --surface: #121a2b;
   --surface-2: #172036;
   --text: #e5e9f2;
@@ -630,6 +632,39 @@ select.input {
   overflow-wrap: anywhere;
 }
 
+.plain-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.plain-fieldset:disabled {
+  opacity: 0.75;
+}
+
+.rows.rows-end {
+  gap: 0;
+}
+
+.rows.rows-end > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+
+.rows.rows-end > div:first-child {
+  border-top: 0;
+}
+
+.rows.rows-end dd {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .brand {
   display: flex;
   gap: 10px;
@@ -690,9 +725,8 @@ select.input {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 24px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  padding: 10px 20px;
+  background: var(--chrome);
 }
 
 .user-chip {
@@ -1382,16 +1416,19 @@ select.input {
   grid-template-rows: auto minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
+  background: var(--chrome);
 }
 
 .app-body {
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: 256px minmax(0, 1fr);
   min-height: 0;
+  padding: 0 8px 8px 0;
 }
 
 .app-body.no-sidebar {
   grid-template-columns: minmax(0, 1fr);
+  padding-left: 8px;
 }
 
 .app-main {
@@ -1400,18 +1437,71 @@ select.input {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
 }
 
 .sidebar {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   min-height: 0;
   overflow-y: auto;
-  padding: 18px 12px;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
+  padding: 8px 12px 16px;
+  background: var(--chrome);
+}
+
+.side-accordion {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    color 0.2s,
+    background 0.2s;
+}
+
+.side-accordion:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.side-accordion.has-active {
+  color: var(--text);
+}
+
+.side-accordion:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+
+.side-accordion .side-chevron {
+  margin-left: auto;
+  display: inline-flex;
+}
+
+.side-children {
+  overflow: hidden;
+}
+
+.side-children-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 2px 14px;
+  margin-left: 20px;
+  border-left: 1px solid var(--border);
 }
 
 .side-group {
@@ -1449,6 +1539,7 @@ select.input {
 
 .side-link:hover {
   color: var(--text);
+  background: var(--surface-2);
 }
 
 .side-link.active {
@@ -1470,26 +1561,34 @@ select.input {
 }
 
 @media (max-width: 860px) {
-  .app-body {
+  .app-body,
+  .app-body.no-sidebar {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
+    padding: 0 8px 8px;
   }
 
   .sidebar {
     flex-direction: row;
     gap: 2px;
-    padding: 8px 12px;
+    padding: 0 4px 8px;
     overflow-x: auto;
     overflow-y: hidden;
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
   }
 
-  .side-group {
+  .side-group,
+  .side-children-inner {
     flex-direction: row;
   }
 
-  .side-heading {
+  .side-children-inner {
+    padding: 0;
+    margin: 0;
+    border: 0;
+  }
+
+  .side-heading,
+  .side-accordion {
     display: none;
   }
 }

@@ -7,7 +7,8 @@ import { useLocale, useT } from '../i18n'
 import { useRouter } from '../router'
 import { useTheme } from '../theme'
 import { spring } from '../ui'
-import { PATHS } from './routes'
+import { PROFILE_PATH } from './pages'
+import { roleLabel } from './types'
 import { useSession } from './session'
 import { strings } from './strings'
 
@@ -55,7 +56,7 @@ export function UserMenu({ onSignOut }: { onSignOut: () => void }) {
     return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : undefined
   }
 
-  const subtitle = user.title || t(`role.${user.role}`)
+  const subtitle = user.title || roleLabel(t, user.role, user.role_name)
 
   return (
     <div className="user-menu" ref={root}>
@@ -99,7 +100,7 @@ export function UserMenu({ onSignOut }: { onSignOut: () => void }) {
                 {user.email && <small className="menu-email">{user.email}</small>}
               </div>
             </div>
-            <button type="button" role="menuitem" className="menu-item" onClick={() => navigate(PATHS.profile)}>
+            <button type="button" role="menuitem" className="menu-item" onClick={() => navigate(PROFILE_PATH)}>
               <UserRound size={18} />
               {t('nav.profile')}
             </button>

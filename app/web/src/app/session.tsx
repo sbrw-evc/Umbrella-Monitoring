@@ -11,6 +11,8 @@ export type Session = {
   refresh: () => Promise<void>
   setPolicy: (p: PasswordPolicy) => void
   expire: () => void
+  can: (perm: string) => boolean
+  setDefaultTz: (tz: string) => void
 }
 
 const SessionContext = createContext<Session | null>(null)

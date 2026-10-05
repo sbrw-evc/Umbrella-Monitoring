@@ -20,7 +20,15 @@ func Migrate(ctx context.Context, st *store.Store, vault credentials.Vault) erro
 			changed = true
 		}
 		now := time.Now().UTC()
+		if d.EnsureSystemRoles(now) {
+			d.AddAudit(store.AuditEntry{Actor: "system", Action: "roles.seeded", Detail: "system roles created"})
+			changed = true
+		}
 		for _, u := range d.Users {
+			if d.Roles[u.Role] == nil {
+				u.Role = model.RoleUser
+				changed = true
+			}
 			if splitName(u) {
 				changed = true
 			}

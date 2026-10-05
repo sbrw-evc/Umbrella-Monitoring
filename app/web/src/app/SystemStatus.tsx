@@ -32,9 +32,9 @@ function Pill({ state, t }: { state: 'ok' | 'error' | 'off'; t: (k: string) => s
   return <span className={`pill pill-${state}`}>{t(`state.${state}`)}</span>
 }
 
-export function SystemStatus({ onDefaults }: { onDefaults: (tz: string) => void }) {
+export function SystemStatus() {
   const t = useT(strings)
-  const { timezone: tz, expire: onExpired } = useSession()
+  const { timezone: tz, expire: onExpired, can, setDefaultTz } = useSession()
   const { locale } = useLocale()
   const [s, setS] = useState<Status | null>(null)
   const [busy, setBusy] = useState(false)
@@ -156,12 +156,14 @@ export function SystemStatus({ onDefaults }: { onDefaults: (tz: string) => void 
                 [t('field.appVersion'), s.version],
               ]}
             />
-            <div className="card-actions">
-              <Button onClick={() => setEditing(true)}>
-                <Pencil size={16} />
-                {t('defaults.edit')}
-              </Button>
-            </div>
+            {can('status:defaults') && (
+              <div className="card-actions">
+                <Button onClick={() => setEditing(true)}>
+                  <Pencil size={16} />
+                  {t('defaults.edit')}
+                </Button>
+              </div>
+            )}
           </section>
         </div>
       )}
@@ -172,7 +174,7 @@ export function SystemStatus({ onDefaults }: { onDefaults: (tz: string) => void 
           initial={s.settings}
           onSaved={(next) => {
             setS({ ...s, settings: { ...s.settings, ...next } })
-            onDefaults(next.default_timezone)
+            setDefaultTz(next.default_timezone)
           }}
         />
       )}

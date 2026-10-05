@@ -41,13 +41,18 @@ type App struct {
 	deps      Deps
 	auth      *AuthService
 	users     *UserService
+	accounts  *UsersService
 	settings  *SettingsService
 	status    *StatusService
 	limiter   *Limiter
 	policy    *PolicyService
+	access    *AccessService
 	directory *DirectoryService
 	postgres  *PostgresService
 	openbao   *OpenBaoService
+	roles     *RolesService
+	teams     *TeamsService
+	services  *ServicesService
 }
 
 func New(opt Options, deps Deps) *App {
@@ -61,14 +66,19 @@ func New(opt Options, deps Deps) *App {
 		opt:       opt,
 		deps:      deps,
 		users:     users,
+		accounts:  NewUsersService(deps.Store, passwords, deps.Vault, deps.Sessions),
 		auth:      NewAuthService(deps.Store, passwords, deps.Vault, dir, users),
 		settings:  NewSettingsService(deps.Store),
 		status:    NewStatusService(deps.Store, deps.Vault, deps.Backend, dir, opt.Version),
 		limiter:   NewLimiter(maxFailures, failWindow, lockout),
 		policy:    NewPolicyService(deps.Store),
+		access:    NewAccessService(deps.Store),
 		directory: NewDirectoryService(deps.Store, deps.Vault, dir, deps.Sessions),
 		postgres:  NewPostgresService(deps.Store, deps.Backend, deps.Vault, deps.Runtime, deps.Config),
 		openbao:   NewOpenBaoService(deps.Store, deps.Vault, deps.Runtime, deps.Config),
+		roles:     NewRolesService(deps.Store),
+		teams:     NewTeamsService(deps.Store),
+		services:  NewServicesService(deps.Store),
 	}
 }
 
@@ -87,9 +97,9 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/auth/me/avatar", a.authed(a.uploadAvatar))
 	mux.HandleFunc("DELETE /api/auth/me/avatar", a.authed(a.deleteAvatar))
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
-	mux.HandleFunc("PUT /api/settings", a.authed(a.admin(a.updateSettings)))
-	mux.HandleFunc("GET /api/system", a.authed(a.admin(a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerPolicy} {
+	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
+	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })

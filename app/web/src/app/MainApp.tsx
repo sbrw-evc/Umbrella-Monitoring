@@ -7,13 +7,12 @@ import { RouterProvider, SCROLL_ROOT_ID, useRouter } from '../router'
 import { ExpiredPassword } from './profile/ExpiredPassword'
 import { PasswordExpiryNotice } from './profile/PasswordExpiryNotice'
 import { ProfilePage } from './profile/ProfilePage'
-import { PATHS, pageFor } from './routes'
-import { SettingsPage } from './settings/SettingsPage'
+import { PageHead } from './PageHead'
+import { resolve, visiblePages } from './pages'
 import { SessionProvider, useSession, type Session } from './session'
 import { Sidebar } from './Sidebar'
 import { SignIn } from './SignIn'
 import { strings } from './strings'
-import { SystemStatus } from './SystemStatus'
 import { TopBar } from './TopBar'
 import type { User } from './types'
 
@@ -66,6 +65,8 @@ function Shell({ meta }: { meta: Meta }) {
     }
   }, [expire])
 
+  const permissions = useMemo(() => new Set(user?.permissions ?? []), [user?.permissions])
+
   const session = useMemo<Session | null>(
     () =>
       user && {
@@ -73,16 +74,20 @@ function Shell({ meta }: { meta: Meta }) {
         timezone: user.timezone || defaultTz,
         defaultTz,
         policy,
+        can: (perm: string) => permissions.has(perm),
+        setDefaultTz,
         update: setUser,
         refresh,
         setPolicy,
         expire,
       },
-    [user, defaultTz, policy, refresh, expire],
+    [user, defaultTz, policy, refresh, expire, permissions],
   )
 
   if (!checked) return <div className="center-page boot">{t('loading')}</div>
   if (!session) return <SignIn meta={meta} onSignedIn={setUser} />
+
+  const hasSidebar = visiblePages(session.can).length > 0
 
   if (session.user.password_expired) {
     return (
@@ -96,10 +101,10 @@ function Shell({ meta }: { meta: Meta }) {
     <SessionProvider value={session}>
       <div className="app-shell">
         <TopBar onSignOut={signOut} />
-        <div className={`app-body ${session.user.role === 'admin' ? '' : 'no-sidebar'}`}>
-          {session.user.role === 'admin' && <Sidebar />}
+        <div className={`app-body ${hasSidebar ? '' : 'no-sidebar'}`}>
+          {hasSidebar && <Sidebar />}
           <div id={SCROLL_ROOT_ID} className="app-main">
-            <Pages onDefaults={setDefaultTz} />
+            <Pages />
           </div>
         </div>
       </div>
@@ -107,36 +112,42 @@ function Shell({ meta }: { meta: Meta }) {
   )
 }
 
-function Pages({ onDefaults }: { onDefaults: (tz: string) => void }) {
+function Pages() {
   const { path, navigate } = useRouter()
-  const { user, refresh } = useSession()
-  const page = pageFor(path, user)
+  const { user, refresh, can } = useSession()
+  const target = resolve(path, can)
 
   useEffect(() => {
     if (user.source === 'local') void refresh()
   }, [path, user.source, refresh])
 
   useEffect(() => {
-    if (!page) navigate(PATHS.status, { replace: true })
-  }, [page, navigate])
+    if (target.kind === 'redirect') navigate(target.to, { replace: true })
+  }, [target, navigate])
+
+  if (target.kind === 'redirect') return null
+  const key = target.kind === 'page' ? target.page.id : 'profile'
 
   return (
     <AnimatePresence mode="wait" initial={false}>
-      {page && (
-        <motion.main
-          key={page}
-          className="page"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-        >
-          {page !== 'profile' && <PasswordExpiryNotice link />}
-          {page === 'status' && <SystemStatus onDefaults={onDefaults} />}
-          {page === 'settings' && <SettingsPage />}
-          {page === 'profile' && <ProfilePage />}
-        </motion.main>
-      )}
+      <motion.main
+        key={key}
+        className="page"
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -6 }}
+        transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+      >
+        {target.kind === 'profile' ? (
+          <ProfilePage />
+        ) : (
+          <>
+            <PasswordExpiryNotice link />
+            {target.page.subtitle && <PageHead page={target.page} />}
+            <target.page.Component />
+          </>
+        )}
+      </motion.main>
     </AnimatePresence>
   )
 }

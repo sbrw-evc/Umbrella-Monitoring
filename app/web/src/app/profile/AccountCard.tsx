@@ -3,6 +3,7 @@ import { formatDate, Rows } from '../../ui'
 import { useSession } from '../session'
 import { strings } from '../strings'
 import { ProfileCard } from './ProfileCard'
+import { roleLabel } from '../types'
 
 export function AccountCard() {
   const t = useT(strings)
@@ -14,7 +15,7 @@ export function AccountCard() {
         rows={[
           [t('signin.username'), user.username],
           [t('field.source'), t(`source.${user.source}`)],
-          [t('field.role'), t(`role.${user.role}`)],
+          [t('field.role'), roleLabel(t, user.role, user.role_name)],
           [t('field.lastLogin'), formatDate(user.last_login_at, locale, timezone)],
         ]}
       />

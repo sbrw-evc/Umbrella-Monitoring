@@ -34,7 +34,14 @@ func (s *PolicyService) Age(u model.User) model.PasswordAge {
 	if u.Source != model.SourceLocal {
 		return model.PasswordAge{}
 	}
-	return s.Get().Age(u.PasswordChangedAt, s.now())
+	age := s.Get().Age(u.PasswordChangedAt, s.now())
+	if u.MustChangePassword {
+		age.Expired, age.Warning = true, true
+		if age.ExpiresAt.IsZero() {
+			age.ExpiresAt = u.PasswordChangedAt
+		}
+	}
+	return age
 }
 
 func (s *PolicyService) Summary() PolicySummary {

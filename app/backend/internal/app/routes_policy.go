@@ -8,8 +8,8 @@ import (
 )
 
 func (a *App) registerPolicy(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/settings/password-policy", a.authed(a.admin(a.passwordPolicy)))
-	mux.HandleFunc("PUT /api/settings/password-policy", a.authed(a.admin(a.updatePasswordPolicy)))
+	mux.HandleFunc("GET /api/settings/password-policy", a.authed(a.can("settings.policy:view", a.passwordPolicy)))
+	mux.HandleFunc("PUT /api/settings/password-policy", a.authed(a.can("settings.policy:edit", a.updatePasswordPolicy)))
 }
 
 func (a *App) passwordPolicy(w http.ResponseWriter, r *http.Request) {

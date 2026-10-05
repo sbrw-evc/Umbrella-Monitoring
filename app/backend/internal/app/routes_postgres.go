@@ -15,11 +15,11 @@ const (
 )
 
 func (a *App) registerPostgres(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/settings/postgres", a.authed(a.admin(a.postgresOverview)))
-	mux.HandleFunc("POST /api/settings/postgres/test", a.authed(a.admin(a.postgresTest)))
-	mux.HandleFunc("GET /api/settings/postgres/stats", a.authed(a.admin(a.postgresStats)))
-	mux.HandleFunc("POST /api/settings/postgres/probe", a.authed(a.admin(a.postgresProbe)))
-	mux.HandleFunc("POST /api/settings/postgres/migrate", a.authed(a.admin(a.postgresMigrate)))
+	mux.HandleFunc("GET /api/settings/postgres", a.authed(a.can("settings.postgres:view", a.postgresOverview)))
+	mux.HandleFunc("POST /api/settings/postgres/test", a.authed(a.can("settings.postgres:test", a.postgresTest)))
+	mux.HandleFunc("GET /api/settings/postgres/stats", a.authed(a.can("settings.postgres:view", a.postgresStats)))
+	mux.HandleFunc("POST /api/settings/postgres/probe", a.authed(a.can("settings.postgres:migrate", a.postgresProbe)))
+	mux.HandleFunc("POST /api/settings/postgres/migrate", a.authed(a.can("settings.postgres:migrate", a.postgresMigrate)))
 }
 
 func (a *App) postgresOverview(w http.ResponseWriter, r *http.Request) {

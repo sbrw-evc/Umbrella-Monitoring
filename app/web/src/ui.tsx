@@ -243,9 +243,9 @@ export function Banner({ kind, title, children }: { kind: keyof typeof icons; ti
   )
 }
 
-export function Rows({ rows }: { rows: [ReactNode, ReactNode][] }) {
+export function Rows({ rows, align = 'start' }: { rows: [ReactNode, ReactNode][]; align?: 'start' | 'end' }) {
   return (
-    <dl className="rows">
+    <dl className={`rows ${align === 'end' ? 'rows-end' : ''}`}>
       {rows.map(([k, v], i) => (
         <div key={i}>
           <dt>{k}</dt>

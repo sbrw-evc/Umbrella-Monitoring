@@ -12,10 +12,12 @@ import (
 
 type userView struct {
 	model.User
-	CSRF          string `json:"csrf,omitempty"`
-	Gravatar      string `json:"gravatar,omitempty"`
-	HasAvatar     bool   `json:"has_avatar"`
-	AvatarVersion string `json:"avatar_version,omitempty"`
+	CSRF          string   `json:"csrf,omitempty"`
+	Gravatar      string   `json:"gravatar,omitempty"`
+	HasAvatar     bool     `json:"has_avatar"`
+	AvatarVersion string   `json:"avatar_version,omitempty"`
+	RoleName      string   `json:"role_name,omitempty"`
+	Permissions   []string `json:"permissions,omitempty"`
 	passwordView
 }
 
@@ -27,6 +29,8 @@ type passwordView struct {
 
 func (a *App) view(u model.User, csrf string) userView {
 	v := newUserView(u, csrf)
+	g := a.access.Grant(u)
+	v.Role, v.RoleName, v.Permissions = g.RoleID, g.RoleName, g.Perms.List()
 	if age := a.policy.Age(u); !age.ExpiresAt.IsZero() {
 		v.passwordView = passwordView{Expired: age.Expired, Warning: age.Warning, ExpiresAt: &age.ExpiresAt}
 	}

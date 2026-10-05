@@ -10,9 +10,9 @@ import (
 )
 
 func (a *App) registerDirectory(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/settings/ldap", a.authed(a.admin(a.directorySettings)))
-	mux.HandleFunc("PUT /api/settings/ldap", a.authed(a.admin(a.saveDirectory)))
-	mux.HandleFunc("POST /api/settings/ldap/test", a.authed(a.admin(a.testDirectory)))
+	mux.HandleFunc("GET /api/settings/ldap", a.authed(a.can("settings.ldap:view", a.directorySettings)))
+	mux.HandleFunc("PUT /api/settings/ldap", a.authed(a.can("settings.ldap:edit", a.saveDirectory)))
+	mux.HandleFunc("POST /api/settings/ldap/test", a.authed(a.can("settings.ldap:test", a.testDirectory)))
 }
 
 func (a *App) directorySettings(w http.ResponseWriter, r *http.Request) {

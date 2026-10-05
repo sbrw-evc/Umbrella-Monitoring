@@ -12,7 +12,7 @@ import type { OpenBaoOverview } from './types'
 export function CurrentConnection({ overview }: { overview: OpenBaoOverview }) {
   const t = useT(strings)
   const { locale } = useLocale()
-  const { timezone } = useSession()
+  const { timezone, can } = useSession()
   const test = useAction()
   const [result, setResult] = useState<OpenBaoReport | null>(null)
   const c = overview.connection
@@ -28,7 +28,7 @@ export function CurrentConnection({ overview }: { overview: OpenBaoOverview }) {
       title={t('obs.current')}
       ok={s.token_ok === true && s.mount_ok === true}
       problem={s.error || overview.list_error}
-      onTest={runTest}
+      onTest={can('settings.openbao:test') ? runTest : undefined}
       testing={test.busy}
       rows={[
         [t('obs.addr'), c.addr],

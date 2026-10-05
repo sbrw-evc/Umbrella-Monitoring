@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { ApiError } from '../../api'
-import { errorText, useT } from '../../i18n'
+import { errorText, useT, type Dict } from '../../i18n'
 import { useSession } from '../session'
 import { strings } from '../strings'
 
@@ -9,20 +9,25 @@ export type Action = {
   error: { message: string; detail?: string } | null
   notice: string
   run: (fn: () => Promise<string | void>) => Promise<void>
+  reset: () => void
 }
 
-export function useAction(): Action {
-  const t = useT(strings)
+export function useAction(dict: Dict = strings): Action {
+  const t = useT(dict)
   const { expire, refresh } = useSession()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Action['error']>(null)
   const [notice, setNotice] = useState('')
 
+  const reset = useCallback(() => {
+    setError(null)
+    setNotice('')
+  }, [])
+
   const run = useCallback(
     async (fn: () => Promise<string | void>) => {
       setBusy(true)
-      setError(null)
-      setNotice('')
+      reset()
       try {
         const message = await fn()
         if (message) setNotice(message)
@@ -34,8 +39,8 @@ export function useAction(): Action {
         setBusy(false)
       }
     },
-    [t, expire, refresh],
+    [t, expire, refresh, reset],
   )
 
-  return { busy, error, notice, run }
+  return { busy, error, notice, run, reset }
 }

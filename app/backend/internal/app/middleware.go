@@ -67,9 +67,9 @@ func (a *App) authed(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func (a *App) admin(next http.HandlerFunc) http.HandlerFunc {
+func (a *App) can(perm string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if current(r).user.Role != model.RoleAdmin {
+		if !a.access.Permissions(current(r).user).Has(perm) {
 			writeError(w, forbidden)
 			return
 		}

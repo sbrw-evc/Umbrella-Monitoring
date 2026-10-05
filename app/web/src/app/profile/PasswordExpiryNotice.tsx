@@ -1,7 +1,7 @@
 import { useLocale, useT } from '../../i18n'
 import { Link } from '../../router'
 import { Banner, formatDate } from '../../ui'
-import { PATHS } from '../routes'
+import { PROFILE_PATH } from '../pages'
 import { useSession } from '../session'
 import { strings } from '../strings'
 import './password.css'
@@ -17,7 +17,7 @@ export function PasswordExpiryNotice({ link }: { link?: boolean }) {
   return (
     <div className="expiry-notice">
       <Banner kind="warn" title={t('expiry.title', { n: days, date: formatDate(user.password_expires_at, locale, timezone) })}>
-        {link ? <Link to={PATHS.profile}>{t('expiry.change')}</Link> : t('expiry.text')}
+        {link ? <Link to={PROFILE_PATH}>{t('expiry.change')}</Link> : t('expiry.text')}
       </Banner>
     </div>
   )
