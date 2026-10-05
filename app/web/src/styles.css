@@ -1510,15 +1510,6 @@ select.input {
   gap: 2px;
 }
 
-.side-heading {
-  padding: 0 12px 6px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
 .side-link {
   position: relative;
   display: flex;
@@ -1587,7 +1578,6 @@ select.input {
     border: 0;
   }
 
-  .side-heading,
   .side-accordion {
     display: none;
   }

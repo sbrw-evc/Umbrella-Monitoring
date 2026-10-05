@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { ChevronDown, Settings } from 'lucide-react'
+import { Building2, ChevronDown, Settings, type LucideIcon } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useT } from '../i18n'
 import { Link, useRouter } from '../router'
 import { spring } from '../ui'
 import { navStrings } from './navStrings'
-import { visiblePages, type PageDef } from './pages'
+import { visiblePages, type Group, type PageDef } from './pages'
 import { useSession } from './session'
 
 const COMPACT = '(max-width: 860px)'
-const OPEN_KEY = 'umbrella.sidebar.settings'
+const openKey = (group: Group) => `umbrella.sidebar.${group}`
 
 function useCompact() {
   return useSyncExternalStore(
@@ -22,17 +22,17 @@ function useCompact() {
   )
 }
 
-function readOpen() {
+function readOpen(group: Group) {
   try {
-    return window.localStorage.getItem(OPEN_KEY) === '1'
+    return window.localStorage.getItem(openKey(group)) === '1'
   } catch {
     return false
   }
 }
 
-function writeOpen(v: boolean) {
+function writeOpen(group: Group, v: boolean) {
   try {
-    window.localStorage.setItem(OPEN_KEY, v ? '1' : '0')
+    window.localStorage.setItem(openKey(group), v ? '1' : '0')
   } catch {
     return
   }
@@ -49,11 +49,11 @@ function SideLink({ page, active }: { page: PageDef; active: boolean }) {
   )
 }
 
-function SettingsAccordion({ pages, path }: { pages: PageDef[]; path: string }) {
+function GroupAccordion({ group, icon: Icon, pages, path }: { group: Group; icon: LucideIcon; pages: PageDef[]; path: string }) {
   const t = useT(navStrings)
   const compact = useCompact()
   const hasActive = pages.some((p) => p.path === path)
-  const [open, setOpen] = useState(() => hasActive || readOpen())
+  const [open, setOpen] = useState(() => hasActive || readOpen(group))
 
   useEffect(() => {
     if (hasActive) setOpen(true)
@@ -61,7 +61,7 @@ function SettingsAccordion({ pages, path }: { pages: PageDef[]; path: string }) 
 
   const toggle = () =>
     setOpen((v) => {
-      writeOpen(!v)
+      writeOpen(group, !v)
       return !v
     })
   const shown = open || compact
@@ -69,8 +69,8 @@ function SettingsAccordion({ pages, path }: { pages: PageDef[]; path: string }) 
   return (
     <div className="side-group">
       <button type="button" className={`side-accordion ${hasActive ? 'has-active' : ''}`} aria-expanded={shown} onClick={toggle}>
-        <Settings size={17} aria-hidden />
-        <span>{t('group.settings')}</span>
+        <Icon size={17} aria-hidden />
+        <span>{t(`group.${group}`)}</span>
         <motion.span className="side-chevron" animate={{ rotate: shown ? 180 : 0 }} transition={spring}>
           <ChevronDown size={16} />
         </motion.span>
@@ -124,15 +124,8 @@ export function Sidebar() {
           ))}
         </div>
       )}
-      {org.length > 0 && (
-        <div className="side-group">
-          <div className="side-heading">{t('group.org')}</div>
-          {org.map((p) => (
-            <SideLink key={p.id} page={p} active={p.path === path} />
-          ))}
-        </div>
-      )}
-      {settings.length > 0 && <SettingsAccordion pages={settings} path={path} />}
+      {org.length > 0 && <GroupAccordion group="org" icon={Building2} pages={org} path={path} />}
+      {settings.length > 0 && <GroupAccordion group="settings" icon={Settings} pages={settings} path={path} />}
     </nav>
   )
 }
