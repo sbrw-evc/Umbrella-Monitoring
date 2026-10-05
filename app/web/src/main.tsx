@@ -2,6 +2,7 @@ import { StrictMode, Suspense, lazy, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { api, type Meta, type Theme } from './api'
 import { browserLocale, LocaleProvider, savedLocale, useT } from './i18n'
+import { installScrollbars } from './scrollbars'
 import { applyTheme, savedTheme, ThemeProvider } from './theme'
 import { Button } from './ui'
 import './styles.css'
@@ -64,6 +65,7 @@ function BootScreen({ failed, retry }: { failed: boolean; retry: () => void }) {
 }
 
 applyTheme(savedTheme() ?? systemTheme())
+installScrollbars()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
