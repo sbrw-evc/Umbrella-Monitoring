@@ -20,6 +20,7 @@ type Data struct {
 	Credentials   map[string]*model.Credential
 	ConfigItems   map[string]*model.ConfigItem
 	Maintenance   map[string]*model.Maintenance
+	Wallboards    map[string]*model.Wallboard
 	MetricSources map[string]*model.MetricSource
 	Rules         map[string]*model.Rule
 	// MonitoringSources are the Zabbix and Prometheus systems hosts are read from.
@@ -82,6 +83,9 @@ func (d *Data) init() {
 	}
 	if d.Maintenance == nil {
 		d.Maintenance = map[string]*model.Maintenance{}
+	}
+	if d.Wallboards == nil {
+		d.Wallboards = map[string]*model.Wallboard{}
 	}
 	if d.MetricSources == nil {
 		d.MetricSources = map[string]*model.MetricSource{}

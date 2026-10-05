@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"os"
 	"sync/atomic"
 	"time"
 
@@ -35,6 +36,9 @@ type Options struct {
 	BuiltAt       string
 	SecureCookies bool
 	Web           http.Handler
+	// TrustedProxies are the reverse proxies whose forwarding headers are believed for TV
+	// wallboards; nil reads UMBRELLA_TRUSTED_PROXIES.
+	TrustedProxies TrustedProxies
 }
 
 type Deps struct {
@@ -79,6 +83,8 @@ type App struct {
 	notifier      *notify.Service
 	notifications *NotificationsService
 	maintenance   *MaintenanceService
+	wallboards    *WallboardService
+	proxies       TrustedProxies
 	rules         *RulesService
 	ruleEngine    *rules.Engine
 	ready         atomic.Bool
@@ -132,6 +138,11 @@ func New(opt Options, deps Deps) *App {
 		cis:         NewCIService(deps.Store, nb),
 		groups:      NewGroupsService(deps.Store, vault, dir),
 		maintenance: NewMaintenanceService(deps.Store),
+		wallboards:  NewWallboardService(deps.Store),
+		proxies:     opt.TrustedProxies,
+	}
+	if a.proxies == nil {
+		a.proxies = ParseTrustedProxies(os.Getenv("UMBRELLA_TRUSTED_PROXIES"))
 	}
 	var firing firingSource
 	if queue != nil {
@@ -186,7 +197,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerRules, a.registerGrafana} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerWallboards, a.registerRules, a.registerGrafana} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })
