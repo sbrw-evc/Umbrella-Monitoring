@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import { Activity, BellRing, Boxes, CalendarClock, Briefcase, Cable, Database, Gauge, KeyRound, LockKeyhole, Network, Radar, Server, ShieldCheck, Siren, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
+import { Activity, BellRing, Boxes, CalendarClock, Briefcase, Cable, Database, Gauge, KeyRound, LockKeyhole, Network, Radar, Server, ShieldCheck, Siren, Tv, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
 import { CIsPage } from './cis/CIsPage'
 import { IncidentsPage } from './incidents/IncidentsPage'
 import { CMDBMapPage } from './cmdb/CMDBMapPage'
@@ -19,6 +19,7 @@ import { PostgresSettings } from './settings/postgres/PostgresSettings'
 import { SystemStatus } from './SystemStatus'
 import { TeamsPage } from './teams/TeamsPage'
 import { UsersPage } from './users/UsersPage'
+import { WallboardsPage } from './wallboards/WallboardsPage'
 
 export type Group = 'overview' | 'automation' | 'org' | 'settings'
 
@@ -45,6 +46,7 @@ export const PAGES: PageDef[] = [
   { id: 'cis', path: '/cis', group: 'overview', icon: Boxes, Component: CIsPage, subtitle: 'page.cis.subtitle' },
   { id: 'services', path: '/services', group: 'overview', icon: Briefcase, Component: ServicesPage, subtitle: 'page.services.subtitle' },
   { id: 'maintenance', path: '/maintenance', group: 'overview', icon: CalendarClock, Component: MaintenancePage, subtitle: 'page.maintenance.subtitle' },
+  { id: 'wallboards', path: '/wallboards', group: 'overview', icon: Tv, Component: WallboardsPage, subtitle: 'page.wallboards.subtitle' },
   { id: 'connectors', path: '/connectors', group: 'automation', icon: Cable, Component: ConnectorsPage, nested: true },
   { id: 'rules', path: '/rules', group: 'automation', icon: Gauge, Component: RulesPage, subtitle: 'page.rules.subtitle' },
   { id: 'netbox', path: '/netbox', group: 'automation', icon: Server, Component: NetBoxPage, subtitle: 'page.netbox.subtitle' },
