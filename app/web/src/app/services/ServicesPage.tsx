@@ -156,6 +156,10 @@ export function ServicesPage() {
           setSelected(null)
           setDeleting(s)
         }}
+        onChanged={(s) => {
+          setSelected(s)
+          reload()
+        }}
       />
       <ServiceEditor
         open={editing !== null}

@@ -45,6 +45,7 @@ export type CI = {
   netbox?: NetBoxRef
   directory?: DirectoryInfo
   owners: Owner[]
+  services: { id: string; name: string }[]
   editable: boolean
   registrable: boolean
   created_at: string

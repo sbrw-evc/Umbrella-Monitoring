@@ -97,6 +97,12 @@ function ServiceCard({ service: s, onOpen }: { service: Service; onOpen: (s: Ser
               </dd>
             </div>
           )}
+          {s.cis.length > 0 && (
+            <div>
+              <dt>{t('svc.cis')}</dt>
+              <dd>{s.cis.length}</dd>
+            </div>
+          )}
           {s.tags.length > 0 && (
             <div>
               <dt>{t('svc.col.tags')}</dt>
@@ -107,7 +113,10 @@ function ServiceCard({ service: s, onOpen }: { service: Service; onOpen: (s: Ser
           )}
         </dl>
         <div className="svc-card-foot">
-          <StatusBadge value={s.status} />
+          <span className="row">
+            <StatusBadge value={s.status} />
+            {s.netbox && <span className="pill ci-source ci-source-netbox">NetBox</span>}
+          </span>
           <span className="muted">
             {t('svc.col.updated')}: {formatDate(s.updated_at, locale, timezone)}
           </span>

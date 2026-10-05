@@ -18,8 +18,10 @@ export function useResource<T>(path: string, epoch: number) {
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
   const seq = useRef(0)
+  // An empty path loads nothing, for resources only needed sometimes.
   const reload = useCallback(async () => {
     const mine = ++seq.current
+    if (!path) return
     setBusy(true)
     try {
       const next = await api<T>('GET', path)

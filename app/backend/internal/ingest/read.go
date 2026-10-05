@@ -289,3 +289,28 @@ func (q *Queue) Overview(ctx context.Context) (Overview, error) {
 		&o.Events, &o.Duplicates, &o.LatencyAvg, &o.LatencyMax, &o.LastReceived)
 	return o, err
 }
+
+// FiringEvent is an event that is still firing, for the health of configuration items.
+type FiringEvent struct {
+	ConnectorID string    `json:"connector_id"`
+	CI          string    `json:"ci"`
+	Title       string    `json:"title"`
+	Severity    string    `json:"severity"`
+	LastSeen    time.Time `json:"last_seen"`
+}
+
+const maxFiring = 5000
+
+// Firing lists the newest events of every connector that fire and were seen since the given time.
+func (q *Queue) Firing(ctx context.Context, since time.Time) ([]FiringEvent, error) {
+	rows, err := q.pool.Query(ctx, `SELECT connector_id, ci, title, severity, last_seen FROM connector_events
+		WHERE status = 'firing' AND ci <> '' AND last_seen >= $1 ORDER BY last_seen DESC LIMIT $2`, since, maxFiring)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (FiringEvent, error) {
+		var e FiringEvent
+		err := row.Scan(&e.ConnectorID, &e.CI, &e.Title, &e.Severity, &e.LastSeen)
+		return e, err
+	})
+}

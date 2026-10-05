@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
-import { Activity, Boxes, Briefcase, Cable, Database, KeyRound, LockKeyhole, Network, Server, ShieldCheck, UserCog, Users, UsersRound, type LucideIcon } from 'lucide-react'
+import { Activity, Boxes, Briefcase, Cable, Database, KeyRound, LockKeyhole, Network, Server, ShieldCheck, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
 import { CIsPage } from './cis/CIsPage'
+import { CMDBMapPage } from './cmdb/CMDBMapPage'
 import { ConnectorsPage } from './connectors/ConnectorsPage'
 import { CredentialsPage } from './connectors/CredentialsPage'
 import { NetBoxPage } from './netbox/NetBoxPage'
@@ -34,14 +35,15 @@ export const SETTINGS_PATH = '/settings'
 const MOVED: Record<string, string> = { '/status': '/settings/status' }
 
 export const PAGES: PageDef[] = [
+  { id: 'services', path: '/services', group: 'overview', icon: Briefcase, Component: ServicesPage, subtitle: 'page.services.subtitle' },
   { id: 'cis', path: '/cis', group: 'overview', icon: Boxes, Component: CIsPage, subtitle: 'page.cis.subtitle' },
+  { id: 'cmdb', path: '/cmdb', group: 'overview', icon: Waypoints, Component: CMDBMapPage, subtitle: 'page.cmdb.subtitle' },
   { id: 'connectors', path: '/connectors', group: 'automation', icon: Cable, Component: ConnectorsPage, nested: true },
   { id: 'credentials', path: '/credentials', group: 'automation', icon: LockKeyhole, Component: CredentialsPage, subtitle: 'page.credentials.subtitle' },
   { id: 'netbox', path: '/netbox', group: 'automation', icon: Server, Component: NetBoxPage, subtitle: 'page.netbox.subtitle' },
   { id: 'users', path: '/users', group: 'org', icon: Users, Component: UsersPage, subtitle: 'page.users.subtitle' },
   { id: 'roles', path: '/roles', group: 'org', icon: UserCog, Component: RolesPage, subtitle: 'page.roles.subtitle' },
   { id: 'teams', path: '/teams', group: 'org', icon: UsersRound, Component: TeamsPage, subtitle: 'page.teams.subtitle' },
-  { id: 'services', path: '/services', group: 'org', icon: Briefcase, Component: ServicesPage, subtitle: 'page.services.subtitle' },
   { id: 'status', path: '/settings/status', group: 'settings', icon: Activity, Component: SystemStatus },
   { id: 'settings.postgres', path: '/settings/postgresql', group: 'settings', icon: Database, Component: PostgresSettings, subtitle: 'page.settings.subtitle' },
   { id: 'settings.openbao', path: '/settings/openbao', group: 'settings', icon: KeyRound, Component: OpenBaoSettings, subtitle: 'page.settings.subtitle' },

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"net/url"
 	"slices"
@@ -63,8 +64,20 @@ type ServiceRef struct {
 	Name string `json:"name"`
 }
 
+// ServiceCI is a configuration item a service runs on.
+type ServiceCI struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Kind    string `json:"kind"`
+	Status  string `json:"status"`
+	Source  string `json:"source"`
+	NetBox  bool   `json:"netbox"`
+	Deleted bool   `json:"deleted"`
+}
+
 type ServiceView struct {
 	model.Service
+	CIs        []ServiceCI   `json:"cis"`
 	Owner      ServiceTeam   `json:"owner"`
 	Teams      []ServiceTeam `json:"teams"`
 	Depends    []ServiceRef  `json:"dependencies"`
@@ -83,12 +96,13 @@ type ServicesOfTeam struct {
 }
 
 type ServicesService struct {
-	st  *store.Store
-	now func() time.Time
+	st     *store.Store
+	netbox *NetBoxService
+	now    func() time.Time
 }
 
-func NewServicesService(st *store.Store) *ServicesService {
-	return &ServicesService{st: st, now: func() time.Time { return time.Now().UTC() }}
+func NewServicesService(st *store.Store, nb *NetBoxService) *ServicesService {
+	return &ServicesService{st: st, netbox: nb, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (s *ServicesService) List(f ServiceFilter) ServiceList {
@@ -176,10 +190,27 @@ func (s *ServicesService) Create(actor string, in ServiceInput) (ServiceView, er
 	return out, err
 }
 
-func (s *ServicesService) Update(actor, id string, in ServiceInput) (ServiceView, error) {
+func (s *ServicesService) Update(ctx context.Context, actor, id string, in ServiceInput) (ServiceView, error) {
 	spec, err := in.normalize()
 	if err != nil {
 		return ServiceView{}, err
+	}
+	var link *model.ServiceNetBox
+	err = ErrNotFound
+	s.st.Read(func(d *store.Data) {
+		if svc := d.Services[id]; svc != nil {
+			link, err = svc.NetBox, spec.check(d, id)
+		}
+	})
+	if err != nil {
+		return ServiceView{}, err
+	}
+	if link != nil {
+		next := model.Service{ID: id}
+		spec.apply(&next)
+		if link, err = s.pushTag(ctx, &next, link.TagID); err != nil {
+			return ServiceView{}, err
+		}
 	}
 	var out ServiceView
 	s.st.Write(func(d *store.Data) {
@@ -193,6 +224,9 @@ func (s *ServicesService) Update(actor, id string, in ServiceInput) (ServiceView
 		}
 		before := *svc
 		spec.apply(svc)
+		if link != nil && svc.NetBox != nil {
+			svc.NetBox = link
+		}
 		if changed := serviceChanges(before, *svc); len(changed) > 0 {
 			svc.UpdatedAt = s.now()
 			d.AddAudit(store.AuditEntry{Actor: actor, Action: "service.update", Object: id, Detail: svc.Name + ": " + strings.Join(changed, ", ")})
@@ -202,8 +236,24 @@ func (s *ServicesService) Update(actor, id string, in ServiceInput) (ServiceView
 	return out, err
 }
 
-func (s *ServicesService) Delete(actor, id string) error {
+// Delete removes the service and, when it is linked to NetBox, its tag there.
+func (s *ServicesService) Delete(ctx context.Context, actor, id string) error {
+	var link *model.ServiceNetBox
 	err := ErrNotFound
+	s.st.Read(func(d *store.Data) {
+		if svc := d.Services[id]; svc != nil {
+			link, err = svc.NetBox, nil
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if link != nil {
+		if err := s.deleteTag(ctx, link.TagID); err != nil {
+			return err
+		}
+	}
+	err = ErrNotFound
 	s.st.Write(func(d *store.Data) {
 		svc := d.Services[id]
 		if svc == nil {
@@ -326,11 +376,26 @@ func (g serviceGraph) refs(ids []string) []ServiceRef {
 	return out
 }
 
+func (g serviceGraph) cis(ids []string) []ServiceCI {
+	out := []ServiceCI{}
+	for _, id := range ids {
+		ci := g.d.ConfigItems[id]
+		if ci == nil {
+			out = append(out, ServiceCI{ID: id, Deleted: true})
+			continue
+		}
+		out = append(out, ServiceCI{ID: ci.ID, Name: ci.Name, Kind: ci.Kind, Status: ci.Status, Source: ci.Source, NetBox: ci.NetBox != nil})
+	}
+	slices.SortFunc(out, func(x, y ServiceCI) int { return byName(x.Name, y.Name) })
+	return out
+}
+
 func (g serviceGraph) view(s *model.Service) ServiceView {
-	v := ServiceView{Service: *s, Owner: g.team(s.OwnerTeamID), Teams: []ServiceTeam{}, Depends: g.refs(s.DependsOn), Dependents: g.refs(g.dependents[s.ID])}
+	v := ServiceView{Service: *s, CIs: g.cis(s.CIIDs), Owner: g.team(s.OwnerTeamID), Teams: []ServiceTeam{}, Depends: g.refs(s.DependsOn), Dependents: g.refs(g.dependents[s.ID])}
 	v.TeamIDs = serviceStrings(s.TeamIDs)
 	v.Tags = serviceStrings(s.Tags)
 	v.DependsOn = serviceStrings(s.DependsOn)
+	v.CIIDs = serviceStrings(s.CIIDs)
 	if v.Links == nil {
 		v.Links = []model.Link{}
 	}

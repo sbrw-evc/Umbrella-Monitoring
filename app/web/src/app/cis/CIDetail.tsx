@@ -92,6 +92,7 @@ function Body({ ci }: { ci: CI }) {
         none
       ),
     ],
+    [t('ci.field.services'), ci.services.length ? <Chips key="s" items={ci.services.map((x) => ({ key: x.id, label: x.name }))} /> : none],
     [t('ci.field.ips'), ci.ips.length ? <span className="cn-mono">{ci.ips.join(', ')}</span> : none],
     [t('ci.field.tags'), ci.tags.length ? <Chips key="g" items={ci.tags.map((x) => ({ key: x, label: `#${x}` }))} /> : none],
   ]

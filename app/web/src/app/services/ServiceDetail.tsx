@@ -3,6 +3,7 @@ import { useLocale, useT } from '../../i18n'
 import { Button, formatDate, Modal, Rows } from '../../ui'
 import { useSession } from '../session'
 import { Chips, CriticalityBadge, StatusBadge, TeamName } from './Badges'
+import { CIBindings, DependencyBindings, NetBoxLink } from './Bindings'
 import { strings } from './strings'
 import { teamPath } from './teams'
 import type { Service } from './types'
@@ -13,12 +14,14 @@ export function ServiceDetail({
   onClose,
   onEdit,
   onDelete,
+  onChanged,
 }: {
   service: Service | null
   editable: boolean
   onClose: () => void
   onEdit: (s: Service) => void
   onDelete: (s: Service) => void
+  onChanged: (s: Service) => void
 }) {
   const t = useT(strings)
   const { locale } = useLocale()
@@ -77,10 +80,6 @@ export function ServiceDetail({
                 ),
               ],
               [
-                t('svc.field.dependencies'),
-                service.dependencies.length ? <Chips key="d" items={service.dependencies.map((x) => ({ key: x.id, label: x.name }))} /> : none,
-              ],
-              [
                 t('svc.field.dependents'),
                 service.dependents.length ? <Chips key="u" items={service.dependents.map((x) => ({ key: x.id, label: x.name }))} /> : none,
               ],
@@ -89,6 +88,9 @@ export function ServiceDetail({
               [t('svc.field.updated'), formatDate(service.updated_at, locale, timezone)],
             ]}
           />
+          <CIBindings service={service} editable={editable} onChanged={onChanged} />
+          <DependencyBindings service={service} editable={editable} onChanged={onChanged} />
+          <NetBoxLink service={service} editable={editable} onChanged={onChanged} />
         </>
       )}
     </Modal>
