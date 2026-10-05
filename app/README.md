@@ -2,6 +2,8 @@
 
 Реализация MVP по архитектуре из [`mvp/docs`](../mvp/docs). Backend на Go, веб-интерфейс на React и TypeScript, секреты в OpenBao.
 
+Коннекторы, приём вебхуков и визуальный конструктор по плану из [`n8n.md`](../n8n.md): [docs/connectors.md](docs/connectors.md).
+
 ## Что работает
 
 | Страница | Что умеет | Функция |

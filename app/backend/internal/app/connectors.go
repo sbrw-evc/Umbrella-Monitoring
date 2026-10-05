@@ -247,11 +247,11 @@ func (s *ConnectorsService) issues(graph []byte) []flow.Issue {
 	return issues
 }
 
-func (s *ConnectorsService) List() []ConnectorSummary {
+func (s *ConnectorsService) List(me string) []ConnectorSummary {
 	out := []ConnectorSummary{}
 	s.st.Read(func(d *store.Data) {
 		for _, c := range d.Connectors {
-			out = append(out, s.summary(c, ""))
+			out = append(out, s.summary(c, me))
 		}
 	})
 	slices.SortFunc(out, func(a, b ConnectorSummary) int { return byName(a.Name, b.Name) })

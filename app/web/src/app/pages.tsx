@@ -1,5 +1,7 @@
 import type { ComponentType } from 'react'
-import { Activity, Briefcase, Database, KeyRound, Network, ShieldCheck, UserCog, Users, UsersRound, type LucideIcon } from 'lucide-react'
+import { Activity, Briefcase, Cable, Database, KeyRound, LockKeyhole, Network, ShieldCheck, UserCog, Users, UsersRound, type LucideIcon } from 'lucide-react'
+import { ConnectorsPage } from './connectors/ConnectorsPage'
+import { CredentialsPage } from './connectors/CredentialsPage'
 import { RolesPage } from './roles/RolesPage'
 import { ServicesPage } from './services/ServicesPage'
 import { DirectorySettings } from './settings/directory/DirectorySettings'
@@ -19,6 +21,8 @@ export type PageDef = {
   icon: LucideIcon
   Component: ComponentType
   subtitle?: string
+  // nested: the page also owns the paths below its own, such as /connectors/{id}.
+  nested?: boolean
 }
 
 export const HOME_PATH = '/'
@@ -27,6 +31,8 @@ export const SETTINGS_PATH = '/settings'
 
 export const PAGES: PageDef[] = [
   { id: 'status', path: '/status', group: 'main', icon: Activity, Component: SystemStatus },
+  { id: 'connectors', path: '/connectors', group: 'main', icon: Cable, Component: ConnectorsPage, nested: true },
+  { id: 'credentials', path: '/credentials', group: 'main', icon: LockKeyhole, Component: CredentialsPage, subtitle: 'page.credentials.subtitle' },
   { id: 'users', path: '/users', group: 'org', icon: Users, Component: UsersPage, subtitle: 'page.users.subtitle' },
   { id: 'roles', path: '/roles', group: 'org', icon: UserCog, Component: RolesPage, subtitle: 'page.roles.subtitle' },
   { id: 'teams', path: '/teams', group: 'org', icon: UsersRound, Component: TeamsPage, subtitle: 'page.teams.subtitle' },
@@ -50,6 +56,10 @@ export type Can = (perm: string) => boolean
 
 export const viewPerm = (p: PageDef) => `${p.id}:view`
 
+export function owns(p: PageDef, path: string) {
+  return p.path === path || (!!p.nested && path.startsWith(p.path + '/'))
+}
+
 export function visiblePages(can: Can) {
   return PAGES.filter((p) => can(viewPerm(p)))
 }
@@ -59,7 +69,7 @@ export type Resolved = { kind: 'page'; page: PageDef } | { kind: 'profile' } | {
 export function resolve(path: string, can: Can): Resolved {
   if (path === PROFILE_PATH) return { kind: 'profile' }
   const visible = visiblePages(can)
-  const page = visible.find((p) => p.path === path)
+  const page = visible.find((p) => owns(p, path))
   if (page) return { kind: 'page', page }
   if (path === SETTINGS_PATH || path.startsWith(SETTINGS_PATH + '/')) {
     const first = visible.find((p) => p.group === 'settings')

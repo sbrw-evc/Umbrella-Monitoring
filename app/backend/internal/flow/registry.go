@@ -95,6 +95,13 @@ func (t *NodeType) outputsOf(n Node) []string {
 var registry = map[string]map[int]*NodeType{}
 
 func register(t *NodeType) {
+	// The editor reads these lists as JSON arrays, never null.
+	if t.Outputs == nil {
+		t.Outputs = []string{}
+	}
+	if t.Params == nil {
+		t.Params = []Param{}
+	}
 	if registry[t.Type] == nil {
 		registry[t.Type] = map[int]*NodeType{}
 	}

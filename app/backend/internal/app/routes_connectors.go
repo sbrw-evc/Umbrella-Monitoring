@@ -96,7 +96,7 @@ func respond(w http.ResponseWriter, status int, out any, err error) {
 }
 
 func (a *App) listConnectors(w http.ResponseWriter, r *http.Request) {
-	list := a.connectors.List()
+	list := a.connectors.List(current(r).user.ID)
 	if a.ingestReady() {
 		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		sums, err := a.queue.Summaries(ctx)
