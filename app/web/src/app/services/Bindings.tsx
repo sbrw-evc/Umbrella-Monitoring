@@ -8,13 +8,17 @@ import { useLocale, useT } from '../../i18n'
 import { Button, formatDate, Input } from '../../ui'
 import { StatusPill } from '../cis/Badges'
 import type { CIList } from '../cis/types'
+import { BulkResults, ciRows, problems, type BulkCIsResult } from '../bulk/BulkResults'
+import { strings as bulkStrings } from '../bulk/strings'
+import { mergeDicts } from '../../connections/connectionStrings'
 import { useSession } from '../session'
 import { OptionSelect } from './Pickers'
 import { blockedDependencies } from './ServiceEditor'
 import { strings } from './strings'
 import type { Service, ServiceList } from './types'
 
-const MAX_RESULTS = 8
+const MAX_RESULTS = 25
+const bindStrings = mergeDicts(strings, bulkStrings)
 
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value)
@@ -29,18 +33,43 @@ type Props = { service: Service; editable: boolean; onChanged: (s: Service) => v
 
 // CIBindings lists the configuration items of the service and binds or unbinds them.
 export function CIBindings({ service, editable, onChanged }: Props) {
-  const t = useT(strings)
+  const t = useT(bindStrings)
   const { can } = useSession()
   const act = useAction()
   const [query, setQuery] = useState('')
   const [adding, setAdding] = useState(false)
+  const [toBind, setToBind] = useState<Set<string>>(new Set())
+  const [toUnbind, setToUnbind] = useState<Set<string>>(new Set())
+  const [report, setReport] = useState<BulkCIsResult | null>(null)
   const q = useDebounced(query.trim(), 250)
   const found = useResource<CIList>(adding ? `/api/cis${q ? `?q=${encodeURIComponent(q)}` : ''}` : '', 0)
   const free = (found.data?.items ?? []).filter((ci) => !service.ci_ids.includes(ci.id))
   const ciLabel = (kind: string) => t(`svc.ci.kind.${kind}`)
+  useEffect(() => {
+    setToBind(new Set())
+    setToUnbind(new Set())
+    setReport(null)
+  }, [service.id])
 
   const bind = (id: string) => void act.run(async () => onChanged(await api<Service>('POST', `/api/services/${service.id}/cis`, { ids: [id] })))
   const unbind = (id: string) => void act.run(async () => onChanged(await api<Service>('DELETE', `/api/services/${service.id}/cis/${id}`)))
+  // Several at once go through the bulk action, which reports a NetBox failure per item.
+  const bulk = (action: 'bind' | 'unbind', ids: Set<string>) =>
+    void act.run(async () => {
+      const r = await api<BulkCIsResult>('POST', '/api/services/bulk/cis', { service_ids: [service.id], ci_ids: [...ids], action })
+      setReport(problems(r.summary) > 0 ? r : null)
+      if (action === 'bind') setToBind(new Set())
+      else setToUnbind(new Set())
+      onChanged(await api<Service>('GET', `/api/services/${service.id}`))
+    })
+  const flip = (set: (f: (s: Set<string>) => Set<string>) => void, id: string) =>
+    set((s) => {
+      const n = new Set(s)
+      if (n.has(id)) n.delete(id)
+      else n.add(id)
+      return n
+    })
+  const shownFree = free.slice(0, MAX_RESULTS)
 
   return (
     <section className="svc-bind" aria-label={t('svc.cis')}>
@@ -49,12 +78,20 @@ export function CIBindings({ service, editable, onChanged }: Props) {
           {t('svc.cis')}
           <span className="muted">{service.cis.length}</span>
         </h3>
-        {editable && can('cis:view') && !adding && (
-          <Button variant="ghost" onClick={() => setAdding(true)}>
-            <Plus size={16} />
-            {t('svc.cis.bind')}
-          </Button>
-        )}
+        <div className="row">
+          {editable && toUnbind.size > 0 && (
+            <Button variant="ghost" busy={act.busy} onClick={() => bulk('unbind', toUnbind)}>
+              <X size={16} />
+              {t('bulk.cis.unbindSelected', { n: toUnbind.size })}
+            </Button>
+          )}
+          {editable && can('cis:view') && !adding && (
+            <Button variant="ghost" onClick={() => setAdding(true)}>
+              <Plus size={16} />
+              {t('svc.cis.bind')}
+            </Button>
+          )}
+        </div>
       </header>
       {service.netbox && <p className="muted svc-bind-note">{t('svc.cis.netboxNote', { slug: service.netbox.slug })}</p>}
       {service.cis.length === 0 ? (
@@ -64,6 +101,14 @@ export function CIBindings({ service, editable, onChanged }: Props) {
           <AnimatePresence initial={false}>
             {service.cis.map((ci) => (
               <motion.li key={ci.id} layout initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }}>
+                {editable && (
+                  <input
+                    type="checkbox"
+                    aria-label={t('bulk.selectOne', { name: ci.name || ci.id })}
+                    checked={toUnbind.has(ci.id)}
+                    onChange={() => flip(setToUnbind, ci.id)}
+                  />
+                )}
                 <span className={`svc-bind-name ${ci.deleted ? 'muted' : ''}`}>{ci.deleted ? t('svc.cis.deleted') : ci.name}</span>
                 {!ci.deleted && <span className="muted svc-bind-kind">{ciLabel(ci.kind)}</span>}
                 {ci.netbox && <span className="pill ci-source ci-source-netbox">NetBox</span>}
@@ -90,10 +135,38 @@ export function CIBindings({ service, editable, onChanged }: Props) {
                 {t('svc.cis.done')}
               </Button>
             </div>
+            {shownFree.length > 1 && (
+              <div className="bulk-bar">
+                <label className="row">
+                  <input
+                    type="checkbox"
+                    checked={shownFree.every((ci) => toBind.has(ci.id))}
+                    onChange={(e) =>
+                      setToBind((s) => {
+                        const n = new Set(s)
+                        for (const ci of shownFree) {
+                          if (e.target.checked) n.add(ci.id)
+                          else n.delete(ci.id)
+                        }
+                        return n
+                      })
+                    }
+                  />
+                  <span className="muted">{t('bulk.selectAll')}</span>
+                </label>
+                {toBind.size > 0 && (
+                  <Button variant="primary" busy={act.busy} onClick={() => bulk('bind', toBind)}>
+                    <Plus size={15} />
+                    {t('bulk.cis.bindSelected', { n: toBind.size })}
+                  </Button>
+                )}
+              </div>
+            )}
             {found.data && free.length === 0 && <p className="muted">{t('svc.cis.noMatch')}</p>}
             <ul className="svc-bind-list">
-              {free.slice(0, MAX_RESULTS).map((ci) => (
+              {shownFree.map((ci) => (
                 <li key={ci.id}>
+                  <input type="checkbox" aria-label={t('bulk.selectOne', { name: ci.name })} checked={toBind.has(ci.id)} onChange={() => flip(setToBind, ci.id)} />
                   <span className="svc-bind-name">{ci.name}</span>
                   <span className="muted svc-bind-kind">{ciLabel(ci.kind)}</span>
                   {ci.netbox && <span className="pill ci-source ci-source-netbox">NetBox</span>}
@@ -110,6 +183,7 @@ export function CIBindings({ service, editable, onChanged }: Props) {
           </motion.div>
         )}
       </AnimatePresence>
+      {report && <BulkResults rows={ciRows(report)} columns={[t('bulk.col.item'), t('bulk.col.service')]} summary={report.summary} />}
       <ErrorBanner error={act.error} strings={strings} />
     </section>
   )

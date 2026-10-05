@@ -309,10 +309,35 @@ func (s *MonitoringService) BulkCreateCIs(ctx context.Context, actor string, in 
 	if len(keys) > maxBulkHosts {
 		return BulkHostsResult{}, invalid("too_many_hosts", nil)
 	}
-	out := BulkHostsResult{Items: []BulkHostItem{}, Summary: BulkSummary{}}
+	// Zabbix hosts go first: one machine also seen by Prometheus is then named after its
+	// technical name in Zabbix rather than the address Prometheus scrapes.
+	kinds := map[HostKey]string{}
+	s.st.Read(func(d *store.Data) {
+		for _, k := range keys {
+			if src := d.MonitoringSources[k.SourceID]; src != nil {
+				kinds[k] = src.Kind
+			}
+		}
+	})
+	order := make([]int, len(keys))
+	for i := range order {
+		order[i] = i
+	}
+	slices.SortStableFunc(order, func(a, b int) int {
+		rank := func(k HostKey) int {
+			if kinds[k] == model.MonitoringZabbix {
+				return 0
+			}
+			return 1
+		}
+		return rank(keys[a]) - rank(keys[b])
+	})
+
+	out := BulkHostsResult{Items: make([]BulkHostItem, len(keys)), Summary: BulkSummary{}}
 	made := map[string]bool{}
 	var stop giveUp
-	for _, k := range keys {
+	for _, i := range order {
+		k := keys[i]
 		it := BulkHostItem{SourceID: k.SourceID, Key: k.Key, Host: k.Key}
 		v, err := s.host(k.SourceID, k.Key)
 		switch {
@@ -343,7 +368,7 @@ func (s *MonitoringService) BulkCreateCIs(ctx context.Context, actor string, in 
 		if err == nil {
 			it.SourceName, it.Host = v.SourceName, firstSet(v.Name, v.Host)
 		}
-		out.Items = append(out.Items, it)
+		out.Items[i] = it
 	}
 	for _, it := range out.Items {
 		out.Summary[it.Result]++

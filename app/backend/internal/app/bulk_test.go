@@ -125,7 +125,7 @@ func TestBulkCreateCIsFromHosts(t *testing.T) {
 
 	var out app.BulkHostsResult
 	in := app.BulkHostsInput{Kind: "vm", Hosts: []app.HostKey{
-		{SourceID: kz.SourceID, Key: kz.Key}, {SourceID: kp.SourceID, Key: kp.Key}, {SourceID: lab.SourceID, Key: lab.Key},
+		{SourceID: kp.SourceID, Key: kp.Key}, {SourceID: kz.SourceID, Key: kz.Key}, {SourceID: lab.SourceID, Key: lab.Key},
 		{SourceID: srv.SourceID, Key: srv.Key}, {SourceID: lab.SourceID, Key: "nope"}, {SourceID: kz.SourceID, Key: kz.Key},
 	}}
 	f.expect(http.MethodPost, "/api/monitoring/ci/bulk", in, http.StatusOK, &out)
@@ -136,15 +136,15 @@ func TestBulkCreateCIsFromHosts(t *testing.T) {
 	for _, it := range out.Items {
 		results = append(results, it.Result)
 	}
-	if !slices.Equal(results, []string{app.BulkCreated, app.BulkLinked, app.BulkCreated, app.BulkMatched, app.BulkFailed}) {
+	if !slices.Equal(results, []string{app.BulkLinked, app.BulkCreated, app.BulkCreated, app.BulkMatched, app.BulkFailed}) {
 		t.Fatalf("results = %v (%+v)", results, out.Items)
 	}
-	// One machine in both systems is one item.
+	// One machine in both systems is one item, made from Zabbix whatever the order.
 	if out.Items[0].CI.ID != out.Items[1].CI.ID || out.Items[3].CI.ID != db || out.Items[4].Error != "host_not_found" {
 		t.Fatalf("items = %+v", out.Items)
 	}
-	if out.Items[0].SourceName != "Zabbix" || out.Items[0].Host != "Lobby kiosk" {
-		t.Errorf("names = %+v", out.Items[0])
+	if out.Items[1].SourceName != "Zabbix" || out.Items[1].Host != "Lobby kiosk" {
+		t.Errorf("names = %+v", out.Items[1])
 	}
 	var ci app.CIView
 	f.expect(http.MethodGet, "/api/cis/"+out.Items[0].CI.ID, nil, http.StatusOK, &ci)
