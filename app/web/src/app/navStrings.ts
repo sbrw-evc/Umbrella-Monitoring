@@ -36,7 +36,7 @@ export const navStrings: Dict = {
     'page.rules': 'RED/USE rules',
     'page.rules.subtitle': 'PromQL rules that fire incidents for CIs: RED for services, USE for resources.',
     'page.maintenance.subtitle': 'Planned works: incidents of the covered services and CIs are kept but not sent to PagerDuty or by backup notification.',
-    'page.settings.alerting.subtitle': 'PagerDuty, backup notification by mail and Telegram.',
+    'page.settings.alerting.subtitle': 'PagerDuty, backup notification by mail and Telegram, Grafana context.',
     'page.settings.subtitle': 'Connections and security of this Umbrella installation.',
   },
   ru: {
@@ -74,7 +74,7 @@ export const navStrings: Dict = {
     'page.rules': 'Правила RED/USE',
     'page.rules.subtitle': 'Правила PromQL, открывающие инциденты по КЕ: RED для сервисов, USE для ресурсов.',
     'page.maintenance.subtitle': 'Плановые работы: инциденты затронутых сервисов и КЕ сохраняются, но не уходят в PagerDuty и резервное оповещение.',
-    'page.settings.alerting.subtitle': 'PagerDuty и резервное оповещение по почте и в Telegram.',
+    'page.settings.alerting.subtitle': 'PagerDuty, резервное оповещение по почте и в Telegram, контекст в Grafana.',
     'page.settings.subtitle': 'Подключения и безопасность этой установки Umbrella.',
   },
 }

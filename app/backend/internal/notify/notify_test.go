@@ -49,7 +49,7 @@ func setup(t *testing.T) (*notify.Service, *store.Store, *notifytest.SMTP, *noti
 		d.Settings.DefaultLocale = "ru"
 		d.Settings.DefaultTZ = "Europe/Moscow"
 		d.Users["u1"] = &model.User{ID: "u1", Username: "ivanov", Timezone: "Asia/Novosibirsk"}
-		d.Settings.Alerting = model.Alerting{PublicURL: "https://umbrella.example.com", Notify: model.Notify{
+		d.Settings.Alerting = model.Alerting{PublicURL: "https://umbrella.example.com", Grafana: model.Grafana{DashboardURL: "https://grafana.example/d/x"}, Notify: model.Notify{
 			Email:         model.EmailChannel{Enabled: true, Host: smtp.Host(), Port: smtp.Port(), Security: model.SMTPNone, Username: "relay", PasswordRef: "pw", From: "Umbrella <umbrella@example.com>"},
 			Telegram:      model.TelegramChannel{Enabled: true, TokenRef: "tg", APIURL: tg.URL()},
 			ExtraEmails:   []string{"duty@example.com"},
@@ -92,7 +92,7 @@ func TestBackupNotification(t *testing.T) {
 		t.Fatalf("subject: %q", m.Subject)
 	}
 	for _, want := range []string{"Платежи", "Payments SRE", "05.10.2026 16:00 +07", "ошибка доставки: breaker open",
-		"Открыть в Umbrella: https://umbrella.example.com/incidents?id=INC-7", "Подтвердить: https://umbrella.example.com/ack/"} {
+		"Открыть в Umbrella: https://umbrella.example.com/incidents?id=INC-7", "Подтвердить: https://umbrella.example.com/ack/", "Grafana: https://umbrella.example.com/go/incidents/INC-7/grafana"} {
 		if !strings.Contains(m.Body, want) {
 			t.Fatalf("body has no %q:\n%s", want, m.Body)
 		}

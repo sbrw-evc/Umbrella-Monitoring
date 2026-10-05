@@ -105,12 +105,13 @@ type TelegramChannel struct {
 }
 
 // Grafana opens the context of an incident: a dashboard with the time around the incident and
-// variables for the item, the service and the incident.
+// variables for the item, the service, the team and the incident.
 type Grafana struct {
-	// DashboardURL is the dashboard address, for example https://grafana/d/abc/incident.
+	// DashboardURL is the dashboard address, for example https://grafana/d/abc/incident; its own
+	// query (an organization, fixed variables) is kept.
 	DashboardURL string `json:"dashboard_url"`
-	// ExploreURL is the Grafana address used when there is no dashboard: Explore with the
-	// configuration item as a query.
-	BaseURL      string `json:"base_url"`
-	WindowMinute int    `json:"window_minutes"`
+	// WindowMinute is how much time before the incident and after its end is shown.
+	WindowMinute int        `json:"window_minutes"`
+	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
+	UpdatedBy    string     `json:"updated_by,omitempty"`
 }

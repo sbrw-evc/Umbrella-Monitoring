@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { GrafanaCard } from './GrafanaCard'
 import { NotifyCard } from './NotifyCard'
 import { PagerDutyCard } from './PagerDutyCard'
 import './alerting.css'
@@ -11,6 +12,7 @@ export function AlertingSettings() {
     <>
       <PagerDutyCard onSaved={() => setEpoch((e) => e + 1)} />
       <NotifyCard key={epoch} />
+      <GrafanaCard />
     </>
   )
 }

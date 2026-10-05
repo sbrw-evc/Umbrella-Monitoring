@@ -36,9 +36,9 @@ func NewMaintenanceService(st *store.Store) *MaintenanceService {
 
 type MaintenanceView struct {
 	model.Maintenance
-	State    string `json:"state"`
-	CIs      []TargetRef  `json:"cis"`
-	Services []TargetRef  `json:"services"`
+	State    string      `json:"state"`
+	CIs      []TargetRef `json:"cis"`
+	Services []TargetRef `json:"services"`
 }
 
 type TargetRef struct {

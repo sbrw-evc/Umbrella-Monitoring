@@ -149,7 +149,7 @@ func (g *Gateway) deliver(ctx context.Context, cmd alert.Command) {
 		g.report(cmd, routeName, fmt.Errorf("integration key: %w", err))
 		return
 	}
-	ev := Build(all.PublicURL, all.Grafana.DashboardURL != "" || all.Grafana.BaseURL != "", key, cmd)
+	ev := Build(all.PublicURL, all.Grafana.DashboardURL != "", key, cmd)
 	backoff := g.Backoff
 	for attempt := 0; attempt < g.Retries; attempt++ {
 		if g.breakerOpen() {

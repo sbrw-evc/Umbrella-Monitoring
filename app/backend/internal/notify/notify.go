@@ -337,9 +337,12 @@ func (s *Service) compose(c config, a alert.Alert, t target) composed {
 		}
 	}
 	lines = append(lines, line{w["pd"], pd})
-	var open, ack string
+	var open, ack, grafana string
 	if base != "" {
 		open = base + "/incidents?id=" + url.QueryEscape(a.ID)
+		if c.set.Grafana.DashboardURL != "" {
+			grafana = base + "/go/incidents/" + url.PathEscape(a.ID) + "/grafana"
+		}
 		if l := s.Links(); l != nil {
 			ack = base + "/ack/" + l.Sign(a.ID, t.recipient, s.now().Add(LinkTTL))
 		}
@@ -366,6 +369,10 @@ func (s *Service) compose(c config, a alert.Alert, t target) composed {
 	if open != "" {
 		tb.WriteString(w["open"] + ": " + open + "\n")
 		hb.WriteString(`<a href="` + html.EscapeString(open) + `">` + html.EscapeString(w["open"]) + "</a>")
+	}
+	if grafana != "" {
+		tb.WriteString("Grafana: " + grafana + "\n")
+		hb.WriteString(` · <a href="` + html.EscapeString(grafana) + `">Grafana</a>`)
 	}
 	tb.WriteString("\n-- \n" + w["why"] + "\n")
 	return composed{subject: "[Umbrella] " + title + " (" + w[a.Severity] + ")", text: tb.String(), html: hb.String()}
