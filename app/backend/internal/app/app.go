@@ -13,6 +13,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/credentials"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pagerduty"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
@@ -69,6 +70,8 @@ type App struct {
 	connectors *ConnectorsService
 	queue      *ingest.Queue
 	alerts     *alert.Engine
+	pdGateway  *pagerduty.Gateway
+	pagerduty  *PagerDutyService
 	ready      atomic.Bool
 	rates      rates
 }
@@ -128,8 +131,16 @@ func New(opt Options, deps Deps) *App {
 			return queue.Firing(ctx, since)
 		}
 	}
+	var resolver pagerduty.Resolver = noSecrets{}
+	if vault != nil {
+		resolver = vault
+	}
+	a.pdGateway = pagerduty.New(deps.Store, resolver)
+	a.pagerduty = NewPagerDutyService(deps.Store, vault, a.pdGateway)
 	if queue != nil {
 		a.alerts = alert.New(deps.Backend.Pool(), deps.Store)
+		a.alerts.SetSender(a.pdGateway)
+		a.pdGateway.SetResults(a.alerts)
 		queue.SetSink(a.alertSink)
 	}
 	a.cmdb = NewCMDBService(deps.Store, firing)
@@ -154,7 +165,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerCMDB, a.registerIncidents} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerCMDB, a.registerIncidents, a.registerPagerDuty} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })
@@ -186,6 +197,7 @@ func (a *App) Run(ctx context.Context) {
 	}
 	a.ready.Store(true)
 	go a.alerts.Run(ctx)
+	go a.pdGateway.Run(ctx)
 	a.queue.Run(ctx, 2, a.process)
 }
 
@@ -207,3 +219,7 @@ func (a *App) meta(w http.ResponseWriter, r *http.Request) {
 	s := a.settings.Get()
 	httpx.JSON(w, http.StatusOK, metaView{defaultsView: defaultsOf(s), Mode: "ready", Version: a.opt.Version, LDAPEnabled: s.LDAP.Enabled, EntraEnabled: s.Entra.Enabled})
 }
+
+type noSecrets struct{}
+
+func (noSecrets) Resolve(string) (string, error) { return "", credentials.ErrUnavailable }

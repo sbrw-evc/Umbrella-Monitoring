@@ -93,6 +93,11 @@ var pages = []Page{
 	{"roles", GroupOrg, Text{"Roles", "Роли"}, []Feature{view, edit}},
 	{"teams", GroupOrg, Text{"Teams", "Команды"}, []Feature{view, edit}},
 	{"status", GroupSettings, Text{"System status", "Состояние системы"}, []Feature{view, {"defaults", Text{"Change default theme, language and time zone", "Изменение темы, языка и часового пояса по умолчанию"}}}},
+	{"settings.alerting", GroupSettings, Text{"Alerting", "Оповещения"}, []Feature{
+		view,
+		{"test", Text{"Check connections and send test messages", "Проверка подключений и тестовые сообщения"}},
+		{"edit", Text{"Change PagerDuty, backup notification and Grafana", "Изменение PagerDuty, резервного оповещения и Grafana"}},
+	}},
 	{"settings.postgres", GroupSettings, Text{"PostgreSQL", "PostgreSQL"}, []Feature{view, test, migrate}},
 	{"settings.openbao", GroupSettings, Text{"OpenBao", "OpenBao"}, []Feature{view, test, migrate}},
 	{"settings.ldap", GroupSettings, Text{"LDAP / AD", "LDAP / AD"}, []Feature{view, test, {"edit", Text{"Change the connection", "Изменение подключения"}}}},

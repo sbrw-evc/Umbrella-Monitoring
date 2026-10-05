@@ -119,6 +119,7 @@ type Settings struct {
 	LDAP          directory.Config `json:"ldap"`
 	Entra         entra.Config     `json:"entra"`
 	NetBox        netbox.Config    `json:"netbox"`
+	Alerting      Alerting         `json:"alerting"`
 	SetupAt       time.Time        `json:"setup_at"`
 	SetupBy       string           `json:"setup_by"`
 }
