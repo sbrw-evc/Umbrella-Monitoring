@@ -52,9 +52,14 @@ type Outcome struct {
 // Processor runs a request through the connector version it was received for.
 type Processor func(ctx context.Context, r Request) (Outcome, error)
 
+// Sink receives the events of a processed request inside the transaction that stores them
+// (the alert engine). after runs once the transaction is committed.
+type Sink func(ctx context.Context, tx pgx.Tx, connectorID string, events []flow.Event) (after func(), err error)
+
 type Queue struct {
 	pool *pgxpool.Pool
 	wake chan struct{}
+	sink Sink
 
 	mu       sync.Mutex
 	rejected map[string]int
@@ -96,6 +101,9 @@ func nonNil(m map[string]string) map[string]string {
 	}
 	return m
 }
+
+// SetSink sets the receiver of processed events. Call it before Run.
+func (q *Queue) SetSink(s Sink) { q.sink = s }
 
 // Notify wakes a worker right away instead of at its next poll.
 func (q *Queue) Notify() {
@@ -186,7 +194,9 @@ type statDelta struct {
 // Drain claims one batch of pending requests and processes it. It returns how many it took.
 func (q *Queue) Drain(ctx context.Context, process Processor) (int, error) {
 	n := 0
+	var after []func()
 	err := pgx.BeginFunc(ctx, q.pool, func(tx pgx.Tx) error {
+		after = after[:0]
 		rows, err := tx.Query(ctx, `SELECT id, received_at, connector_id, version, attempts, remote_ip, method, headers, query, body
 			FROM ingest_requests WHERE status = 'pending' ORDER BY received_at LIMIT $1 FOR UPDATE SKIP LOCKED`, claimBatch)
 		if err != nil {
@@ -208,8 +218,12 @@ func (q *Queue) Drain(ctx context.Context, process Processor) (int, error) {
 				st = &statDelta{}
 				stats[r.ConnectorID] = st
 			}
-			if err := q.handle(ctx, tx, r, process, st); err != nil {
+			f, err := q.handle(ctx, tx, r, process, st)
+			if err != nil {
 				return err
+			}
+			if f != nil {
+				after = append(after, f)
 			}
 		}
 		for id, st := range stats {
@@ -226,14 +240,19 @@ func (q *Queue) Drain(ctx context.Context, process Processor) (int, error) {
 		}
 		return nil
 	})
+	if err == nil {
+		for _, f := range after {
+			f()
+		}
+	}
 	return n, err
 }
 
-func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Processor, st *statDelta) error {
+func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Processor, st *statDelta) (func(), error) {
 	st.received++
 	out, perr := process(ctx, r)
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 	version := r.Version
 	if out.Version != 0 {
@@ -247,9 +266,9 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 		st.failed++
 		if _, err := tx.Exec(ctx, `INSERT INTO ingest_failures (connector_id, version, node_id, error, request_id, request_at, item, raw)
 			VALUES ($1, $2, '', $3, $4, $5, 0, $6)`, r.ConnectorID, version, msg, r.ID, r.ReceivedAt, clip(string(r.Body), 4000)); err != nil {
-			return err
+			return nil, err
 		}
-		return finish(ctx, tx, r, StatusFailed, 0, msg)
+		return nil, finish(ctx, tx, r, StatusFailed, 0, msg)
 	}
 	res := out.Result
 	st.filtered += res.Filtered
@@ -272,7 +291,7 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 			r.ConnectorID, version, e.Event.Key, e.Event.Title, e.Event.CI, e.Event.Signal, e.Event.Method, e.Event.Severity, e.Event.Status,
 			e.Event.ExternalID, e.Event.Value, labels, r.ID, r.ReceivedAt, e.Lineage.Item).Scan(&changed)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if changed {
 			inserted++
@@ -285,7 +304,7 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 		data, _ := json.Marshal(f.Data)
 		if _, err := tx.Exec(ctx, `INSERT INTO ingest_failures (connector_id, version, node_id, error, request_id, request_at, item, data, raw)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, r.ConnectorID, version, f.Node, clip(f.Error, 2000), r.ID, r.ReceivedAt, f.Lineage.Item, data, f.Raw); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	st.failed += len(res.Failures)
@@ -300,9 +319,35 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 		msg = fmt.Sprintf("%d of the records failed; first: %s", len(res.Failures), clip(res.Failures[0].Error, 500))
 	}
 	if _, err := tx.Exec(ctx, "UPDATE ingest_requests SET version = $3 WHERE id = $1 AND received_at = $2", r.ID, r.ReceivedAt, version); err != nil {
-		return err
+		return nil, err
 	}
-	return finish(ctx, tx, r, status, len(res.Events), msg)
+	after := q.deliver(ctx, tx, r, res)
+	return after, finish(ctx, tx, r, status, len(res.Events), msg)
+}
+
+// deliver hands the events to the sink in a savepoint: an alert that cannot be folded does not
+// hold back the events, it is logged instead.
+func (q *Queue) deliver(ctx context.Context, tx pgx.Tx, r Request, res *flow.Result) func() {
+	if q.sink == nil || len(res.Events) == 0 {
+		return nil
+	}
+	events := make([]flow.Event, 0, len(res.Events))
+	for _, e := range res.Events {
+		events = append(events, e.Event)
+	}
+	var after func()
+	err := pgx.BeginFunc(ctx, tx, func(sp pgx.Tx) error {
+		var err error
+		after, err = q.sink(ctx, sp, r.ConnectorID, events)
+		return err
+	})
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Error("events not folded into alerts", "connector", r.ConnectorID, "request", r.ID, "err", err)
+		}
+		return nil
+	}
+	return after
 }
 
 func finish(ctx context.Context, tx pgx.Tx, r Request, status string, events int, msg string) error {

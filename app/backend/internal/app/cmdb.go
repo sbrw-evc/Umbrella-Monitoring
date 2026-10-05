@@ -6,10 +6,10 @@ import (
 	"net"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
@@ -205,25 +205,9 @@ func (s *CMDBService) Map(ctx context.Context) CMDBMap {
 	return out
 }
 
-// eventKeys are the forms of the ci field of an event a configuration item may be known by:
-// the value itself, without a port (Prometheus instances look like host:9100) and the short
-// host name.
-func eventKeys(v string) []string {
-	v = strings.ToLower(strings.TrimSpace(v))
-	keys := []string{v}
-	if host, port, err := net.SplitHostPort(v); err == nil {
-		if _, err := strconv.Atoi(port); err == nil {
-			v = host
-			keys = append(keys, v)
-		}
-	}
-	if net.ParseIP(v) == nil {
-		if short, _, ok := strings.Cut(v, "."); ok && short != "" {
-			keys = append(keys, short)
-		}
-	}
-	return keys
-}
+// eventKeys are the forms of the ci field of an event a configuration item may be known by,
+// the same the alert engine matches items with.
+func eventKeys(v string) []string { return alert.EventKeys(v) }
 
 // attachEvents matches firing events to configuration items by name, short name, IP address
 // or the DNS name the domain controller has for the item.
