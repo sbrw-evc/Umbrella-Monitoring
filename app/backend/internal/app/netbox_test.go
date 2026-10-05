@@ -26,7 +26,7 @@ func device(id int, name, ip string) map[string]any {
 	return map[string]any{"id": id, "name": name, "display": name, "status": map[string]any{"value": "active", "label": "Active"},
 		"site": map[string]any{"id": 1, "name": "DC-1"}, "role": map[string]any{"id": 2, "name": "Server"},
 		"device_type": map[string]any{"id": 3, "model": "R640"}, "primary_ip4": map[string]any{"address": ip + "/24"},
-		"tags": []any{map[string]any{"name": "Prod", "slug": "prod"}}}
+		"tags": []any{map[string]any{"id": 50, "name": "Prod", "slug": "prod"}}}
 }
 
 func contact(id int, name, email string) map[string]any {
@@ -42,6 +42,7 @@ func newNetBoxFixture(t *testing.T) netboxFixture {
 	h := newHarness(t)
 	h.addLocal("admin", "Admin-pass-2026", model.RoleAdmin, time.Now())
 	nb := netboxtest.Start(t)
+	nb.Put("extras/tags", map[string]any{"id": 50, "name": "Prod", "slug": "prod"})
 	nb.Put("dcim/devices", device(1, "srv-db-01", "10.0.0.1"))
 	nb.Put("dcim/devices", device(2, "srv-app-01", "10.0.0.2"))
 	nb.Put("dcim/devices", device(3, "sw-core-01", "10.0.0.3"))

@@ -410,6 +410,7 @@ func applyInventory(d *store.Data, cfg netbox.Config, inv netbox.Inventory, now 
 		ci.NetBox, ci.UpdatedAt, ci.UpdatedBy = nil, now, netboxActor
 		stats.Unlinked++
 	}
+	applyServiceTags(d, cfg, inv.Tags, seen, now, &stats)
 	return stats
 }
 

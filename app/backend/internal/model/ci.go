@@ -110,6 +110,9 @@ type SyncStats struct {
 	DirectoryMatched int    `json:"directory_matched"`
 	DirectoryMissing int    `json:"directory_missing"`
 	DirectoryError   string `json:"directory_error,omitempty"`
+	ServiceBound     int    `json:"service_bound"`
+	ServiceUnbound   int    `json:"service_unbound"`
+	ServiceUnlinked  int    `json:"service_unlinked"`
 }
 
 // SyncState is the last NetBox synchronization.

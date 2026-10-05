@@ -62,6 +62,7 @@ type App struct {
 	services  *ServicesService
 	netbox    *NetBoxService
 	cis       *CIService
+	cmdb      *CMDBService
 
 	creds      *CredentialsService
 	connectors *ConnectorsService
@@ -112,10 +113,20 @@ func New(opt Options, deps Deps) *App {
 		openbao:    NewOpenBaoService(deps.Store, deps.Vault, deps.Runtime, deps.Config),
 		roles:      NewRolesService(deps.Store),
 		teams:      NewTeamsService(deps.Store),
-		services:   NewServicesService(deps.Store),
+		services:   NewServicesService(deps.Store, nb),
 		netbox:     nb,
 		cis:        NewCIService(deps.Store, nb),
 	}
+	var firing firingSource
+	if queue != nil {
+		firing = func(ctx context.Context, since time.Time) ([]ingest.FiringEvent, error) {
+			if !a.ingestReady() {
+				return nil, errEventsNotReady
+			}
+			return queue.Firing(ctx, since)
+		}
+	}
+	a.cmdb = NewCMDBService(deps.Store, firing)
 	a.status = NewStatusService(deps.Store, vault, db, dir, sessions, queue, a.ingestReady, opt)
 	return a
 }
@@ -137,7 +148,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerCMDB} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })

@@ -426,6 +426,7 @@ type Assignment struct {
 // Inventory is everything a synchronization reads from NetBox.
 type Inventory struct {
 	Objects     []Object
+	Tags        []Tag
 	Contacts    []Contact
 	Assignments []Assignment
 }
@@ -460,6 +461,11 @@ func (c *Client) Fetch(ctx context.Context) (Inventory, error) {
 		}
 		inv.Objects = append(inv.Objects, objs...)
 	}
+	tags, err := c.Tags(ctx)
+	if err != nil {
+		return inv, err
+	}
+	inv.Tags = tags
 	if !c.cfg.SyncContacts {
 		return inv, nil
 	}
@@ -653,4 +659,109 @@ func firstSet(v ...string) string {
 		}
 	}
 	return ""
+}
+
+// Tag is a NetBox tag. Umbrella keeps one tag per business service.
+type Tag struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	Slug        string `json:"slug"`
+	Color       string `json:"color"`
+	Description string `json:"description"`
+}
+
+const tagsPath = "extras/tags"
+
+// TagURL is the page of the tag in the NetBox web interface.
+func (c Config) TagURL(id int) string {
+	if c.URL == "" || id <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s/%s/%d/", c.URL, tagsPath, id)
+}
+
+// Tags reads every tag.
+func (c *Client) Tags(ctx context.Context) ([]Tag, error) {
+	return list[Tag](ctx, c, tagsPath, nil)
+}
+
+// EnsureTag changes the tag with the given ID or, when there is none (any more), the tag with
+// the same slug, and creates the tag when neither exists.
+func (c *Client) EnsureTag(ctx context.Context, id int, t Tag) (Tag, error) {
+	body := map[string]any{"name": t.Name, "slug": t.Slug, "color": t.Color, "description": t.Description}
+	if id <= 0 {
+		found, err := list[Tag](ctx, c, tagsPath, url.Values{"slug": {t.Slug}})
+		if err != nil {
+			return Tag{}, err
+		}
+		for _, x := range found {
+			if x.Slug == t.Slug {
+				id = x.ID
+			}
+		}
+	}
+	var out Tag
+	if id > 0 {
+		err := c.do(ctx, http.MethodPatch, fmt.Sprintf("%s/%d/", tagsPath, id), nil, body, &out)
+		if !errors.Is(err, ErrNotFound) {
+			return out, err
+		}
+	}
+	err := c.do(ctx, http.MethodPost, tagsPath+"/", nil, body, &out)
+	var nbErr *Error
+	if errors.As(err, &nbErr) && nbErr.Status == http.StatusBadRequest && strings.Contains(nbErr.Detail, "name") {
+		// Another tag already has the name: keep the slug in the name to tell them apart.
+		body["name"] = clipName(t.Name, 100-len(t.Slug)-3) + " (" + t.Slug + ")"
+		err = c.do(ctx, http.MethodPost, tagsPath+"/", nil, body, &out)
+	}
+	return out, err
+}
+
+func clipName(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
+}
+
+// DeleteTag removes the tag, which NetBox also takes off every object; a missing tag is fine.
+func (c *Client) DeleteTag(ctx context.Context, id int) error {
+	err := c.do(ctx, http.MethodDelete, fmt.Sprintf("%s/%d/", tagsPath, id), nil, nil, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+// SetTag puts the tag on the object or takes it off, keeping the other tags of the object.
+func (c *Client) SetTag(ctx context.Context, kind string, objectID, tagID int, on bool) error {
+	k, ok := kinds[kind]
+	if !ok {
+		return fmt.Errorf("unknown kind %q", kind)
+	}
+	path := fmt.Sprintf("%s/%d/", k.api, objectID)
+	var o struct {
+		Tags []Tag `json:"tags"`
+	}
+	if err := c.do(ctx, http.MethodGet, path, nil, nil, &o); err != nil {
+		return err
+	}
+	ids := []int{}
+	has := false
+	for _, t := range o.Tags {
+		if t.ID == tagID {
+			has = true
+			if !on {
+				continue
+			}
+		}
+		ids = append(ids, t.ID)
+	}
+	if has == on {
+		return nil
+	}
+	if on {
+		ids = append(ids, tagID)
+	}
+	return c.do(ctx, http.MethodPatch, path, nil, map[string]any{"tags": ids}, nil)
 }

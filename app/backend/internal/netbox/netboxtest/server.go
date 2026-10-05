@@ -114,8 +114,11 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for k, v := range patch {
-			if k == "status" {
+			switch k {
+			case "status":
 				v = map[string]any{"value": v, "label": v}
+			case "tags":
+				v = s.tags(v)
 			}
 			objs[id][k] = v
 		}
@@ -141,14 +144,68 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request, objs map[int]map[s
 	}
 	// Pages are capped below the requested size to exercise paging.
 	limit = min(limit, 2)
-	results := []map[string]any{}
-	for i := offset; i < len(ids) && i < offset+limit; i++ {
-		results = append(results, objs[ids[i]])
+	// Other query parameters filter on top-level fields, such as ?slug=x.
+	filter := map[string]string{}
+	for k, v := range r.URL.Query() {
+		if k != "limit" && k != "offset" && len(v) > 0 {
+			filter[k] = v[0]
+		}
 	}
-	write(w, http.StatusOK, map[string]any{"count": len(ids), "next": nil, "results": results})
+	matched := ids[:0:0]
+	for _, id := range ids {
+		ok := true
+		for k, v := range filter {
+			if s, _ := objs[id][k].(string); s != v {
+				ok = false
+			}
+		}
+		if ok {
+			matched = append(matched, id)
+		}
+	}
+	results := []map[string]any{}
+	for i := offset; i < len(matched) && i < offset+limit; i++ {
+		results = append(results, objs[matched[i]])
+	}
+	write(w, http.StatusOK, map[string]any{"count": len(matched), "next": nil, "results": results})
+}
+
+// tags turns tag IDs into the nested tag objects NetBox returns.
+func (s *Server) tags(v any) any {
+	in, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	out := []any{}
+	for _, x := range in {
+		if n, isNum := x.(float64); isNum {
+			if t := s.objects["extras/tags"][int(n)]; t != nil {
+				out = append(out, map[string]any{"id": t["id"], "name": t["name"], "slug": t["slug"]})
+			}
+			continue
+		}
+		out = append(out, x)
+	}
+	return out
+}
+
+// Tagged lists the slugs of the tags on an object.
+func (s *Server) Tagged(collection string, id int) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []string{}
+	tags, _ := s.objects[collection][id]["tags"].([]any)
+	for _, t := range tags {
+		if m, ok := t.(map[string]any); ok {
+			slug, _ := m["slug"].(string)
+			out = append(out, slug)
+		}
+	}
+	return out
 }
 
 var required = map[string][]string{
+	"extras/tags":                     {"name", "slug"},
 	"dcim/devices":                    {"name", "site", "device_type", "role"},
 	"virtualization/virtual-machines": {"name"},
 }
@@ -165,6 +222,16 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request, collection strin
 			return
 		}
 	}
+	if collection == "extras/tags" {
+		for _, t := range s.objects[collection] {
+			for _, f := range []string{"name", "slug"} {
+				if t[f] == in[f] {
+					write(w, http.StatusBadRequest, map[string][]string{f: {"tag with this " + f + " already exists."}})
+					return
+				}
+			}
+		}
+	}
 	s.next++
 	obj := map[string]any{"id": s.next, "display": in["name"]}
 	for k, v := range in {
@@ -173,6 +240,8 @@ func (s *Server) create(w http.ResponseWriter, r *http.Request, collection strin
 			obj[k] = map[string]any{"value": v, "label": v}
 		case "site", "device_type", "role", "cluster":
 			obj[k] = map[string]any{"id": v, "name": collection + " ref"}
+		case "tags":
+			obj[k] = s.tags(v)
 		default:
 			obj[k] = v
 		}

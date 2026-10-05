@@ -65,6 +65,7 @@ type CIOwnerView struct {
 type CIView struct {
 	model.ConfigItem
 	Owners      []CIOwnerView `json:"owners"`
+	Services    []ServiceRef  `json:"services"`
 	Editable    bool          `json:"editable"`
 	Registrable bool          `json:"registrable"`
 }
@@ -104,8 +105,27 @@ func NewCIService(st *store.Store, nb *NetBoxService) *CIService {
 	return &CIService{st: st, netbox: nb, now: func() time.Time { return time.Now().UTC() }}
 }
 
-func ciView(d *store.Data, ci *model.ConfigItem) CIView {
-	v := CIView{ConfigItem: *ci, Owners: []CIOwnerView{}, Editable: !ci.Imported()}
+// servicesByCI lists the business services of every configuration item.
+func servicesByCI(d *store.Data) map[string][]ServiceRef {
+	out := map[string][]ServiceRef{}
+	for _, svc := range d.Services {
+		for _, id := range svc.CIIDs {
+			out[id] = append(out[id], ServiceRef{ID: svc.ID, Name: svc.Name})
+		}
+	}
+	for _, refs := range out {
+		slices.SortFunc(refs, func(x, y ServiceRef) int { return byName(x.Name, y.Name) })
+	}
+	return out
+}
+
+func ciView(d *store.Data, ci *model.ConfigItem) CIView { return ciViewWith(d, ci, servicesByCI(d)) }
+
+func ciViewWith(d *store.Data, ci *model.ConfigItem, services map[string][]ServiceRef) CIView {
+	v := CIView{ConfigItem: *ci, Owners: []CIOwnerView{}, Services: services[ci.ID], Editable: !ci.Imported()}
+	if v.Services == nil {
+		v.Services = []ServiceRef{}
+	}
 	v.Registrable = !ci.Imported() && ci.NetBox == nil && netboxKindOf[ci.Kind] != ""
 	if v.IPs == nil {
 		v.IPs = []string{}
@@ -140,6 +160,7 @@ func (s *CIService) List(f CIFilter) CIList {
 	q := strings.ToLower(strings.TrimSpace(f.Query))
 	s.st.Read(func(d *store.Data) {
 		tags := map[string]bool{}
+		services := servicesByCI(d)
 		for _, ci := range d.ConfigItems {
 			sum := &out.Summary
 			sum.Total++
@@ -160,7 +181,7 @@ func (s *CIService) List(f CIFilter) CIList {
 			for _, t := range ci.Tags {
 				tags[t] = true
 			}
-			v := ciView(d, ci)
+			v := ciViewWith(d, ci, services)
 			if f.matches(v, q) {
 				out.Items = append(out.Items, v)
 			}
@@ -197,6 +218,9 @@ func (f CIFilter) matches(v CIView, q string) bool {
 	fields = append(fields, v.Tags...)
 	for _, o := range v.Owners {
 		fields = append(fields, o.Name, o.Username, o.Email)
+	}
+	for _, svc := range v.Services {
+		fields = append(fields, svc.Name)
 	}
 	if v.NetBox != nil {
 		fields = append(fields, "netbox:"+strconv.Itoa(v.NetBox.ID))
@@ -462,6 +486,7 @@ func (s *CIService) Delete(ctx context.Context, actor, id string) error {
 			return
 		}
 		delete(d.ConfigItems, id)
+		dropCI(d, id)
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "ci.delete", Object: id, Detail: cur.Name + note})
 	})
 	return nil

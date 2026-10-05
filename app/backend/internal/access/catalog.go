@@ -53,10 +53,15 @@ var groups = []Group{
 }
 
 var pages = []Page{
+	{"services", GroupOverview, Text{"Business services", "Бизнес-сервисы"}, []Feature{
+		view,
+		{"edit", Text{"Create, change and delete services, bind configuration items, link services to NetBox", "Создание, изменение и удаление сервисов, привязка КЕ, связь с NetBox"}},
+	}},
 	{"cis", GroupOverview, Text{"Configuration items", "Конфигурационные единицы"}, []Feature{
 		view,
 		{"edit", Text{"Create, change and delete configuration items, also in NetBox", "Создание, изменение и удаление КЕ, в том числе в NetBox"}},
 	}},
+	{"cmdb", GroupOverview, Text{"CMDB map", "Карта CMDB"}, []Feature{view}},
 	{"connectors", GroupAuto, Text{"Connectors", "Коннекторы"}, []Feature{
 		view,
 		{"edit", Text{"Create and change drafts, samples and test runs", "Создание и изменение черновиков, образцов и тестовых прогонов"}},
@@ -83,7 +88,6 @@ var pages = []Page{
 	}},
 	{"roles", GroupOrg, Text{"Roles", "Роли"}, []Feature{view, edit}},
 	{"teams", GroupOrg, Text{"Teams", "Команды"}, []Feature{view, edit}},
-	{"services", GroupOrg, Text{"Business services", "Бизнес-сервисы"}, []Feature{view, edit}},
 	{"status", GroupSettings, Text{"System status", "Состояние системы"}, []Feature{view, {"defaults", Text{"Change default theme, language and time zone", "Изменение темы, языка и часового пояса по умолчанию"}}}},
 	{"settings.postgres", GroupSettings, Text{"PostgreSQL", "PostgreSQL"}, []Feature{view, test, migrate}},
 	{"settings.openbao", GroupSettings, Text{"OpenBao", "OpenBao"}, []Feature{view, test, migrate}},
