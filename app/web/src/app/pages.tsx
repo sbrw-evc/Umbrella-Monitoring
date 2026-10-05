@@ -12,7 +12,7 @@ import { SystemStatus } from './SystemStatus'
 import { TeamsPage } from './teams/TeamsPage'
 import { UsersPage } from './users/UsersPage'
 
-export type Group = 'main' | 'org' | 'settings'
+export type Group = 'main' | 'automation' | 'org' | 'settings'
 
 export type PageDef = {
   id: string
@@ -31,8 +31,8 @@ export const SETTINGS_PATH = '/settings'
 
 export const PAGES: PageDef[] = [
   { id: 'status', path: '/status', group: 'main', icon: Activity, Component: SystemStatus },
-  { id: 'connectors', path: '/connectors', group: 'main', icon: Cable, Component: ConnectorsPage, nested: true },
-  { id: 'credentials', path: '/credentials', group: 'main', icon: LockKeyhole, Component: CredentialsPage, subtitle: 'page.credentials.subtitle' },
+  { id: 'connectors', path: '/connectors', group: 'automation', icon: Cable, Component: ConnectorsPage, nested: true },
+  { id: 'credentials', path: '/credentials', group: 'automation', icon: LockKeyhole, Component: CredentialsPage, subtitle: 'page.credentials.subtitle' },
   { id: 'users', path: '/users', group: 'org', icon: Users, Component: UsersPage, subtitle: 'page.users.subtitle' },
   { id: 'roles', path: '/roles', group: 'org', icon: UserCog, Component: RolesPage, subtitle: 'page.roles.subtitle' },
   { id: 'teams', path: '/teams', group: 'org', icon: UsersRound, Component: TeamsPage, subtitle: 'page.teams.subtitle' },
@@ -50,7 +50,7 @@ export const PAGES: PageDef[] = [
   },
 ]
 
-export const GROUPS: Group[] = ['main', 'org', 'settings']
+export const GROUPS: Group[] = ['main', 'automation', 'org', 'settings']
 
 export type Can = (perm: string) => boolean
 

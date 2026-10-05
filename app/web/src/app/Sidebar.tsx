@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { Building2, ChevronDown, Settings, type LucideIcon } from 'lucide-react'
+import { Building2, ChevronDown, Settings, Workflow, type LucideIcon } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useT } from '../i18n'
 import { Link, useRouter } from '../router'
@@ -103,6 +103,7 @@ export function Sidebar() {
   const nav = useRef<HTMLElement>(null)
   const pages = visiblePages(can)
   const main = pages.filter((p) => p.group === 'main')
+  const automation = pages.filter((p) => p.group === 'automation')
   const org = pages.filter((p) => p.group === 'org')
   const settings = pages.filter((p) => p.group === 'settings')
 
@@ -124,6 +125,7 @@ export function Sidebar() {
           ))}
         </div>
       )}
+      {automation.length > 0 && <GroupAccordion group="automation" icon={Workflow} pages={automation} path={path} />}
       {org.length > 0 && <GroupAccordion group="org" icon={Building2} pages={org} path={path} />}
       {settings.length > 0 && <GroupAccordion group="settings" icon={Settings} pages={settings} path={path} />}
     </nav>
