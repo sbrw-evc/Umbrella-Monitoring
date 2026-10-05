@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: umbrella
+    orgId: 1
+    folder: Umbrella
+    type: file
+    disableDeletion: true
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/umbrella-dashboards
