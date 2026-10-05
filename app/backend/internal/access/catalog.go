@@ -53,6 +53,10 @@ var groups = []Group{
 }
 
 var pages = []Page{
+	{"incidents", GroupMain, Text{"Incidents", "Инциденты"}, []Feature{
+		view,
+		{"ack", Text{"Acknowledge, resolve and comment incidents", "Подтверждение, решение и комментарии инцидентов"}},
+	}},
 	{"services", GroupOverview, Text{"Business services", "Бизнес-сервисы"}, []Feature{
 		view,
 		{"edit", Text{"Create, change and delete services, bind configuration items, link services to NetBox", "Создание, изменение и удаление сервисов, привязка КЕ, связь с NetBox"}},

@@ -92,13 +92,15 @@ type User struct {
 	Username string `json:"username"`
 	Name     string `json:"name"`
 	Profile
-	Avatar             []byte     `json:"-"`
-	AvatarSource       string     `json:"avatar_source,omitempty"`
-	AvatarAt           *time.Time `json:"avatar_at,omitempty"`
-	Source             string     `json:"source"`
-	Timezone           string     `json:"timezone"`
-	Role               string     `json:"role"`
-	TeamID             string     `json:"team_id"`
+	Avatar       []byte     `json:"-"`
+	AvatarSource string     `json:"avatar_source,omitempty"`
+	AvatarAt     *time.Time `json:"avatar_at,omitempty"`
+	Source       string     `json:"source"`
+	Timezone     string     `json:"timezone"`
+	Role         string     `json:"role"`
+	TeamID       string     `json:"team_id"`
+	// Telegram is the chat ID backup notification sends to.
+	Telegram           string     `json:"telegram"`
 	MustChangePassword bool       `json:"must_change_password"`
 	PasswordRef        string     `json:"-"`
 	ExternalID         string     `json:"-"`
