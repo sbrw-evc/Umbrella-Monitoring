@@ -1,15 +1,20 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { Building2, ChevronDown, LayoutGrid, Settings, Workflow, type LucideIcon } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useT } from '../i18n'
 import { Link, useRouter } from '../router'
 import { spring } from '../ui'
 import { navStrings } from './navStrings'
-import { owns, visiblePages, type Group, type PageDef } from './pages'
+import { GROUPS, owns, visiblePages, type Group, type PageDef } from './pages'
 import { useSession } from './session'
 
 const COMPACT = '(max-width: 860px)'
 const openKey = (group: Group) => `umbrella.sidebar.${group}`
+const collapsedKey = (user: string) => `umbrella.sidebar.collapsed.${user}`
+const GROUP_ICONS: Record<Group, LucideIcon> = { overview: LayoutGrid, automation: Workflow, org: Building2, settings: Settings }
+// Groups shown open the first time, before the user has opened or closed them.
+const OPEN_BY_DEFAULT: Group[] = ['overview']
 
 function useCompact() {
   return useSyncExternalStore(
@@ -24,10 +29,58 @@ function useCompact() {
 
 function readOpen(group: Group) {
   try {
-    return window.localStorage.getItem(openKey(group)) === '1'
+    const v = window.localStorage.getItem(openKey(group))
+    return v === null ? OPEN_BY_DEFAULT.includes(group) : v === '1'
+  } catch {
+    return OPEN_BY_DEFAULT.includes(group)
+  }
+}
+
+function readCollapsed(user: string) {
+  try {
+    return window.localStorage.getItem(collapsedKey(user)) === '1'
   } catch {
     return false
   }
+}
+
+// useCollapsed keeps the collapsed state of the sidebar per user in this browser.
+export function useCollapsed(user: string) {
+  const [collapsed, setCollapsed] = useState(() => readCollapsed(user))
+  useEffect(() => setCollapsed(readCollapsed(user)), [user])
+  const toggle = useCallback(
+    () =>
+      setCollapsed((v) => {
+        try {
+          window.localStorage.setItem(collapsedKey(user), v ? '0' : '1')
+        } catch {
+          // The choice then lasts until the page is reloaded.
+        }
+        return !v
+      }),
+    [user],
+  )
+  return [collapsed, toggle] as const
+}
+
+// Tip is the label shown next to an icon of the collapsed sidebar. It is drawn in a portal
+// because the sidebar scrolls and would clip it.
+function Tip({ anchor, children }: { anchor: HTMLElement | null; children: ReactNode }) {
+  if (!anchor) return null
+  const r = anchor.getBoundingClientRect()
+  return createPortal(
+    <motion.div
+      role="tooltip"
+      className="side-tip"
+      style={{ top: r.top + r.height / 2, left: r.right + 10, y: '-50%' }}
+      initial={{ opacity: 0, x: -4 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.12 }}
+    >
+      {children}
+    </motion.div>,
+    document.body,
+  )
 }
 
 function writeOpen(group: Group, v: boolean) {
@@ -38,13 +91,32 @@ function writeOpen(group: Group, v: boolean) {
   }
 }
 
-function SideLink({ page, active }: { page: PageDef; active: boolean }) {
+function SideLink({ page, active, rail }: { page: PageDef; active: boolean; rail?: boolean }) {
   const t = useT(navStrings)
+  const compact = useCompact()
+  const [tip, setTip] = useState<HTMLElement | null>(null)
+  const label = t(`page.${page.id}`)
+  const show = (e: { currentTarget: HTMLElement }) => rail && !compact && setTip(e.currentTarget)
+  const hide = () => setTip(null)
+  useEffect(() => {
+    if (!rail) setTip(null)
+  }, [rail])
   return (
-    <Link to={page.path} className={`side-link ${active ? 'active' : ''}`} aria-current={active ? 'page' : undefined}>
+    <Link
+      to={page.path}
+      className={`side-link ${active ? 'active' : ''}`}
+      aria-current={active ? 'page' : undefined}
+      aria-label={rail ? label : undefined}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+      onClick={hide}
+    >
       {active && <motion.span layoutId="side-pill" className="side-pill" transition={spring} />}
       <page.icon size={17} aria-hidden />
-      <span>{t(`page.${page.id}`)}</span>
+      <span className="side-label">{label}</span>
+      {rail && <Tip anchor={tip}>{label}</Tip>}
     </Link>
   )
 }
@@ -96,17 +168,13 @@ function GroupAccordion({ group, icon: Icon, pages, path }: { group: Group; icon
   )
 }
 
-export function Sidebar() {
+export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const t = useT(navStrings)
   const { path } = useRouter()
   const { can } = useSession()
   const nav = useRef<HTMLElement>(null)
   const pages = visiblePages(can)
-  const main = pages.filter((p) => p.group === 'main')
-  const overview = pages.filter((p) => p.group === 'overview')
-  const automation = pages.filter((p) => p.group === 'automation')
-  const org = pages.filter((p) => p.group === 'org')
-  const settings = pages.filter((p) => p.group === 'settings')
+  const groups = GROUPS.map((g) => ({ group: g, pages: pages.filter((p) => p.group === g) })).filter((g) => g.pages.length > 0)
 
   useEffect(() => {
     const el = nav.current
@@ -115,21 +183,22 @@ export function Sidebar() {
     const box = el.getBoundingClientRect()
     const item = active.getBoundingClientRect()
     el.scrollBy({ left: item.left - box.left - box.width / 2 + item.width / 2, behavior: 'smooth' })
-  }, [path])
+  }, [path, collapsed])
 
   return (
-    <nav ref={nav} className="sidebar" aria-label={t('nav.label')}>
-      {main.length > 0 && (
-        <div className="side-group">
-          {main.map((p) => (
-            <SideLink key={p.id} page={p} active={owns(p, path)} />
-          ))}
-        </div>
-      )}
-      {overview.length > 0 && <GroupAccordion group="overview" icon={LayoutGrid} pages={overview} path={path} />}
-      {automation.length > 0 && <GroupAccordion group="automation" icon={Workflow} pages={automation} path={path} />}
-      {org.length > 0 && <GroupAccordion group="org" icon={Building2} pages={org} path={path} />}
-      {settings.length > 0 && <GroupAccordion group="settings" icon={Settings} pages={settings} path={path} />}
+    <nav ref={nav} id="app-sidebar" className={`sidebar ${collapsed ? 'collapsed' : ''}`} aria-label={t('nav.label')}>
+      {collapsed
+        ? groups.map(({ group, pages }, i) => (
+            <Fragment key={group}>
+              {i > 0 && <span className="side-sep" aria-hidden />}
+              <div className="side-group" role="group" aria-label={t(`group.${group}`)}>
+                {pages.map((p) => (
+                  <SideLink key={p.id} page={p} active={owns(p, path)} rail />
+                ))}
+              </div>
+            </Fragment>
+          ))
+        : groups.map(({ group, pages }) => <GroupAccordion key={group} group={group} icon={GROUP_ICONS[group]} pages={pages} path={path} />)}
     </nav>
   )
 }

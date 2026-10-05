@@ -9,11 +9,6 @@
   min-width: 0;
 }
 
-.al-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 12px;
-}
 
 .al-sub {
   margin: 8px 0 0;
@@ -35,10 +30,6 @@
   margin-bottom: 4px;
 }
 
-.al-test {
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-}
 
 .al-test-row {
   display: flex;
@@ -48,4 +39,46 @@
 
 .al-test-row .input {
   flex: 1;
+}
+
+.al-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.al-section > .hint {
+  margin: -6px 0 0;
+}
+
+.al-inline {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.al-inline > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.al-inline > .btn {
+  margin-top: 24px;
+}
+
+.al-error {
+  color: var(--error);
+}
+
+@media (max-width: 640px) {
+  .al-inline {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .al-inline > .btn {
+    margin-top: 0;
+  }
 }

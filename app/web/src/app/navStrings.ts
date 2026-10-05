@@ -3,6 +3,8 @@ import type { Dict } from '../i18n'
 export const navStrings: Dict = {
   en: {
     'nav.label': 'Sections',
+    'nav.collapse': 'Collapse the menu',
+    'nav.expand': 'Expand the menu',
     'group.overview': 'Overview',
     'group.automation': 'Automation',
     'group.org': 'Organization',
@@ -41,6 +43,8 @@ export const navStrings: Dict = {
   },
   ru: {
     'nav.label': 'Разделы',
+    'nav.collapse': 'Свернуть меню',
+    'nav.expand': 'Развернуть меню',
     'group.overview': 'Обзор',
     'group.automation': 'Автоматизация',
     'group.org': 'Организация',

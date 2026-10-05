@@ -1,10 +1,12 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Send, Trash2 } from 'lucide-react'
+import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../../api'
 import { useResource } from '../../../connections/useRequest'
 import { useLocale, useT } from '../../../i18n'
 import { Banner, Button, Field, formatDate, Input, Password, Rows, Select, Switch } from '../../../ui'
 import { ProfileCard } from '../../profile/ProfileCard'
+import { SummaryCard } from '../../profile/SummaryCard'
 import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { strings } from './strings'
@@ -27,6 +29,8 @@ type Draft = {
 }
 
 let seq = 0
+
+export const reveal = { duration: 0.28, ease: [0.22, 1, 0.36, 1] as const }
 
 function draftOf(v: PagerDutyView): Draft {
   return {
@@ -139,181 +143,194 @@ export function PagerDutyCard({ onSaved }: { onSaved?: () => void }) {
       </Field>
     ) : null
 
-  const status: [string, ReactNode][] = [
-    [
-      t('pd.state'),
-      <span key="s" className={`pill pill-${!view.enabled ? 'off' : st.breaker_open ? 'error' : 'ok'}`}>
-        {t(!view.enabled ? 'pd.state.off' : st.breaker_open ? 'pd.state.breaker' : 'pd.state.on')}
-      </span>,
-    ],
+  const stateKey = !view.enabled ? 'off' : st.breaker_open ? 'breaker' : 'on'
+  const subscribed = !!(view.webhook_subscription_id || view.has_webhook_secret)
+  const fallback = view.service_name || (view.has_routing_key ? t('pd.set') : '')
+  const rows: [string, ReactNode][] = [
     [t('pd.sent'), `${st.sent} / ${st.failed}`],
     [t('pd.queue'), String(st.queue)],
     [t('pd.lastSuccess'), at(st.last_success_at)],
     [t('pd.lastWebhook'), at(st.last_webhook_at)],
+    [t('pd.default'), fallback || t('pd.notset')],
+    [t('pd.routes'), String(view.routes.length)],
+    [t('pd.webhook'), t(subscribed ? 'pd.webhook.on' : 'pd.webhook.off')],
   ]
-  if (st.last_error) status.push([t('pd.lastError'), <span key="e" className="inc-warn">{`${at(st.last_error_at)} · ${st.last_error}`}</span>])
+  if (st.last_error) rows.push([t('pd.lastError'), <span key="e" className="al-error">{`${at(st.last_error_at)} · ${st.last_error}`}</span>])
 
   return (
-    <ProfileCard
-      title={t('pd.title')}
-      action={saver}
-      onSubmit={save}
-      wide
-      footer={
-        <div className="row">
-          {canTest && view.enabled && (
-            <Button busy={other.busy} disabled={dirty} onClick={() => void call('POST', '/api/pagerduty/test', t('pd.test.ok'))}>
+    <>
+      <SummaryCard
+        title={t('pd.title')}
+        badge={<span className={`pill pill-${stateKey === 'off' ? 'off' : stateKey === 'breaker' ? 'error' : 'ok'}`}>{t(`pd.state.${stateKey}`)}</span>}
+        text={t('pd.text')}
+        rows={rows}
+        action={other}
+        footer={
+          canTest &&
+          view.enabled && (
+            <Button busy={other.busy} disabled={dirty} title={dirty ? t('nt.test.saveFirst') : undefined} onClick={() => void call('POST', '/api/pagerduty/test', t('pd.test.ok'))}>
+              <Send size={15} aria-hidden />
               {t('pd.test')}
             </Button>
-          )}
-          {canEdit && (
+          )
+        }
+      />
+      <ProfileCard
+        title={t('pd.settings')}
+        action={saver}
+        onSubmit={save}
+        footer={
+          canEdit && (
             <Button type="submit" variant="primary" busy={saver.busy} disabled={!dirty}>
               {t('save')}
             </Button>
+          )
+        }
+      >
+        <fieldset className="plain-fieldset stack" disabled={!canEdit}>
+          <Switch checked={draft.enabled} onChange={(enabled) => set({ enabled })} label={t('pd.enable')} hint={t('pd.enable.hint')} />
+          <Field label={t('pd.public')} hint={t('pd.public.hint')}>
+            {(id) => <Input id={id} value={draft.public_url} placeholder="https://umbrella.example.com" onChange={(e) => set({ public_url: e.target.value })} />}
+          </Field>
+        </fieldset>
+        <AnimatePresence initial={false} mode="wait">
+          {draft.enabled ? (
+            <motion.div key="on" className="reveal-box" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} transition={reveal}>
+              <fieldset className="plain-fieldset stack" disabled={!canEdit}>
+                <div className="grid-2">
+                  <Field label={t('pd.region')}>
+                    {(id) => (
+                      <Select id={id} value={draft.region} onChange={(e) => set({ region: e.target.value as Draft['region'] })}>
+                        <option value="us">{t('pd.region.us')}</option>
+                        <option value="eu">{t('pd.region.eu')}</option>
+                      </Select>
+                    )}
+                  </Field>
+                  <Field label={t('pd.min')} hint={t('pd.min.hint')}>
+                    {(id) => (
+                      <Select id={id} value={draft.min_severity} onChange={(e) => set({ min_severity: e.target.value })}>
+                        <option value="">{t('sev.info')}</option>
+                        {SEVERITIES.filter((s) => s !== 'info').map((s) => (
+                          <option key={s} value={s}>
+                            {t(`sev.${s}`)}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </Field>
+                </div>
+                <div className="al-inline">
+                  <Field label={t('pd.token')} hint={view.has_api_token && !draft.api_token ? t('keep') : t('pd.token.hint')}>
+                    {(id) => <Password id={id} value={draft.api_token} autoComplete="off" onChange={(e) => set({ api_token: e.target.value })} />}
+                  </Field>
+                  {canTest && (draft.api_token || view.has_api_token) && (
+                    <Button busy={other.busy} onClick={() => void call('POST', '/api/pagerduty/check', t('pd.token.ok'), { api_token: draft.api_token })}>
+                      {t('pd.token.check')}
+                    </Button>
+                  )}
+                </div>
+
+                <section className="al-section">
+                  <h3 className="al-sub">{t('pd.default')}</h3>
+                  <p className="hint">{t('pd.default.hint')}</p>
+                  <div className="grid-2">
+                    {servicePicker(draft.pd_service_id, (pd_service_id) => set({ pd_service_id, routing_key: '' }), t('pd.service'))}
+                    {(!services || !draft.pd_service_id) && (
+                      <Field label={t('pd.key')} hint={view.has_routing_key && !draft.routing_key ? t('keep') : undefined}>
+                        {(id) => <Password id={id} value={draft.routing_key} autoComplete="off" onChange={(e) => set({ routing_key: e.target.value })} />}
+                      </Field>
+                    )}
+                  </div>
+                  {view.service_name && draft.pd_service_id === view.service_id && <p className="hint">{view.service_name}</p>}
+                </section>
+
+                <section className="al-section">
+                  <h3 className="al-sub">{t('pd.routes')}</h3>
+                  <p className="hint">{t('pd.routes.hint')}</p>
+                  {draft.routes.map((r, i) => (
+                    <div key={r.key} className="al-route">
+                      <Field label={t('pd.route.name')}>{(id) => <Input id={id} value={r.name} onChange={(e) => setRoute(i, { name: e.target.value })} />}</Field>
+                      <Field label={t('pd.route.service')}>
+                        {(id) => (
+                          <Select id={id} value={r.service_id} onChange={(e) => setRoute(i, { service_id: e.target.value })}>
+                            <option value="">{t('pd.route.any')}</option>
+                            {(refs.data?.services ?? []).map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.name}
+                              </option>
+                            ))}
+                          </Select>
+                        )}
+                      </Field>
+                      <Field label={t('pd.route.team')}>
+                        {(id) => (
+                          <Select id={id} value={r.team_id} onChange={(e) => setRoute(i, { team_id: e.target.value })}>
+                            <option value="">{t('pd.route.any')}</option>
+                            {(refs.data?.teams ?? []).map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.name}
+                              </option>
+                            ))}
+                          </Select>
+                        )}
+                      </Field>
+                      {servicePicker(r.pd_service_id, (pd_service_id) => setRoute(i, { pd_service_id, routing_key: '' }), t('pd.service'))}
+                      {(!services || !r.pd_service_id) && (
+                        <Field label={t('pd.key')} hint={r.has_key && !r.routing_key ? t('keep') : undefined}>
+                          {(id) => <Password id={id} value={r.routing_key} autoComplete="off" onChange={(e) => setRoute(i, { routing_key: e.target.value })} />}
+                        </Field>
+                      )}
+                      <button type="button" className="icon-btn al-remove" aria-label={t('remove')} title={t('remove')} onClick={() => set({ routes: draft.routes.filter((_, j) => j !== i) })}>
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="row">
+                    <Button
+                      onClick={() =>
+                        set({ routes: [...draft.routes, { key: `new-${++seq}`, id: '', name: '', team_id: '', service_id: '', routing_key: '', pd_service_id: '', has_key: false }] })
+                      }
+                    >
+                      <Plus size={16} aria-hidden />
+                      {t('pd.route.add')}
+                    </Button>
+                  </div>
+                </section>
+
+                <section className="al-section">
+                  <h3 className="al-sub">{t('pd.webhook')}</h3>
+                  <Rows
+                    align="end"
+                    rows={[
+                      [t('pd.webhook.url'), view.webhook_url ? <code key="u">{view.webhook_url}</code> : <span className="muted">{t('pd.webhook.nourl')}</span>],
+                      [t('state'), <span key="w" className={`pill pill-${subscribed ? 'ok' : 'off'}`}>{t(subscribed ? 'pd.webhook.on' : 'pd.webhook.off')}</span>],
+                    ]}
+                  />
+                  {view.webhook_url && view.has_api_token && (
+                    <div className="row">
+                      <Button busy={other.busy} disabled={dirty} onClick={() => void call('POST', '/api/pagerduty/subscription', t('saved'))}>
+                        {t('pd.webhook.subscribe')}
+                      </Button>
+                      {view.webhook_subscription_id && (
+                        <Button busy={other.busy} disabled={dirty} onClick={() => void call('DELETE', '/api/pagerduty/subscription', t('saved'))}>
+                          {t('pd.webhook.unsubscribe')}
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                  <Field label={t('pd.webhook.secret')} hint={view.has_webhook_secret && !draft.webhook_secret ? t('keep') : t('pd.webhook.secret.hint')}>
+                    {(id) => <Password id={id} value={draft.webhook_secret} autoComplete="off" onChange={(e) => set({ webhook_secret: e.target.value })} />}
+                  </Field>
+                </section>
+              </fieldset>
+            </motion.div>
+          ) : (
+            <motion.div key="off" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}>
+              <Banner kind="info" title={t('pd.off')} />
+            </motion.div>
           )}
-        </div>
-      }
-    >
-      <p className="muted">{t('pd.text')}</p>
-      <Rows rows={status} />
-      <fieldset className="plain-fieldset stack" disabled={!canEdit}>
-        <Switch checked={draft.enabled} onChange={(enabled) => set({ enabled })} label={t('pd.enable')} hint={t('pd.enable.hint')} />
-        <Field label={t('pd.public')} hint={t('pd.public.hint')}>
-          {(id) => <Input id={id} value={draft.public_url} placeholder="https://umbrella.example.com" onChange={(e) => set({ public_url: e.target.value })} />}
-        </Field>
-        <div className="al-grid">
-          <div className="al-col stack">
-            <div className="al-row">
-              <Field label={t('pd.region')}>
-                {(id) => (
-                  <Select id={id} value={draft.region} onChange={(e) => set({ region: e.target.value as Draft['region'] })}>
-                    <option value="us">{t('pd.region.us')}</option>
-                    <option value="eu">{t('pd.region.eu')}</option>
-                  </Select>
-                )}
-              </Field>
-              <Field label={t('pd.min')} hint={t('pd.min.hint')}>
-                {(id) => (
-                  <Select id={id} value={draft.min_severity} onChange={(e) => set({ min_severity: e.target.value })}>
-                    <option value="">{t('sev.info')}</option>
-                    {SEVERITIES.filter((s) => s !== 'info').map((s) => (
-                      <option key={s} value={s}>
-                        {t(`sev.${s}`)}
-                      </option>
-                    ))}
-                  </Select>
-                )}
-              </Field>
-            </div>
-            <Field label={t('pd.token')} hint={view.has_api_token && !draft.api_token ? t('keep') : t('pd.token.hint')}>
-              {(id) => <Password id={id} value={draft.api_token} autoComplete="off" onChange={(e) => set({ api_token: e.target.value })} />}
-            </Field>
-            {canTest && (draft.api_token || view.has_api_token) && (
-              <div className="row">
-                <Button busy={other.busy} onClick={() => void call('POST', '/api/pagerduty/check', t('pd.token.ok'), { api_token: draft.api_token })}>
-                  {t('pd.token.check')}
-                </Button>
-              </div>
-            )}
-          </div>
-          <div className="al-col stack">
-            <h3 className="al-sub">{t('pd.default')}</h3>
-            <p className="hint">{t('pd.default.hint')}</p>
-            {servicePicker(draft.pd_service_id, (pd_service_id) => set({ pd_service_id, routing_key: '' }), t('pd.service'))}
-            {(!services || !draft.pd_service_id) && (
-              <Field label={t('pd.key')} hint={view.has_routing_key && !draft.routing_key ? t('keep') : undefined}>
-                {(id) => <Password id={id} value={draft.routing_key} autoComplete="off" onChange={(e) => set({ routing_key: e.target.value })} />}
-              </Field>
-            )}
-            {view.service_name && draft.pd_service_id === view.service_id && <p className="hint">{view.service_name}</p>}
-          </div>
-        </div>
-
-        <h3 className="al-sub">{t('pd.routes')}</h3>
-        <p className="hint">{t('pd.routes.hint')}</p>
-        {draft.routes.map((r, i) => (
-          <div key={r.key} className="al-route">
-            <Field label={t('pd.route.name')}>{(id) => <Input id={id} value={r.name} onChange={(e) => setRoute(i, { name: e.target.value })} />}</Field>
-            <Field label={t('pd.route.service')}>
-              {(id) => (
-                <Select id={id} value={r.service_id} onChange={(e) => setRoute(i, { service_id: e.target.value })}>
-                  <option value="">{t('pd.route.any')}</option>
-                  {(refs.data?.services ?? []).map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </Field>
-            <Field label={t('pd.route.team')}>
-              {(id) => (
-                <Select id={id} value={r.team_id} onChange={(e) => setRoute(i, { team_id: e.target.value })}>
-                  <option value="">{t('pd.route.any')}</option>
-                  {(refs.data?.teams ?? []).map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </Field>
-            {servicePicker(r.pd_service_id, (pd_service_id) => setRoute(i, { pd_service_id, routing_key: '' }), t('pd.service'))}
-            {(!services || !r.pd_service_id) && (
-              <Field label={t('pd.key')} hint={r.has_key && !r.routing_key ? t('keep') : undefined}>
-                {(id) => <Password id={id} value={r.routing_key} autoComplete="off" onChange={(e) => setRoute(i, { routing_key: e.target.value })} />}
-              </Field>
-            )}
-            <button type="button" className="icon-btn al-remove" aria-label={t('remove')} title={t('remove')} onClick={() => set({ routes: draft.routes.filter((_, j) => j !== i) })}>
-              <Trash2 size={16} />
-            </button>
-          </div>
-        ))}
-        <div className="row">
-          <Button
-            onClick={() =>
-              set({ routes: [...draft.routes, { key: `new-${++seq}`, id: '', name: '', team_id: '', service_id: '', routing_key: '', pd_service_id: '', has_key: false }] })
-            }
-          >
-            <Plus size={16} aria-hidden />
-            {t('pd.route.add')}
-          </Button>
-        </div>
-
-        <h3 className="al-sub">{t('pd.webhook')}</h3>
-        <Rows
-          rows={[
-            [t('pd.webhook.url'), view.webhook_url ? <code key="u">{view.webhook_url}</code> : <span className="muted">{t('pd.webhook.nourl')}</span>],
-            [
-              t('state'),
-              <span key="w" className={`pill pill-${view.webhook_subscription_id || view.has_webhook_secret ? 'ok' : 'off'}`}>
-                {t(view.webhook_subscription_id || view.has_webhook_secret ? 'pd.webhook.on' : 'pd.webhook.off')}
-              </span>,
-            ],
-          ]}
-        />
-        {view.webhook_url && view.has_api_token && (
-          <div className="row">
-            <Button busy={other.busy} disabled={dirty} onClick={() => void call('POST', '/api/pagerduty/subscription', t('saved'))}>
-              {t('pd.webhook.subscribe')}
-            </Button>
-            {view.webhook_subscription_id && (
-              <Button busy={other.busy} disabled={dirty} onClick={() => void call('DELETE', '/api/pagerduty/subscription', t('saved'))}>
-                {t('pd.webhook.unsubscribe')}
-              </Button>
-            )}
-          </div>
-        )}
-        <Field label={t('pd.webhook.secret')} hint={view.has_webhook_secret && !draft.webhook_secret ? t('keep') : t('pd.webhook.secret.hint')}>
-          {(id) => <Password id={id} value={draft.webhook_secret} autoComplete="off" onChange={(e) => set({ webhook_secret: e.target.value })} />}
-        </Field>
-      </fieldset>
-      {other.notice && <Banner kind="ok" title={other.notice} />}
-      {other.error && (
-        <Banner kind="error" title={other.error.message}>
-          {other.error.detail}
-        </Banner>
-      )}
-    </ProfileCard>
+        </AnimatePresence>
+      </ProfileCard>
+    </>
   )
 }

@@ -66,6 +66,13 @@ export const strings: Dict = {
     'pd.test': 'Send a test incident',
     'pd.test.ok': 'A test incident was triggered and resolved in PagerDuty.',
 
+    'pd.settings': 'PagerDuty settings',
+    'pd.set': 'Integration key set',
+    'pd.notset': 'Not set',
+    'pd.off': 'PagerDuty is off. Its settings are kept and apply again when it is turned on.',
+    'nt.settings': 'Channels',
+    'nt.extra.n.emails': '{n} addresses',
+    'nt.extra.n.chats': '{n} chats',
     'nt.title': 'Backup notification',
     'nt.text':
       'When PagerDuty has not taken an error or critical incident in two minutes, the team of its business service (or the people responsible for the CI) get it by mail and from the Telegram bot, with a link that acknowledges it.',
@@ -192,6 +199,13 @@ export const strings: Dict = {
     'pd.test': 'Отправить тестовый инцидент',
     'pd.test.ok': 'Тестовый инцидент открыт и решён в PagerDuty.',
 
+    'pd.settings': 'Настройки PagerDuty',
+    'pd.set': 'Ключ интеграции задан',
+    'pd.notset': 'Не задана',
+    'pd.off': 'PagerDuty выключен. Настройки сохраняются и снова действуют после включения.',
+    'nt.settings': 'Каналы',
+    'nt.extra.n.emails': 'адресов: {n}',
+    'nt.extra.n.chats': 'чатов: {n}',
     'nt.title': 'Резервное оповещение',
     'nt.text':
       'Если PagerDuty за две минуты не принял инцидент уровня «ошибка» или «критично», команда его бизнес-сервиса (или ответственные за КЕ) получают его по почте и от Telegram-бота со ссылкой для подтверждения.',
