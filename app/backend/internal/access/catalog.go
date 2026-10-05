@@ -31,6 +31,7 @@ const (
 	View = "view"
 
 	GroupMain     = "main"
+	GroupOverview = "overview"
 	GroupAuto     = "automation"
 	GroupOrg      = "org"
 	GroupSettings = "settings"
@@ -45,12 +46,17 @@ var (
 
 var groups = []Group{
 	{GroupMain, Text{"Monitoring", "Мониторинг"}},
+	{GroupOverview, Text{"Overview", "Обзор"}},
 	{GroupAuto, Text{"Automation", "Автоматизация"}},
 	{GroupOrg, Text{"Organization", "Организация"}},
 	{GroupSettings, Text{"Settings", "Настройки"}},
 }
 
 var pages = []Page{
+	{"cis", GroupOverview, Text{"Configuration items", "Конфигурационные единицы"}, []Feature{
+		view,
+		{"edit", Text{"Create, change and delete configuration items, also in NetBox", "Создание, изменение и удаление КЕ, в том числе в NetBox"}},
+	}},
 	{"connectors", GroupAuto, Text{"Connectors", "Коннекторы"}, []Feature{
 		view,
 		{"edit", Text{"Create and change drafts, samples and test runs", "Создание и изменение черновиков, образцов и тестовых прогонов"}},
@@ -60,6 +66,12 @@ var pages = []Page{
 	{"credentials", GroupAuto, Text{"Credentials", "Учётные данные"}, []Feature{
 		view,
 		{"edit", Text{"Create, replace and delete credentials", "Создание, замена и удаление учётных данных"}},
+	}},
+	{"netbox", GroupAuto, Text{"NetBox", "NetBox"}, []Feature{
+		view,
+		test,
+		{"edit", Text{"Change the connection and synchronization settings", "Изменение подключения и настроек синхронизации"}},
+		{"sync", Text{"Run synchronization", "Запуск синхронизации"}},
 	}},
 	{"users", GroupOrg, Text{"Users", "Пользователи"}, []Feature{
 		view,

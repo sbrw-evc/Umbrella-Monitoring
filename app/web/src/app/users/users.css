@@ -146,7 +146,8 @@
 }
 
 .usr-source-ldap,
-.usr-source-entra {
+.usr-source-entra,
+.usr-source-netbox {
   background: var(--accent-soft);
   color: var(--accent);
   border-color: transparent;

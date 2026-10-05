@@ -3,6 +3,7 @@ import type { Dict } from '../i18n'
 export const navStrings: Dict = {
   en: {
     'nav.label': 'Sections',
+    'group.overview': 'Overview',
     'group.automation': 'Automation',
     'group.org': 'Organization',
     'group.settings': 'Settings',
@@ -10,6 +11,10 @@ export const navStrings: Dict = {
     'page.connectors': 'Connectors',
     'page.credentials': 'Credentials',
     'page.credentials.subtitle': 'Tokens, passwords and keys that connectors use to check incoming requests. Secrets are stored in OpenBao and never shown again.',
+    'page.cis': 'Configuration items',
+    'page.cis.subtitle': 'Devices, virtual machines and services monitoring refers to, with the people responsible for them.',
+    'page.netbox': 'NetBox',
+    'page.netbox.subtitle': 'Import of configuration items and responsible people from NetBox, registration of new items there and matching with the domain controller.',
     'page.users': 'Users',
     'page.users.subtitle': 'Local and directory accounts, their roles, teams and access.',
     'page.roles': 'Roles',
@@ -26,6 +31,7 @@ export const navStrings: Dict = {
   },
   ru: {
     'nav.label': 'Разделы',
+    'group.overview': 'Обзор',
     'group.automation': 'Автоматизация',
     'group.org': 'Организация',
     'group.settings': 'Настройки',
@@ -33,6 +39,10 @@ export const navStrings: Dict = {
     'page.connectors': 'Коннекторы',
     'page.credentials': 'Учётные данные',
     'page.credentials.subtitle': 'Токены, пароли и ключи, которыми коннекторы проверяют входящие запросы. Секреты хранятся в OpenBao и больше не показываются.',
+    'page.cis': 'Каталог КЕ',
+    'page.cis.subtitle': 'Устройства, виртуальные машины и сервисы, к которым привязан мониторинг, и ответственные за них.',
+    'page.netbox': 'NetBox',
+    'page.netbox.subtitle': 'Загрузка КЕ и ответственных из NetBox, регистрация новых КЕ в NetBox и сверка с контроллером домена.',
     'page.users': 'Пользователи',
     'page.users.subtitle': 'Локальные учётные записи и учётные записи каталога, их роли, команды и доступ.',
     'page.roles': 'Роли',

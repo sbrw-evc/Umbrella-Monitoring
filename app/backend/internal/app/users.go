@@ -191,6 +191,16 @@ func (s *UserService) syncExternal(source, externalID string, id directory.Ident
 	var out model.User
 	s.st.Write(func(d *store.Data) {
 		x := d.UserByName(id.Username)
+		if x == nil && profile.Email != "" {
+			// A person first seen as a NetBox contact takes over that account on first sign-in.
+			if c := userByEmail(d, profile.Email); c != nil && c.Source == model.SourceNetBox {
+				c.Username = id.Username
+				x = c
+			}
+		}
+		if x != nil && x.Source == model.SourceNetBox && !x.Disabled {
+			x.Source, x.ExternalID = source, externalID
+		}
 		if x == nil {
 			x = &model.User{ID: d.NextID("USR"), Username: id.Username, Source: source, ExternalID: externalID, CreatedAt: now}
 			d.Users[x.ID] = x
