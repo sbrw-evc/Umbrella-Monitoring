@@ -109,7 +109,7 @@ function Body({ ci }: { ci: CI }) {
     ),
   ])
   if (ci.directory) rows.push([t('ci.field.directory'), <Directory key="d" ci={ci} />])
-  if (ci.monitoring.length > 0 || ci.not_monitored) rows.push([t('ci.field.monitoring'), <Monitors key="m" ci={ci} />])
+  if (ci.presence.length > 0) rows.push([t('ci.field.presence'), <PresenceList key="p" ci={ci} />])
   rows.push(
     [t('ci.field.id'), <code key="i">{ci.id}</code>],
     [t('ci.field.created'), `${formatDate(ci.created_at, locale, timezone)} · ${ci.created_by}`],
@@ -166,22 +166,34 @@ function Directory({ ci }: { ci: CI }) {
   )
 }
 
-function Monitors({ ci }: { ci: CI }) {
+function PresenceList({ ci }: { ci: CI }) {
   const t = useT(strings)
-  if (ci.monitoring.length === 0) return <span className="pill pill-warn">{t('ci.mon.none')}</span>
   return (
     <ul className="ci-monitors">
-      {ci.monitoring.map((m) => (
-        <li key={m.source_id + '/' + m.key}>
-          <MonitorState state={m.state} /> <span className="cn-name">{m.source_name}</span>
-          {' · '}
-          {m.url ? (
-            <a href={m.url} target="_blank" rel="noopener noreferrer">
-              {m.name || m.host}
-              <ExternalLink size={13} aria-hidden />
-            </a>
+      {ci.presence.map((p) => (
+        <li key={p.kind + (p.source_id ?? '')}>
+          {p.state === 'present' ? (
+            p.host_state && p.kind !== 'netbox' ? (
+              <MonitorState state={p.host_state} />
+            ) : (
+              <span className="pill pill-ok">{t('ci.presence.yes')}</span>
+            )
           ) : (
-            m.name || m.host
+            <span className="pill pill-off">{t('ci.presence.no')}</span>
+          )}{' '}
+          <span className="cn-name">{p.name}</span>
+          {p.detail && (
+            <>
+              {' · '}
+              {p.url ? (
+                <a href={p.url} target="_blank" rel="noopener noreferrer">
+                  {p.detail}
+                  <ExternalLink size={13} aria-hidden />
+                </a>
+              ) : (
+                <span className="muted">{p.detail}</span>
+              )}
+            </>
           )}
         </li>
       ))}

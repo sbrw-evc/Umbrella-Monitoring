@@ -55,6 +55,7 @@ type Host = {
   ci?: Ref
   match: string
   candidates: Ref[]
+  also_in: { source_id: string; source_name: string; key: string; host: string }[]
 }
 type Summary = { total: number; matched: number; unmatched: number; ambiguous: number; excluded: number }
 type HostList = { items: Host[]; summary: Summary; limited: boolean }
@@ -374,7 +375,12 @@ function HostCI({ h }: { h: Host }) {
         <div className="muted rl-sub">{h.candidates.map((c) => c.name).join(', ')}</div>
       </div>
     )
-  return <span className="pill pill-warn">{t('mon.match.none')}</span>
+  return (
+    <div>
+      <span className="pill pill-warn">{t('mon.match.none')}</span>
+      {h.also_in.length > 0 && <div className="muted rl-sub">{t('mon.also', { list: h.also_in.map((o) => `${o.source_name}: ${o.host}`).join(', ') })}</div>}
+    </div>
+  )
 }
 
 function LinkDialog({ host, onClose, onSaved }: { host: Host | null; onClose: () => void; onSaved: () => void }) {
@@ -492,6 +498,7 @@ function CreateDialog({ host, onClose, onSaved }: { host: Host | null; onClose: 
       {host && (
         <div className="stack">
           <p className="muted">{t('mon.create.text', { name: host.host || host.name })}</p>
+          {host.also_in.length > 0 && <p className="hint">{t('mon.create.also', { list: host.also_in.map((o) => `${o.source_name}: ${o.host}`).join(', ') })}</p>}
           <Field label={t('mon.create.kind')}>
             {(id) => (
               <Select id={id} value={kind} onChange={(e) => setKind(e.target.value)}>

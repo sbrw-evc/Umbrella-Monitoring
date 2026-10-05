@@ -91,3 +91,15 @@ button.ci-tile:hover {
 .ci-table .cn-name {
   text-align: left;
 }
+
+.ci-presence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ci-absent {
+  background: var(--surface-2);
+  color: var(--muted);
+  text-decoration: line-through;
+}

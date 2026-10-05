@@ -122,9 +122,14 @@ func TestMonitoringMatchesHostsWithCIs(t *testing.T) {
 		t.Fatalf("without sources coverage is not judged: %+v", list.Summary)
 	}
 
+	// One machine both systems see, unknown to the catalog.
+	f.zbx.AddHost(7, "kiosk-07", "Lobby kiosk", false, nil, monitoringtest.Iface("172.16.9.7", "", 1))
+	f.prom.Target("node", "kiosk-07.corp.local:9100", true)
+	f.h.st.Write(func(d *store.Data) { d.Settings.NetBox.Enabled = true })
+
 	f.sources()
 	l := f.hosts("")
-	if l.Summary.Total != 9 {
+	if l.Summary.Total != 11 {
 		t.Fatalf("hosts: %+v", l.Summary)
 	}
 	want := map[string][2]string{
@@ -154,7 +159,7 @@ func TestMonitoringMatchesHostsWithCIs(t *testing.T) {
 	if v := byHost(l, "10.0.0.3"); v.CI == nil || v.CI.ID != sw || v.Match != app.MatchIP {
 		t.Errorf("a host named by its IP address: %+v", v)
 	}
-	if un := f.hosts("?match=unmatched"); un.Summary.Unmatched != 3 || len(un.Items) != 3 {
+	if un := f.hosts("?match=unmatched"); un.Summary.Unmatched != 5 || len(un.Items) != 5 {
 		t.Errorf("unmatched: %+v", un)
 	}
 
@@ -162,6 +167,33 @@ func TestMonitoringMatchesHostsWithCIs(t *testing.T) {
 	f.expect(http.MethodGet, "/api/cis/"+db, nil, http.StatusOK, &ci)
 	if len(ci.Monitoring) != 2 || ci.NotMonitored {
 		t.Errorf("db coverage: %+v", ci.Monitoring)
+	}
+	// Where the item is and where it is not: NetBox is connected but the item is local.
+	states := map[string]string{}
+	for _, p := range ci.Presence {
+		states[p.Name] = p.State
+	}
+	if len(ci.Presence) != 3 || states["NetBox"] != "missing" || states["Zabbix"] != "present" || states["Prometheus"] != "present" {
+		t.Errorf("db presence: %+v", ci.Presence)
+	}
+	f.expect(http.MethodGet, "/api/cis/"+lonely, nil, http.StatusOK, &ci)
+	states = map[string]string{}
+	for _, p := range ci.Presence {
+		states[p.Name] = p.State
+	}
+	if states["Zabbix"] != "missing" || states["Prometheus"] != "missing" {
+		t.Errorf("lonely presence: %+v", ci.Presence)
+	}
+
+	// The kiosk is one machine: creating its item from Zabbix links the Prometheus host too.
+	kiosk := byHost(l, "kiosk-07")
+	if len(kiosk.AlsoIn) != 1 || kiosk.AlsoIn[0].SourceID != f.psrc.ID {
+		t.Fatalf("same machine: %+v", kiosk.AlsoIn)
+	}
+	var kci app.CIView
+	f.expect(http.MethodPost, "/api/monitoring/ci", app.CreateCIInput{SourceID: kiosk.SourceID, Key: kiosk.Key}, http.StatusCreated, &kci)
+	if len(kci.Monitoring) != 2 {
+		t.Fatalf("one item for both systems: %+v", kci.Monitoring)
 	}
 	f.expect(http.MethodGet, "/api/cis?flag=not_monitored", nil, http.StatusOK, &list)
 	ids := []string{}
