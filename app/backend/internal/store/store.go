@@ -22,6 +22,8 @@ type Data struct {
 	Maintenance   map[string]*model.Maintenance
 	MetricSources map[string]*model.MetricSource
 	Rules         map[string]*model.Rule
+	// MonitoringSources are the Zabbix and Prometheus systems hosts are read from.
+	MonitoringSources map[string]*model.MonitoringSource
 	// NetBoxContacts maps NetBox contact IDs to the user accounts made or found for them.
 	NetBoxContacts map[int]string
 	NetBoxSync     model.SyncState
@@ -86,6 +88,9 @@ func (d *Data) init() {
 	}
 	if d.Rules == nil {
 		d.Rules = map[string]*model.Rule{}
+	}
+	if d.MonitoringSources == nil {
+		d.MonitoringSources = map[string]*model.MonitoringSource{}
 	}
 	if d.NetBoxContacts == nil {
 		d.NetBoxContacts = map[int]string{}

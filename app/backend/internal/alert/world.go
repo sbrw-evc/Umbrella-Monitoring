@@ -32,6 +32,23 @@ func EventKeys(v string) []string {
 	return keys
 }
 
+// CIKeys are the names a configuration item is known by: its name, the short host name, its
+// IP addresses and the DNS name the domain controller has for it. Events and the hosts of
+// monitoring systems are matched against them with EventKeys.
+func CIKeys(ci *model.ConfigItem) []string {
+	keys := []string{ci.Name}
+	if net.ParseIP(ci.Name) == nil {
+		if short, _, ok := strings.Cut(ci.Name, "."); ok {
+			keys = append(keys, short)
+		}
+	}
+	keys = append(keys, ci.IPs...)
+	if ci.Directory != nil && ci.Directory.DNSName != "" {
+		keys = append(keys, ci.Directory.DNSName)
+	}
+	return keys
+}
+
 // world is what the engine needs from the catalog for one batch of events: configuration
 // items and how events name them, services, teams, people and maintenance windows. It is a
 // copy, so the engine does not hold the store lock while it talks to the database.
@@ -59,17 +76,8 @@ func snapshot(st *store.Store) *world {
 			c.Owners = slices.Clone(ci.Owners)
 			w.cis[id] = c
 			add(ci.ID, id)
-			add(ci.Name, id)
-			if net.ParseIP(ci.Name) == nil {
-				if short, _, ok := strings.Cut(ci.Name, "."); ok {
-					add(short, id)
-				}
-			}
-			for _, ip := range ci.IPs {
-				add(ip, id)
-			}
-			if ci.Directory != nil {
-				add(ci.Directory.DNSName, id)
+			for _, k := range CIKeys(ci) {
+				add(k, id)
 			}
 		}
 		for _, s := range d.Services {
