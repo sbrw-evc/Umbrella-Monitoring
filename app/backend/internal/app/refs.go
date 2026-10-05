@@ -49,8 +49,42 @@ func (a *App) registerRefs(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/access/catalog", a.authed(a.catalog))
 }
 
+// refsAudience lists, per section of GET /api/refs, the permissions whose
+// pages read that section. A caller gets a section when holding any of them;
+// other sections come back as empty arrays so pages degrade instead of failing.
+//
+//	users    — Users (count), Teams and Roles (member pickers), CI editor (owners)
+//	roles    — Users (role filter/editor), LDAP/Entra group mapping
+//	teams    — Users, Teams, Services (owner tree), Incidents (team filter),
+//	           Alerting (PagerDuty routing), LDAP/Entra group mapping
+//	services — Alerting (PagerDuty routing)
+var refsAudience = struct{ users, roles, teams, services []string }{
+	users:    []string{"users:view", "teams:view", "roles:view", "cis:edit"},
+	roles:    []string{"users:view", "roles:view", "settings.ldap:view"},
+	teams:    []string{"users:view", "teams:view", "services:view", "incidents:view", "settings.alerting:view", "settings.ldap:view"},
+	services: []string{"settings.alerting:view"},
+}
+
+func hasAny(perms access.Set, want []string) bool {
+	return slices.ContainsFunc(want, perms.Has)
+}
+
 func (a *App) refs(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, a.collectRefs())
+	perms := a.access.Permissions(current(r).user)
+	out := a.collectRefs()
+	if !hasAny(perms, refsAudience.users) {
+		out.Users = []UserRef{}
+	}
+	if !hasAny(perms, refsAudience.roles) {
+		out.Roles = []RoleRef{}
+	}
+	if !hasAny(perms, refsAudience.teams) {
+		out.Teams = []TeamRef{}
+	}
+	if !hasAny(perms, refsAudience.services) {
+		out.Services = []ServiceRef{}
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 func (a *App) catalog(w http.ResponseWriter, r *http.Request) {
