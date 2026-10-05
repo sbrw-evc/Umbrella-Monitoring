@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -14,6 +15,7 @@ func (a *App) registerServices(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/services/{id}", a.authed(a.can("services:edit", a.updateService)))
 	mux.HandleFunc("DELETE /api/services/{id}", a.authed(a.can("services:edit", a.deleteService)))
 	mux.HandleFunc("POST /api/services/{id}/cis", a.authed(a.can("services:edit", a.bindCIs)))
+	mux.HandleFunc("POST /api/services/bulk/cis", a.authed(a.can("services:edit", a.bulkCIs)))
 	mux.HandleFunc("DELETE /api/services/{id}/cis/{ci}", a.authed(a.can("services:edit", a.unbindCI)))
 	mux.HandleFunc("POST /api/services/{id}/dependencies", a.authed(a.can("services:edit", a.bindDependencies)))
 	mux.HandleFunc("DELETE /api/services/{id}/dependencies/{dep}", a.authed(a.can("services:edit", a.unbindDependency)))
@@ -126,5 +128,15 @@ func (a *App) linkServiceNetBox(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) unlinkServiceNetBox(w http.ResponseWriter, r *http.Request) {
 	out, err := a.services.UnlinkNetBox(r.Context(), current(r).user.Username, r.PathValue("id"))
+	respondService(w, http.StatusOK, out, err)
+}
+
+func (a *App) bulkCIs(w http.ResponseWriter, r *http.Request) {
+	var in BulkCIsInput
+	if !httpx.Decode(w, r, &in) {
+		return
+	}
+	// The batch finishes even if the browser stops waiting.
+	out, err := a.services.BulkCIs(context.WithoutCancel(r.Context()), current(r).user.Username, in)
 	respondService(w, http.StatusOK, out, err)
 }

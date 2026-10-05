@@ -5,6 +5,9 @@ import { ErrorBanner } from '../../connections/ConnectionCard'
 import { useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
 import { Button, Input, Select } from '../../ui'
+import { BindServicesDialog, type BindAction } from '../bulk/BulkDialogs'
+import { strings as bulkStrings } from '../bulk/strings'
+import { mergeDicts } from '../../connections/connectionStrings'
 import { useSession } from '../session'
 import { PresenceCell, SourcePill, StatusPill } from './Badges'
 import { CIDetail } from './CIDetail'
@@ -14,6 +17,9 @@ import { FLAGS, KINDS, NO_FILTERS, queryOf, SOURCES, STATUSES, type CI, type CIL
 import '../services/services.css'
 import '../connectors/connectors.css'
 import './cis.css'
+import '../bulk/bulk.css'
+
+const pageStrings = mergeDicts(strings, bulkStrings)
 
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value)
@@ -25,9 +31,12 @@ function useDebounced<T>(value: T, ms: number) {
 }
 
 export function CIsPage() {
-  const t = useT(strings)
+  const t = useT(pageStrings)
   const { can } = useSession()
   const editable = can('cis:edit')
+  const binder = can('services:edit') && can('services:view')
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const [binding, setBinding] = useState<BindAction | null>(null)
   const [epoch, setEpoch] = useState(0)
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const [selected, setSelected] = useState<CI | null>(null)
@@ -66,7 +75,18 @@ export function CIsPage() {
           <FilterSelect label={t('ci.filter.source')} value={filters.source} values={SOURCES} prefix="ci.source" onChange={(source) => set({ source })} />
         </div>
         <div className="svc-toolbar-row">
-          <span />
+          {binder && checked.size > 0 ? (
+            <div className="bulk-bar">
+              <span className="muted">{t('bulk.selected', { n: checked.size })}</span>
+              <Button onClick={() => setBinding('bind')}>{t('bulk.bind')}</Button>
+              <Button onClick={() => setBinding('unbind')}>{t('bulk.unbind')}</Button>
+              <Button variant="ghost" onClick={() => setChecked(new Set())}>
+                {t('bulk.clear')}
+              </Button>
+            </div>
+          ) : (
+            <span />
+          )}
           <div className="row">
             {filtered && (
               <Button variant="ghost" onClick={() => setFilters(NO_FILTERS)}>
@@ -88,7 +108,13 @@ export function CIsPage() {
           </motion.div>
         ) : (
           <motion.div key="list" className="card cn-table-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <CITable items={items} presence={items.some((ci) => ci.presence.length > 0)} onOpen={setSelected} />
+            <CITable
+              items={items}
+              presence={items.some((ci) => ci.presence.length > 0)}
+              onOpen={setSelected}
+              checked={binder ? checked : null}
+              onCheck={setChecked}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -121,10 +147,13 @@ export function CIsPage() {
           reload()
         }}
       />
+      <BindServicesDialog action={binding} ciIDs={[...checked]} onClose={() => setBinding(null)} onDone={reload} />
       <DeleteDialog
         ci={deleting}
         onClose={() => setDeleting(null)}
         onDeleted={() => {
+          const gone = deleting?.id
+          setChecked((c) => new Set([...c].filter((id) => id !== gone)))
           setDeleting(null)
           reload()
         }}
@@ -197,12 +226,47 @@ function Tiles({ summary, flag, onFlag }: { summary: Summary; flag: string; onFl
   )
 }
 
-function CITable({ items, presence, onOpen }: { items: CI[]; presence: boolean; onOpen: (ci: CI) => void }) {
-  const t = useT(strings)
+function CITable({
+  items,
+  presence,
+  onOpen,
+  checked,
+  onCheck,
+}: {
+  items: CI[]
+  presence: boolean
+  onOpen: (ci: CI) => void
+  // checked is null when the items cannot be selected.
+  checked: Set<string> | null
+  onCheck: (s: Set<string>) => void
+}) {
+  const t = useT(pageStrings)
+  const allChecked = checked !== null && items.length > 0 && items.every((ci) => checked.has(ci.id))
+  const toggleAll = () => {
+    if (!checked) return
+    const n = new Set(checked)
+    for (const ci of items) {
+      if (allChecked) n.delete(ci.id)
+      else n.add(ci.id)
+    }
+    onCheck(n)
+  }
+  const toggle = (id: string) => {
+    if (!checked) return
+    const n = new Set(checked)
+    if (n.has(id)) n.delete(id)
+    else n.add(id)
+    onCheck(n)
+  }
   return (
     <table className="cn-table ci-table">
       <thead>
         <tr>
+          {checked && (
+            <th className="bulk-check">
+              <input type="checkbox" aria-label={t('bulk.selectAll')} checked={allChecked} onChange={toggleAll} />
+            </th>
+          )}
           <th>{t('ci.col.name')}</th>
           <th>{t('ci.col.kind')}</th>
           <th>{t('ci.col.status')}</th>
@@ -215,6 +279,11 @@ function CITable({ items, presence, onOpen }: { items: CI[]; presence: boolean; 
       <tbody>
         {items.map((ci) => (
           <tr key={ci.id}>
+            {checked && (
+              <td className="bulk-check">
+                <input type="checkbox" aria-label={t('bulk.selectOne', { name: ci.name })} checked={checked.has(ci.id)} onChange={() => toggle(ci.id)} />
+              </td>
+            )}
             <td>
               <button type="button" className="cn-link cn-name" onClick={() => onOpen(ci)}>
                 {ci.name}

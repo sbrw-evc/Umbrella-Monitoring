@@ -17,6 +17,7 @@ func (a *App) registerMonitoring(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/monitoring/hosts", a.authed(a.can("monitoring:view", a.monitoringHosts)))
 	mux.HandleFunc("POST /api/monitoring/link", a.authed(a.can("monitoring:link", a.linkHost)))
 	mux.HandleFunc("POST /api/monitoring/ci", a.authed(a.can("monitoring:link", a.can("cis:edit", a.createCIFromHost))))
+	mux.HandleFunc("POST /api/monitoring/ci/bulk", a.authed(a.can("monitoring:link", a.can("cis:edit", a.bulkCreateCIs))))
 }
 
 func (a *App) monitoringView(w http.ResponseWriter, r *http.Request) {
@@ -85,4 +86,14 @@ func (a *App) createCIFromHost(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.monitoring.CreateCI(r.Context(), current(r).user.Username, in)
 	respondNetBox(w, http.StatusCreated, out, err)
+}
+
+func (a *App) bulkCreateCIs(w http.ResponseWriter, r *http.Request) {
+	var in BulkHostsInput
+	if !httpx.Decode(w, r, &in) {
+		return
+	}
+	// The batch finishes even if the browser stops waiting.
+	out, err := a.monitoring.BulkCreateCIs(context.WithoutCancel(r.Context()), current(r).user.Username, in)
+	respond(w, http.StatusOK, out, err)
 }

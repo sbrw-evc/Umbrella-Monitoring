@@ -779,26 +779,13 @@ func (s *MonitoringService) CreateCI(ctx context.Context, actor string, in Creat
 	if err != nil {
 		return CIView{}, err
 	}
-	var h model.MonitoringHost
-	var srcName string
-	err = ErrNotFound
-	s.st.Read(func(d *store.Data) {
-		src := d.MonitoringSources[in.SourceID]
-		if src == nil {
-			return
-		}
-		srcName = src.Name
-		i := slices.IndexFunc(src.Hosts, func(x model.MonitoringHost) bool { return x.Key == in.Key })
-		if i < 0 {
-			err = ErrHostNotFound
-			return
-		}
-		h, err = src.Hosts[i], nil
-	})
-	if err != nil {
-		return CIView{}, err
-	}
-	kind := in.Kind
+	return s.createCI(ctx, actor, same, in.Kind, in.Register)
+}
+
+// createCI makes the item of a host as read by host, links the host to it and the same
+// machine in the other systems too.
+func (s *MonitoringService) createCI(ctx context.Context, actor string, same HostView, kind string, register bool) (CIView, error) {
+	h := same.MonitoringHost
 	if kind == "" {
 		kind = model.CIKindDevice
 	}
@@ -811,17 +798,17 @@ func (s *MonitoringService) CreateCI(ctx context.Context, actor string, in Creat
 		desc = h.Name
 	}
 	ci, err := s.cis.Create(ctx, actor, CIInput{Name: name, Kind: kind, Status: model.CIStatusActive, Description: desc,
-		IPs: slices.Clone(h.IPs[:min(len(h.IPs), maxCIIPs)]), Register: in.Register})
+		IPs: slices.Clone(h.IPs[:min(len(h.IPs), maxCIIPs)]), Register: register})
 	if err != nil {
 		return CIView{}, err
 	}
 	s.st.Write(func(d *store.Data) {
-		if src := d.MonitoringSources[in.SourceID]; src != nil && d.ConfigItems[ci.ID] != nil {
+		if src := d.MonitoringSources[same.SourceID]; src != nil && d.ConfigItems[ci.ID] != nil {
 			if src.Links == nil {
 				src.Links = map[string]string{}
 			}
 			src.Links[h.Key] = ci.ID
-			d.AddAudit(store.AuditEntry{Actor: actor, Action: "monitoring.link", Object: src.ID, Detail: srcName + " / " + h.Host + " linked to new " + ci.ID})
+			d.AddAudit(store.AuditEntry{Actor: actor, Action: "monitoring.link", Object: src.ID, Detail: src.Name + " / " + h.Host + " linked to new " + ci.ID})
 		}
 		// The same machine in the other systems belongs to the same item.
 		for _, o := range same.AlsoIn {

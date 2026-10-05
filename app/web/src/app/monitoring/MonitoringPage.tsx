@@ -8,6 +8,8 @@ import { useLocale, useT } from '../../i18n'
 import { Banner, Button, Field, formatDate, Input, Modal, Segmented, Select, Stepper, Switch } from '../../ui'
 import { strings as ciStrings } from '../cis/strings'
 import type { CI, CIList } from '../cis/types'
+import { CreateHostsDialog, type HostKey } from '../bulk/BulkDialogs'
+import { strings as bulkStrings } from '../bulk/strings'
 import { useSession } from '../session'
 import { strings } from './strings'
 import '../services/services.css'
@@ -15,6 +17,7 @@ import '../connectors/connectors.css'
 import '../cis/cis.css'
 import '../rules/rules.css'
 import './monitoring.css'
+import '../bulk/bulk.css'
 
 type Kind = 'zabbix' | 'prometheus'
 type Sync = { started_at: string; finished_at: string; ok: boolean; error?: string; actor: string; hosts: number; version?: string }
@@ -65,6 +68,10 @@ type Report = { ok: boolean; error?: string; version?: string; hosts: number; sa
 const MATCHES = ['matched', 'unmatched', 'ambiguous', 'excluded'] as const
 const ran = (at?: string) => !!at && !at.startsWith('0001-')
 const createStrings = mergeDicts(ciStrings, strings)
+const hostStrings = mergeDicts(strings, bulkStrings)
+const hostID = (h: { source_id: string; key: string }) => h.source_id + '/' + h.key
+// creatable: a host an item can be made of.
+const creatable = (h: Host) => !h.ci && h.match !== 'excluded'
 
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value)
@@ -225,7 +232,7 @@ function StatePill({ state }: { state: string }) {
 }
 
 function HostsTab({ sources, epoch, onChanged }: { sources: Source[]; epoch: number; onChanged: () => void }) {
-  const t = useT(strings)
+  const t = useT(hostStrings)
   const { can } = useSession()
   const [match, setMatch] = useState('')
   const [source, setSource] = useState('')
@@ -239,6 +246,8 @@ function HostsTab({ sources, epoch, onChanged }: { sources: Source[]; epoch: num
   const list = useResource<HostList>(`/api/monitoring/hosts?${params}`, epoch + own)
   const [linking, setLinking] = useState<Host | null>(null)
   const [creating, setCreating] = useState<Host | null>(null)
+  const [checked, setChecked] = useState<Map<string, HostKey>>(new Map())
+  const [bulkHosts, setBulkHosts] = useState<HostKey[] | null>(null)
   const changed = () => {
     setOwn((n) => n + 1)
     onChanged()
@@ -248,6 +257,24 @@ function HostsTab({ sources, epoch, onChanged }: { sources: Source[]; epoch: num
   if (!list.data) return list.error ? <ErrorBanner error={list.error} strings={strings} /> : <p className="muted">{t('loading')}</p>
   const { items, summary } = list.data
   const filtered = match !== '' || source !== '' || q.trim() !== ''
+  const eligible = canCreate ? items.filter(creatable) : []
+  const allChecked = eligible.length > 0 && eligible.every((h) => checked.has(hostID(h)))
+  const toggleAll = () =>
+    setChecked((c) => {
+      const n = new Map(c)
+      for (const h of eligible) {
+        if (allChecked) n.delete(hostID(h))
+        else n.set(hostID(h), { source_id: h.source_id, key: h.key })
+      }
+      return n
+    })
+  const toggle = (h: Host) =>
+    setChecked((c) => {
+      const n = new Map(c)
+      if (n.has(hostID(h))) n.delete(hostID(h))
+      else n.set(hostID(h), { source_id: h.source_id, key: h.key })
+      return n
+    })
   return (
     <div className="ci-page">
       <div className="ci-tiles">
@@ -289,6 +316,18 @@ function HostsTab({ sources, epoch, onChanged }: { sources: Source[]; epoch: num
           )}
           <span className="muted svc-count">{t('mon.count', { shown: items.length, total: summary.total })}</span>
         </div>
+        {canCreate && checked.size > 0 && (
+          <div className="bulk-bar">
+            <span className="muted">{t('bulk.selected', { n: checked.size })}</span>
+            <Button variant="primary" onClick={() => setBulkHosts([...checked.values()])}>
+              <Plus size={16} />
+              {t('bulk.hosts.create')}
+            </Button>
+            <Button variant="ghost" onClick={() => setChecked(new Map())}>
+              {t('bulk.clear')}
+            </Button>
+          </div>
+        )}
       </div>
       {list.data.limited && <Banner kind="info" title={t('mon.limited', { n: items.length })} />}
       {items.length === 0 ? (
@@ -300,6 +339,11 @@ function HostsTab({ sources, epoch, onChanged }: { sources: Source[]; epoch: num
           <table className="cn-table mon-table">
             <thead>
               <tr>
+                {eligible.length > 0 && (
+                  <th className="bulk-check">
+                    <input type="checkbox" aria-label={t('bulk.selectAll')} checked={allChecked} onChange={toggleAll} />
+                  </th>
+                )}
                 <th>{t('mon.h.host')}</th>
                 <th>{t('mon.h.system')}</th>
                 <th>{t('mon.h.addresses')}</th>
@@ -310,7 +354,14 @@ function HostsTab({ sources, epoch, onChanged }: { sources: Source[]; epoch: num
             </thead>
             <tbody>
               {items.map((h) => (
-                <tr key={h.source_id + '/' + h.key}>
+                <tr key={hostID(h)}>
+                  {eligible.length > 0 && (
+                    <td className="bulk-check">
+                      {creatable(h) && (
+                        <input type="checkbox" aria-label={t('bulk.selectOne', { name: h.name || h.host })} checked={checked.has(hostID(h))} onChange={() => toggle(h)} />
+                      )}
+                    </td>
+                  )}
                   <td>
                     <div className="cn-name">
                       {h.url ? (
@@ -355,6 +406,14 @@ function HostsTab({ sources, epoch, onChanged }: { sources: Source[]; epoch: num
       )}
       <LinkDialog host={linking} onClose={() => setLinking(null)} onSaved={() => (setLinking(null), changed())} />
       <CreateDialog host={creating} onClose={() => setCreating(null)} onSaved={() => (setCreating(null), changed())} />
+      <CreateHostsDialog
+        hosts={bulkHosts}
+        onClose={() => setBulkHosts(null)}
+        onDone={() => {
+          setChecked(new Map())
+          changed()
+        }}
+      />
     </div>
   )
 }
