@@ -450,8 +450,8 @@ func init() {
 			{Key: "value", Kind: KindTemplate, Placeholder: "${value}", Title: Text{"Value", "Значение"}},
 			{Key: "dedup_key", Kind: KindTemplate,
 				Title: Text{"Deduplication key", "Ключ дедупликации"},
-				Help: Text{"Repeated deliveries with the same key update one event. Default: ID in the source and status.",
-					"Повторные доставки с тем же ключом обновляют одно событие. По умолчанию: ID в источнике и статус."}},
+				Help: Text{"Repeated deliveries with the same key update one event, and resolved replaces firing. Do not put the status in the key. Default: ID in the source, otherwise configuration item and signal.",
+					"Повторные доставки с тем же ключом обновляют одно событие, resolved заменяет firing. Не включайте статус в ключ. По умолчанию: ID в источнике, иначе КЕ и сигнал."}},
 		},
 		compile: func(c *compiler, n Node) Step {
 			title, ci, signal := c.template("title"), c.template("ci"), c.template("signal")
@@ -496,13 +496,18 @@ func init() {
 					return fmt.Errorf("status %q is neither firing nor resolved", out["status"])
 				}
 				out["status"] = st
+				// The key leaves the status out, so resolved updates the firing event of the same alert.
+				// Without a signal the title tells alerts apart; sources that reword the title on
+				// recovery need a signal or an ID.
 				switch k := render(key); {
 				case k != "":
 					out["key"] = eventKey("k", k)
 				case out["external_id"] != "":
-					out["key"] = eventKey("x", out["external_id"].(string), st)
+					out["key"] = eventKey("x", out["external_id"].(string))
+				case out["signal"] != "":
+					out["key"] = eventKey("s", out["ci"].(string), out["signal"].(string))
 				default:
-					out["key"] = eventKey("e", out["ci"].(string), out["signal"].(string), out["title"].(string), st)
+					out["key"] = eventKey("e", out["ci"].(string), out["title"].(string))
 				}
 				emit(OutMain, Record{Data: out, Raw: r.Raw, Lineage: r.Lineage})
 				return nil

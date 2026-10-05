@@ -257,21 +257,24 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 	inserted := 0
 	for _, e := range res.Events {
 		labels, _ := json.Marshal(e.Event.Labels)
-		var fresh bool
-		err := tx.QueryRow(ctx, `INSERT INTO connector_events AS ce (connector_id, version, key, title, ci, signal, method, severity, status,
+		// changed: the first delivery of the alert or a change of its status or severity. The
+		// rest are duplicates (prev is read before the upsert, in the same snapshot).
+		var changed bool
+		err := tx.QueryRow(ctx, `WITH prev AS (SELECT status, severity FROM connector_events WHERE connector_id = $1 AND key = $3)
+			INSERT INTO connector_events AS ce (connector_id, version, key, title, ci, signal, method, severity, status,
 				external_id, value, labels, request_id, request_at, item)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 			ON CONFLICT (connector_id, key) DO UPDATE SET version = EXCLUDED.version, title = EXCLUDED.title, ci = EXCLUDED.ci,
 				signal = EXCLUDED.signal, method = EXCLUDED.method, severity = EXCLUDED.severity, status = EXCLUDED.status,
 				external_id = EXCLUDED.external_id, value = EXCLUDED.value, labels = EXCLUDED.labels, request_id = EXCLUDED.request_id,
 				request_at = EXCLUDED.request_at, item = EXCLUDED.item, last_seen = now(), seen = ce.seen + 1
-			RETURNING (xmax = 0)`,
+			RETURNING coalesce((SELECT status <> $9 OR severity <> $8 FROM prev), true)`,
 			r.ConnectorID, version, e.Event.Key, e.Event.Title, e.Event.CI, e.Event.Signal, e.Event.Method, e.Event.Severity, e.Event.Status,
-			e.Event.ExternalID, e.Event.Value, labels, r.ID, r.ReceivedAt, e.Lineage.Item).Scan(&fresh)
+			e.Event.ExternalID, e.Event.Value, labels, r.ID, r.ReceivedAt, e.Lineage.Item).Scan(&changed)
 		if err != nil {
 			return err
 		}
-		if fresh {
+		if changed {
 			inserted++
 		} else {
 			st.duplicates++
