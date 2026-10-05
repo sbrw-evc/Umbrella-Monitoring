@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react'
-import { Activity, Boxes, Briefcase, Cable, Database, KeyRound, LockKeyhole, Network, Server, ShieldCheck, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
+import { Activity, BellRing, Boxes, Briefcase, Cable, Database, KeyRound, LockKeyhole, Network, Server, ShieldCheck, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
 import { CIsPage } from './cis/CIsPage'
+import { IncidentsPage } from './incidents/IncidentsPage'
 import { CMDBMapPage } from './cmdb/CMDBMapPage'
 import { ConnectorsPage } from './connectors/ConnectorsPage'
 import { CredentialsPage } from './connectors/CredentialsPage'
@@ -35,6 +36,7 @@ export const SETTINGS_PATH = '/settings'
 const MOVED: Record<string, string> = { '/status': '/settings/status' }
 
 export const PAGES: PageDef[] = [
+  { id: 'incidents', path: '/incidents', group: 'main', icon: BellRing, Component: IncidentsPage, subtitle: 'page.incidents.subtitle' },
   { id: 'services', path: '/services', group: 'overview', icon: Briefcase, Component: ServicesPage, subtitle: 'page.services.subtitle' },
   { id: 'cis', path: '/cis', group: 'overview', icon: Boxes, Component: CIsPage, subtitle: 'page.cis.subtitle' },
   { id: 'cmdb', path: '/cmdb', group: 'overview', icon: Waypoints, Component: CMDBMapPage, subtitle: 'page.cmdb.subtitle' },

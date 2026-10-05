@@ -13,6 +13,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/flow"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
 var errAlertsNotReady = errors.New("the alert tables are not ready yet")
@@ -77,6 +78,8 @@ type incidentView struct {
 	Alert    alert.Alert   `json:"alert"`
 	Timeline []alert.Entry `json:"timeline"`
 	Grafana  string        `json:"grafana_url,omitempty"`
+	// Connectors names the connectors of the sources.
+	Connectors map[string]string `json:"connectors"`
 }
 
 func (a *App) getIncident(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +91,15 @@ func (a *App) getIncident(w http.ResponseWriter, r *http.Request) {
 		alertError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, incidentView{Alert: al, Timeline: entries, Grafana: a.grafanaLink(al)})
+	names := map[string]string{}
+	a.deps.Store.Read(func(d *store.Data) {
+		for _, src := range al.Sources {
+			if c := d.Connectors[src.ConnectorID]; c != nil {
+				names[src.ConnectorID] = c.Name
+			}
+		}
+	})
+	httpx.JSON(w, http.StatusOK, incidentView{Alert: al, Timeline: entries, Grafana: a.grafanaLink(al), Connectors: names})
 }
 
 type actInput struct {
