@@ -15,13 +15,27 @@ export function SourcePill({ ci }: { ci: CI }) {
   return <span className={`pill ci-source ci-source-${ci.source}`}>{t(key)}</span>
 }
 
-// MonitoringCell: the systems that cover the item, or a warning when none does.
-export function MonitoringCell({ ci }: { ci: CI }) {
+// PresenceCell: the systems the item is in (filled) and those it is missing from (struck out).
+export function PresenceCell({ ci }: { ci: CI }) {
   const t = useT(strings)
-  if (ci.monitoring.length === 0) return ci.not_monitored ? <span className="pill pill-warn">{t('ci.mon.not')}</span> : <span className="muted">{t('ci.none')}</span>
-  const names = [...new Set(ci.monitoring.map((m) => m.source_name))]
-  const tone = ci.monitoring.some((m) => m.state === 'down') ? 'error' : ci.monitoring.some((m) => m.state === 'partial') ? 'warn' : 'ok'
-  return <span className={`pill pill-${tone}`}>{names.join(', ')}</span>
+  if (ci.presence.length === 0) return <span className="muted">{t('ci.none')}</span>
+  return (
+    <div className="ci-presence">
+      {ci.presence.map((p) => (
+        <span
+          key={p.kind + (p.source_id ?? '')}
+          className={`pill ${p.state === 'present' ? `pill-${tone(p.host_state)}` : 'ci-absent'}`}
+          title={t(p.state === 'present' ? 'ci.presence.in' : 'ci.presence.out', { name: p.name })}
+        >
+          {p.kind === 'directory' ? 'AD' : p.name}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function tone(state?: string) {
+  return state === 'down' ? 'error' : state === 'partial' || state === 'disabled' ? 'warn' : 'ok'
 }
 
 export function MonitorState({ state }: { state: string }) {

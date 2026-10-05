@@ -6,7 +6,7 @@ import { useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
 import { Button, Input, Select } from '../../ui'
 import { useSession } from '../session'
-import { MonitoringCell, SourcePill, StatusPill } from './Badges'
+import { PresenceCell, SourcePill, StatusPill } from './Badges'
 import { CIDetail } from './CIDetail'
 import { CIEditor, DeleteDialog } from './CIEditor'
 import { strings } from './strings'
@@ -88,7 +88,7 @@ export function CIsPage() {
           </motion.div>
         ) : (
           <motion.div key="list" className="card cn-table-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <CITable items={items} monitoring={summary.monitoring_sources > 0} onOpen={setSelected} />
+            <CITable items={items} presence={items.some((ci) => ci.presence.length > 0)} onOpen={setSelected} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -197,7 +197,7 @@ function Tiles({ summary, flag, onFlag }: { summary: Summary; flag: string; onFl
   )
 }
 
-function CITable({ items, monitoring, onOpen }: { items: CI[]; monitoring: boolean; onOpen: (ci: CI) => void }) {
+function CITable({ items, presence, onOpen }: { items: CI[]; presence: boolean; onOpen: (ci: CI) => void }) {
   const t = useT(strings)
   return (
     <table className="cn-table ci-table">
@@ -208,7 +208,7 @@ function CITable({ items, monitoring, onOpen }: { items: CI[]; monitoring: boole
           <th>{t('ci.col.status')}</th>
           <th>{t('ci.col.ips')}</th>
           <th>{t('ci.col.owners')}</th>
-          {monitoring && <th>{t('ci.col.monitoring')}</th>}
+          {presence && <th>{t('ci.col.presence')}</th>}
           <th>{t('ci.col.source')}</th>
         </tr>
       </thead>
@@ -227,9 +227,9 @@ function CITable({ items, monitoring, onOpen }: { items: CI[]; monitoring: boole
             </td>
             <td className="cn-mono">{ci.ips.join(', ') || t('ci.none')}</td>
             <td>{ci.owners.length ? ci.owners.map((o) => o.name || o.username || t('ci.owner.deleted')).join(', ') : <span className="muted">{t('ci.none')}</span>}</td>
-            {monitoring && (
+            {presence && (
               <td>
-                <MonitoringCell ci={ci} />
+                <PresenceCell ci={ci} />
               </td>
             )}
             <td>

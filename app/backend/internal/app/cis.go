@@ -67,6 +67,8 @@ type CIView struct {
 	Owners     []CIOwnerView `json:"owners"`
 	Services   []ServiceRef  `json:"services"`
 	Monitoring []CIMonitor   `json:"monitoring"`
+	// Presence: the systems the item is in and those it is missing from.
+	Presence []CIPresence `json:"presence"`
 	// NotMonitored: a device or virtual machine no monitoring system covers.
 	NotMonitored bool `json:"not_monitored"`
 	Editable     bool `json:"editable"`
@@ -126,10 +128,10 @@ func servicesByCI(d *store.Data) map[string][]ServiceRef {
 }
 
 func ciView(d *store.Data, ci *model.ConfigItem) CIView {
-	return ciViewWith(d, ci, servicesByCI(d), monitorsByCI(d), enabledSources(d) > 0)
+	return ciViewWith(d, ci, servicesByCI(d), monitorsByCI(d), enabledSourceList(d))
 }
 
-func ciViewWith(d *store.Data, ci *model.ConfigItem, services map[string][]ServiceRef, monitors map[string][]CIMonitor, judged bool) CIView {
+func ciViewWith(d *store.Data, ci *model.ConfigItem, services map[string][]ServiceRef, monitors map[string][]CIMonitor, sources []*model.MonitoringSource) CIView {
 	v := CIView{ConfigItem: *ci, Owners: []CIOwnerView{}, Services: services[ci.ID], Monitoring: monitors[ci.ID], Editable: !ci.Imported()}
 	if v.Services == nil {
 		v.Services = []ServiceRef{}
@@ -137,7 +139,8 @@ func ciViewWith(d *store.Data, ci *model.ConfigItem, services map[string][]Servi
 	if v.Monitoring == nil {
 		v.Monitoring = []CIMonitor{}
 	}
-	v.NotMonitored = judged && notMonitored(ci, v.Monitoring)
+	v.NotMonitored = len(sources) > 0 && notMonitored(ci, v.Monitoring)
+	v.Presence = presence(d, ci, v.Monitoring, sources)
 	v.Registrable = !ci.Imported() && ci.NetBox == nil && netboxKindOf[ci.Kind] != ""
 	if v.IPs == nil {
 		v.IPs = []string{}
@@ -173,8 +176,8 @@ func (s *CIService) List(f CIFilter) CIList {
 	s.st.Read(func(d *store.Data) {
 		tags := map[string]bool{}
 		services, monitors := servicesByCI(d), monitorsByCI(d)
-		out.Summary.MonitoringSources = enabledSources(d)
-		judged := out.Summary.MonitoringSources > 0
+		sources := enabledSourceList(d)
+		out.Summary.MonitoringSources = len(sources)
 		for _, ci := range d.ConfigItems {
 			sum := &out.Summary
 			sum.Total++
@@ -195,7 +198,7 @@ func (s *CIService) List(f CIFilter) CIList {
 			for _, t := range ci.Tags {
 				tags[t] = true
 			}
-			v := ciViewWith(d, ci, services, monitors, judged)
+			v := ciViewWith(d, ci, services, monitors, sources)
 			if v.NotMonitored {
 				sum.NotMonitored++
 			}

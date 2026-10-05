@@ -47,6 +47,7 @@ export type CI = {
   owners: Owner[]
   services: { id: string; name: string }[]
   monitoring: Monitor[]
+  presence: Presence[]
   not_monitored: boolean
   editable: boolean
   registrable: boolean
@@ -67,6 +68,17 @@ export type Monitor = {
   state: string
   url?: string
   match: string
+}
+
+// Presence: whether a system (NetBox, the domain, a monitoring system) knows the item.
+export type Presence = {
+  kind: 'netbox' | 'directory' | 'zabbix' | 'prometheus'
+  source_id?: string
+  name: string
+  state: 'present' | 'missing'
+  detail?: string
+  host_state?: string
+  url?: string
 }
 
 export type Summary = {

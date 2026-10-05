@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -238,16 +239,6 @@ func monitorsByCI(d *store.Data) map[string][]CIMonitor {
 		}
 	}
 	return out
-}
-
-func enabledSources(d *store.Data) int {
-	n := 0
-	for _, s := range d.MonitoringSources {
-		if s.Enabled {
-			n++
-		}
-	}
-	return n
 }
 
 // monitorable: devices and virtual machines that are expected to run.
@@ -554,6 +545,8 @@ type HostView struct {
 	CI         *ServiceRef  `json:"ci,omitempty"`
 	Match      string       `json:"match"`
 	Candidates []ServiceRef `json:"candidates"`
+	// AlsoIn: unmatched hosts of other sources that are the same machine.
+	AlsoIn []HostRef `json:"also_in"`
 }
 
 type HostSummary struct {
@@ -591,49 +584,110 @@ func (s *MonitoringService) Hosts(f HostFilter) HostList {
 			}
 			return ServiceRef{ID: id, Name: id}
 		}
+		var all []HostView
 		for _, src := range sortedSources(d) {
-			if f.Source != "" && src.ID != f.Source {
-				continue
-			}
 			for _, h := range src.Hosts {
 				hm := m.match(src, h)
-				v := HostView{MonitoringHost: h, SourceID: src.ID, SourceName: src.Name, Kind: src.Kind, Match: hm.How, Candidates: []ServiceRef{}}
-				sum := &out.Summary
-				sum.Total++
-				group := "unmatched"
-				switch {
-				case hm.CIID != "":
+				v := HostView{MonitoringHost: h, SourceID: src.ID, SourceName: src.Name, Kind: src.Kind, Match: hm.How,
+					Candidates: []ServiceRef{}, AlsoIn: []HostRef{}}
+				if hm.CIID != "" {
 					r := ref(hm.CIID)
 					v.CI = &r
-					sum.Matched++
-					group = "matched"
-				case hm.How == MatchExcluded:
-					sum.Excluded++
-					group = "excluded"
-				default:
-					sum.Unmatched++
-					if hm.How == MatchAmbiguous {
-						sum.Ambiguous++
-					}
 				}
 				for _, id := range hm.Candidates {
 					v.Candidates = append(v.Candidates, ref(id))
 				}
-				if f.Match != "" && f.Match != group && !(f.Match == MatchAmbiguous && hm.How == MatchAmbiguous) {
-					continue
-				}
-				if q != "" && !v.contains(q) {
-					continue
-				}
-				if len(out.Items) >= maxHostRows {
-					out.Limited = true
-					continue
-				}
-				out.Items = append(out.Items, v)
+				all = append(all, v)
 			}
+		}
+		linkSameMachine(all)
+		for _, v := range all {
+			if f.Source != "" && v.SourceID != f.Source {
+				continue
+			}
+			sum := &out.Summary
+			sum.Total++
+			group := "unmatched"
+			switch {
+			case v.CI != nil:
+				sum.Matched++
+				group = "matched"
+			case v.Match == MatchExcluded:
+				sum.Excluded++
+				group = "excluded"
+			default:
+				sum.Unmatched++
+				if v.Match == MatchAmbiguous {
+					sum.Ambiguous++
+				}
+			}
+			if f.Match != "" && f.Match != group && !(f.Match == MatchAmbiguous && v.Match == MatchAmbiguous) {
+				continue
+			}
+			if q != "" && !v.contains(q) {
+				continue
+			}
+			if len(out.Items) >= maxHostRows {
+				out.Limited = true
+				continue
+			}
+			out.Items = append(out.Items, v)
 		}
 	})
 	return out
+}
+
+// HostRef names a host of another source that is the same machine.
+type HostRef struct {
+	SourceID   string `json:"source_id"`
+	SourceName string `json:"source_name"`
+	Key        string `json:"key"`
+	Host       string `json:"host"`
+}
+
+// hostKeys are the names a host is known by, in the forms the matcher compares.
+func hostKeys(h model.MonitoringHost) []string {
+	var out []string
+	for _, v := range append(append([]string{h.Host, h.Name}, h.DNS...), h.IPs...) {
+		for _, k := range alert.EventKeys(v) {
+			if k != "" && !slices.Contains(out, k) {
+				out = append(out, k)
+			}
+		}
+	}
+	return out
+}
+
+// linkSameMachine notes, for every host without a configuration item, the hosts of other
+// sources that share a name or an address with it: one machine seen by several systems needs
+// one item, not one per system.
+func linkSameMachine(all []HostView) {
+	index := map[string][]int{}
+	for i, v := range all {
+		if v.CI != nil || v.Match == MatchExcluded {
+			continue
+		}
+		for _, k := range hostKeys(v.MonitoringHost) {
+			index[k] = append(index[k], i)
+		}
+	}
+	for i := range all {
+		v := &all[i]
+		if v.CI != nil || v.Match == MatchExcluded {
+			continue
+		}
+		seen := map[int]bool{}
+		for _, k := range hostKeys(v.MonitoringHost) {
+			for _, j := range index[k] {
+				o := all[j]
+				if j == i || seen[j] || o.SourceID == v.SourceID {
+					continue
+				}
+				seen[j] = true
+				v.AlsoIn = append(v.AlsoIn, HostRef{SourceID: o.SourceID, SourceName: o.SourceName, Key: o.Key, Host: firstSet(o.Name, o.Host)})
+			}
+		}
+	}
 }
 
 func (v HostView) contains(q string) bool {
@@ -721,9 +775,13 @@ type CreateCIInput struct {
 // CreateCI makes a configuration item named after the technical name of the host with its IP
 // addresses and links the host to it.
 func (s *MonitoringService) CreateCI(ctx context.Context, actor string, in CreateCIInput) (CIView, error) {
+	same, err := s.host(in.SourceID, in.Key)
+	if err != nil {
+		return CIView{}, err
+	}
 	var h model.MonitoringHost
 	var srcName string
-	err := ErrNotFound
+	err = ErrNotFound
 	s.st.Read(func(d *store.Data) {
 		src := d.MonitoringSources[in.SourceID]
 		if src == nil {
@@ -765,6 +823,16 @@ func (s *MonitoringService) CreateCI(ctx context.Context, actor string, in Creat
 			src.Links[h.Key] = ci.ID
 			d.AddAudit(store.AuditEntry{Actor: actor, Action: "monitoring.link", Object: src.ID, Detail: srcName + " / " + h.Host + " linked to new " + ci.ID})
 		}
+		// The same machine in the other systems belongs to the same item.
+		for _, o := range same.AlsoIn {
+			if src := d.MonitoringSources[o.SourceID]; src != nil && d.ConfigItems[ci.ID] != nil {
+				if src.Links == nil {
+					src.Links = map[string]string{}
+				}
+				src.Links[o.Key] = ci.ID
+				d.AddAudit(store.AuditEntry{Actor: actor, Action: "monitoring.link", Object: src.ID, Detail: src.Name + " / " + o.Host + " linked to new " + ci.ID})
+			}
+		}
 	})
 	return s.cis.Get(ci.ID)
 }
@@ -778,4 +846,77 @@ func dropHostLinks(d *store.Data, id string) {
 			}
 		}
 	}
+}
+
+const (
+	PresenceNetBox    = "netbox"
+	PresenceDirectory = "directory"
+
+	Present = "present"
+	Missing = "missing"
+)
+
+// CIPresence says whether a system knows the configuration item: NetBox, the domain
+// controller and every turned-on monitoring system.
+type CIPresence struct {
+	Kind      string `json:"kind"`
+	SourceID  string `json:"source_id,omitempty"`
+	Name      string `json:"name"`
+	State     string `json:"state"`
+	Detail    string `json:"detail,omitempty"`
+	HostState string `json:"host_state,omitempty"`
+	URL       string `json:"url,omitempty"`
+}
+
+var hostStateRank = map[string]int{model.HostDisabled: 0, model.HostUnknown: 1, model.HostUp: 2, model.HostPartial: 3, model.HostDown: 4}
+
+// presence lists the systems the item is in and those it is missing from. NetBox counts when it
+// is connected or the item is linked there; the domain controller when the item was checked.
+func presence(d *store.Data, ci *model.ConfigItem, mons []CIMonitor, sources []*model.MonitoringSource) []CIPresence {
+	out := []CIPresence{}
+	if ci.NetBox != nil {
+		out = append(out, CIPresence{Kind: PresenceNetBox, Name: "NetBox", State: Present, Detail: ci.NetBox.Kind + " #" + strconv.Itoa(ci.NetBox.ID), URL: ci.NetBox.URL})
+	} else if d.Settings.NetBox.Enabled {
+		out = append(out, CIPresence{Kind: PresenceNetBox, Name: "NetBox", State: Missing})
+	}
+	if dir := ci.Directory; dir != nil {
+		p := CIPresence{Kind: PresenceDirectory, Name: "Active Directory", State: Missing}
+		if dir.Status == model.DirectoryMatched {
+			p.State, p.Detail = Present, firstSet(dir.DNSName, dir.DN)
+			if dir.Disabled {
+				p.HostState = model.HostDisabled
+			}
+		}
+		out = append(out, p)
+	}
+	for _, src := range sources {
+		p := CIPresence{Kind: src.Kind, SourceID: src.ID, Name: src.Name, State: Missing}
+		var names []string
+		for _, m := range mons {
+			if m.SourceID != src.ID {
+				continue
+			}
+			p.State = Present
+			names = append(names, firstSet(m.Name, m.Host))
+			if p.URL == "" {
+				p.URL = m.URL
+			}
+			if p.HostState == "" || hostStateRank[m.State] > hostStateRank[p.HostState] {
+				p.HostState = m.State
+			}
+		}
+		p.Detail = strings.Join(names, ", ")
+		out = append(out, p)
+	}
+	return out
+}
+
+func enabledSourceList(d *store.Data) []*model.MonitoringSource {
+	var out []*model.MonitoringSource
+	for _, s := range sortedSources(d) {
+		if s.Enabled {
+			out = append(out, s)
+		}
+	}
+	return out
 }
