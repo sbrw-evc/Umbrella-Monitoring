@@ -125,6 +125,7 @@ type Settings struct {
 	Entra         entra.Config     `json:"entra"`
 	NetBox        netbox.Config    `json:"netbox"`
 	Groups        GroupMappings    `json:"groups"`
+	Alerting      Alerting         `json:"alerting"`
 	SetupAt       time.Time        `json:"setup_at"`
 	SetupBy       string           `json:"setup_by"`
 }
