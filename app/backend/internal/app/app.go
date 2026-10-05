@@ -1,13 +1,17 @@
 package app
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/config"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/credentials"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
@@ -53,6 +57,12 @@ type App struct {
 	roles     *RolesService
 	teams     *TeamsService
 	services  *ServicesService
+
+	creds      *CredentialsService
+	connectors *ConnectorsService
+	queue      *ingest.Queue
+	ready      atomic.Bool
+	rates      rates
 }
 
 func New(opt Options, deps Deps) *App {
@@ -62,23 +72,35 @@ func New(opt Options, deps Deps) *App {
 	passwords := credentials.NewPasswords(deps.Vault)
 	dir := ldapDirectory{}
 	users := NewUserService(deps.Store, passwords)
+	var vault Secrets
+	if deps.Vault != nil {
+		vault = deps.Vault
+	}
+	creds := NewCredentialsService(deps.Store, vault)
+	var queue *ingest.Queue
+	if deps.Backend != nil {
+		queue = ingest.New(deps.Backend.Pool())
+	}
 	return &App{
-		opt:       opt,
-		deps:      deps,
-		users:     users,
-		accounts:  NewUsersService(deps.Store, passwords, deps.Vault, deps.Sessions),
-		auth:      NewAuthService(deps.Store, passwords, deps.Vault, dir, users),
-		settings:  NewSettingsService(deps.Store),
-		status:    NewStatusService(deps.Store, deps.Vault, deps.Backend, dir, opt.Version),
-		limiter:   NewLimiter(maxFailures, failWindow, lockout),
-		policy:    NewPolicyService(deps.Store),
-		access:    NewAccessService(deps.Store),
-		directory: NewDirectoryService(deps.Store, deps.Vault, dir, deps.Sessions),
-		postgres:  NewPostgresService(deps.Store, deps.Backend, deps.Vault, deps.Runtime, deps.Config),
-		openbao:   NewOpenBaoService(deps.Store, deps.Vault, deps.Runtime, deps.Config),
-		roles:     NewRolesService(deps.Store),
-		teams:     NewTeamsService(deps.Store),
-		services:  NewServicesService(deps.Store),
+		creds:      creds,
+		connectors: NewConnectorsService(deps.Store, creds),
+		queue:      queue,
+		opt:        opt,
+		deps:       deps,
+		users:      users,
+		accounts:   NewUsersService(deps.Store, passwords, deps.Vault, deps.Sessions),
+		auth:       NewAuthService(deps.Store, passwords, deps.Vault, dir, users),
+		settings:   NewSettingsService(deps.Store),
+		status:     NewStatusService(deps.Store, deps.Vault, deps.Backend, dir, opt.Version),
+		limiter:    NewLimiter(maxFailures, failWindow, lockout),
+		policy:     NewPolicyService(deps.Store),
+		access:     NewAccessService(deps.Store),
+		directory:  NewDirectoryService(deps.Store, deps.Vault, dir, deps.Sessions),
+		postgres:   NewPostgresService(deps.Store, deps.Backend, deps.Vault, deps.Runtime, deps.Config),
+		openbao:    NewOpenBaoService(deps.Store, deps.Vault, deps.Runtime, deps.Config),
+		roles:      NewRolesService(deps.Store),
+		teams:      NewTeamsService(deps.Store),
+		services:   NewServicesService(deps.Store),
 	}
 }
 
@@ -99,13 +121,40 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })
 	mux.Handle("/", a.opt.Web)
 	return httpx.Secure(mux)
 }
+
+// Run prepares the ingest tables and processes received requests until ctx ends. Without
+// PostgreSQL (tests) it returns at once and the intake answers 503.
+func (a *App) Run(ctx context.Context) {
+	if a.queue == nil {
+		return
+	}
+	for {
+		err := ingest.EnsureSchema(ctx, a.deps.Backend.Pool())
+		if err == nil {
+			break
+		}
+		slog.Error("ingest tables are not ready", "err", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(10 * time.Second):
+		}
+	}
+	a.ready.Store(true)
+	a.queue.Run(ctx, 2, a.process)
+}
+
+func (a *App) ingestReady() bool { return a.queue != nil && a.ready.Load() }
+
+// IngestReady reports whether the intake tables exist and the workers run.
+func (a *App) IngestReady() bool { return a.ingestReady() }
 
 type metaView struct {
 	defaultsView

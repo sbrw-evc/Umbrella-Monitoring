@@ -5,7 +5,7 @@ import { useT } from '../i18n'
 import { Link, useRouter } from '../router'
 import { spring } from '../ui'
 import { navStrings } from './navStrings'
-import { visiblePages, type Group, type PageDef } from './pages'
+import { owns, visiblePages, type Group, type PageDef } from './pages'
 import { useSession } from './session'
 
 const COMPACT = '(max-width: 860px)'
@@ -52,7 +52,7 @@ function SideLink({ page, active }: { page: PageDef; active: boolean }) {
 function GroupAccordion({ group, icon: Icon, pages, path }: { group: Group; icon: LucideIcon; pages: PageDef[]; path: string }) {
   const t = useT(navStrings)
   const compact = useCompact()
-  const hasActive = pages.some((p) => p.path === path)
+  const hasActive = pages.some((p) => owns(p, path))
   const [open, setOpen] = useState(() => hasActive || readOpen(group))
 
   useEffect(() => {
@@ -86,7 +86,7 @@ function GroupAccordion({ group, icon: Icon, pages, path }: { group: Group; icon
           >
             <div className="side-children-inner">
               {pages.map((p) => (
-                <SideLink key={p.id} page={p} active={p.path === path} />
+                <SideLink key={p.id} page={p} active={owns(p, path)} />
               ))}
             </div>
           </motion.div>
@@ -120,7 +120,7 @@ export function Sidebar() {
       {main.length > 0 && (
         <div className="side-group">
           {main.map((p) => (
-            <SideLink key={p.id} page={p} active={p.path === path} />
+            <SideLink key={p.id} page={p} active={owns(p, path)} />
           ))}
         </div>
       )}

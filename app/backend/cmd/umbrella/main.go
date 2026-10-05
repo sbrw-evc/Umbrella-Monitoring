@@ -161,16 +161,26 @@ func main() {
 	rt.launch = func(cfg config.File, vault *secrets.Client, backend *store.PGBackend, st *store.Store) {
 		bg, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
+		a := app.New(opts, app.Deps{Config: cfg, Vault: vault, Backend: backend, Store: st, Sessions: sessions, Runtime: rt})
+		var wg sync.WaitGroup
+		wg.Add(2)
 		go vault.Run(bg)
 		go func() {
+			defer wg.Done()
 			st.Run(bg, 2*time.Second, func() error { return sessions.Save(*dataDir) })
+		}()
+		go func() {
+			defer wg.Done()
+			a.Run(bg)
+		}()
+		go func() {
+			wg.Wait()
 			close(done)
 		}()
 		rt.mu.Lock()
 		rt.cancel, rt.done = cancel, done
 		rt.cfg, rt.vault, rt.backend, rt.st = cfg, vault, backend, st
 		rt.mu.Unlock()
-		a := app.New(opts, app.Deps{Config: cfg, Vault: vault, Backend: backend, Store: st, Sessions: sessions, Runtime: rt})
 		handler.Set(a.Handler())
 	}
 	start := rt.launch
