@@ -6,7 +6,6 @@ import {
   useState,
   type InputHTMLAttributes,
   type ReactNode,
-  type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from 'react'
 import { AlertTriangle, CheckCircle2, Eye, EyeOff, Info, Loader2, Minus, Moon, Plus, Sun, X, XCircle } from 'lucide-react'
@@ -14,6 +13,7 @@ import { AnimatePresence, motion, type HTMLMotionProps, type Transition } from '
 import { useLocale, useT } from './i18n'
 import { useTheme } from './theme'
 import { originOf } from './fx'
+import { Select } from './select'
 
 export const spring: Transition = { type: 'spring', stiffness: 420, damping: 30 }
 
@@ -66,9 +66,7 @@ export function Password(props: InputHTMLAttributes<HTMLInputElement>) {
   )
 }
 
-export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className="input" />
-}
+export { Select }
 
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea {...props} className="input textarea" />
@@ -380,7 +378,7 @@ export function TimezoneSelect({ value, onChange, id, defaultLabel }: { value: s
   const zones = useMemo(timezones, [])
   const known = value === '' || zones.some((z) => z.id === value)
   return (
-    <select id={id} className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+    <Select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
       {defaultLabel !== undefined && <option value="">{defaultLabel}</option>}
       {!known && <option value={value}>{value}</option>}
       {zones.map((z) => (
@@ -388,7 +386,7 @@ export function TimezoneSelect({ value, onChange, id, defaultLabel }: { value: s
           {z.label}
         </option>
       ))}
-    </select>
+    </Select>
   )
 }
 
