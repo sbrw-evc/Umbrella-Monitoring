@@ -43,7 +43,6 @@ export function GrafanaCard() {
       title={t('gf.title')}
       action={saver}
       onSubmit={save}
-      wide
       footer={
         canEdit && (
           <Button type="submit" variant="primary" busy={saver.busy} disabled={!dirty}>
@@ -53,7 +52,7 @@ export function GrafanaCard() {
       }
     >
       <p className="muted">{t('gf.text')}</p>
-      <fieldset className="plain-fieldset al-grid" disabled={!canEdit}>
+      <fieldset className="plain-fieldset grid-2" disabled={!canEdit}>
         <Field label={t('gf.dashboard')} hint={t('gf.dashboard.hint')}>
           {(id) => <Input id={id} value={d.dashboard_url} placeholder="https://grafana.example.com/d/abc123/incident" onChange={(e) => setD({ ...d, dashboard_url: e.target.value })} />}
         </Field>

@@ -19,7 +19,7 @@ import { SystemStatus } from './SystemStatus'
 import { TeamsPage } from './teams/TeamsPage'
 import { UsersPage } from './users/UsersPage'
 
-export type Group = 'main' | 'overview' | 'automation' | 'org' | 'settings'
+export type Group = 'overview' | 'automation' | 'org' | 'settings'
 
 export type PageDef = {
   id: string
@@ -39,23 +39,23 @@ export const SETTINGS_PATH = '/settings'
 const MOVED: Record<string, string> = { '/status': '/settings/status' }
 
 export const PAGES: PageDef[] = [
-  { id: 'incidents', path: '/incidents', group: 'main', icon: BellRing, Component: IncidentsPage, subtitle: 'page.incidents.subtitle' },
-  { id: 'maintenance', path: '/maintenance', group: 'main', icon: CalendarClock, Component: MaintenancePage, subtitle: 'page.maintenance.subtitle' },
-  { id: 'services', path: '/services', group: 'overview', icon: Briefcase, Component: ServicesPage, subtitle: 'page.services.subtitle' },
-  { id: 'cis', path: '/cis', group: 'overview', icon: Boxes, Component: CIsPage, subtitle: 'page.cis.subtitle' },
+  { id: 'incidents', path: '/incidents', group: 'overview', icon: BellRing, Component: IncidentsPage, subtitle: 'page.incidents.subtitle' },
   { id: 'cmdb', path: '/cmdb', group: 'overview', icon: Waypoints, Component: CMDBMapPage, subtitle: 'page.cmdb.subtitle' },
+  { id: 'cis', path: '/cis', group: 'overview', icon: Boxes, Component: CIsPage, subtitle: 'page.cis.subtitle' },
+  { id: 'services', path: '/services', group: 'overview', icon: Briefcase, Component: ServicesPage, subtitle: 'page.services.subtitle' },
+  { id: 'maintenance', path: '/maintenance', group: 'overview', icon: CalendarClock, Component: MaintenancePage, subtitle: 'page.maintenance.subtitle' },
   { id: 'connectors', path: '/connectors', group: 'automation', icon: Cable, Component: ConnectorsPage, nested: true },
-  { id: 'credentials', path: '/credentials', group: 'automation', icon: LockKeyhole, Component: CredentialsPage, subtitle: 'page.credentials.subtitle' },
-  { id: 'netbox', path: '/netbox', group: 'automation', icon: Server, Component: NetBoxPage, subtitle: 'page.netbox.subtitle' },
   { id: 'rules', path: '/rules', group: 'automation', icon: Gauge, Component: RulesPage, subtitle: 'page.rules.subtitle' },
+  { id: 'netbox', path: '/netbox', group: 'automation', icon: Server, Component: NetBoxPage, subtitle: 'page.netbox.subtitle' },
+  { id: 'credentials', path: '/credentials', group: 'automation', icon: LockKeyhole, Component: CredentialsPage, subtitle: 'page.credentials.subtitle' },
   { id: 'users', path: '/users', group: 'org', icon: Users, Component: UsersPage, subtitle: 'page.users.subtitle' },
-  { id: 'roles', path: '/roles', group: 'org', icon: UserCog, Component: RolesPage, subtitle: 'page.roles.subtitle' },
   { id: 'teams', path: '/teams', group: 'org', icon: UsersRound, Component: TeamsPage, subtitle: 'page.teams.subtitle' },
-  { id: 'status', path: '/settings/status', group: 'settings', icon: Activity, Component: SystemStatus },
+  { id: 'roles', path: '/roles', group: 'org', icon: UserCog, Component: RolesPage, subtitle: 'page.roles.subtitle' },
   { id: 'settings.alerting', path: '/settings/alerting', group: 'settings', icon: Siren, Component: AlertingSettings, subtitle: 'page.settings.alerting.subtitle' },
+  { id: 'status', path: '/settings/status', group: 'settings', icon: Activity, Component: SystemStatus },
+  { id: 'settings.ldap', path: '/settings/ldap', group: 'settings', icon: Network, Component: DirectorySettings, subtitle: 'page.settings.subtitle' },
   { id: 'settings.postgres', path: '/settings/postgresql', group: 'settings', icon: Database, Component: PostgresSettings, subtitle: 'page.settings.subtitle' },
   { id: 'settings.openbao', path: '/settings/openbao', group: 'settings', icon: KeyRound, Component: OpenBaoSettings, subtitle: 'page.settings.subtitle' },
-  { id: 'settings.ldap', path: '/settings/ldap', group: 'settings', icon: Network, Component: DirectorySettings, subtitle: 'page.settings.subtitle' },
   {
     id: 'settings.policy',
     path: '/settings/password-policy',
@@ -66,7 +66,7 @@ export const PAGES: PageDef[] = [
   },
 ]
 
-export const GROUPS: Group[] = ['main', 'overview', 'automation', 'org', 'settings']
+export const GROUPS: Group[] = ['overview', 'automation', 'org', 'settings']
 
 export type Can = (perm: string) => boolean
 

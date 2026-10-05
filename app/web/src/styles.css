@@ -1624,7 +1624,7 @@ code {
 
 .app-body {
   display: grid;
-  grid-template-columns: 256px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   min-height: 0;
   padding: 0 8px 8px 0;
 }
@@ -1751,6 +1751,56 @@ code {
   background: var(--accent-soft);
 }
 
+.app-body {
+  transition: grid-template-columns 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.app-body.side-collapsed {
+  grid-template-columns: 68px minmax(0, 1fr);
+}
+
+.sidebar.collapsed {
+  gap: 6px;
+  padding: 8px 12px 16px;
+  overflow-x: hidden;
+}
+
+.sidebar.collapsed .side-link {
+  justify-content: center;
+  padding: 9px 0;
+}
+
+.sidebar.collapsed .side-label {
+  display: none;
+}
+
+.side-sep {
+  flex-shrink: 0;
+  height: 1px;
+  margin: 2px 8px;
+  background: var(--border);
+}
+
+.side-tip {
+  position: fixed;
+  z-index: 60;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.side-toggle {
+  flex-shrink: 0;
+  margin-left: -6px;
+}
+
 .settings-content {
   display: flex;
   flex-direction: column;
@@ -1760,6 +1810,7 @@ code {
 
 @media (max-width: 860px) {
   .app-body,
+  .app-body.side-collapsed,
   .app-body.no-sidebar {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
@@ -1787,6 +1838,22 @@ code {
 
   .side-accordion {
     display: none;
+  }
+
+  .sidebar.collapsed {
+    gap: 2px;
+    padding: 0 4px 8px;
+    overflow-x: auto;
+  }
+
+  .sidebar.collapsed .side-link {
+    padding: 9px 12px;
+  }
+
+  .side-sep {
+    width: 1px;
+    height: auto;
+    margin: 8px 4px;
   }
 }
 

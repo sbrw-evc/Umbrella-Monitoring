@@ -10,7 +10,7 @@ import { ProfilePage } from './profile/ProfilePage'
 import { PageHead } from './PageHead'
 import { resolve, visiblePages } from './pages'
 import { SessionProvider, useSession, type Session } from './session'
-import { Sidebar } from './Sidebar'
+import { Sidebar, useCollapsed } from './Sidebar'
 import { SignIn } from './SignIn'
 import { strings } from './strings'
 import { TopBar } from './TopBar'
@@ -99,16 +99,23 @@ function Shell({ meta }: { meta: Meta }) {
 
   return (
     <SessionProvider value={session}>
-      <div className="app-shell">
-        <TopBar onSignOut={signOut} />
-        <div className={`app-body ${hasSidebar ? '' : 'no-sidebar'}`}>
-          {hasSidebar && <Sidebar />}
-          <div id={SCROLL_ROOT_ID} className="app-main">
-            <Pages />
-          </div>
+      <Frame hasSidebar={hasSidebar} user={session.user.id} onSignOut={signOut} />
+    </SessionProvider>
+  )
+}
+
+function Frame({ hasSidebar, user, onSignOut }: { hasSidebar: boolean; user: string; onSignOut: () => void }) {
+  const [collapsed, toggle] = useCollapsed(user)
+  return (
+    <div className="app-shell">
+      <TopBar onSignOut={onSignOut} sidebar={hasSidebar ? { collapsed, toggle } : undefined} />
+      <div className={`app-body ${hasSidebar ? (collapsed ? 'side-collapsed' : '') : 'no-sidebar'}`}>
+        {hasSidebar && <Sidebar collapsed={collapsed} />}
+        <div id={SCROLL_ROOT_ID} className="app-main">
+          <Pages />
         </div>
       </div>
-    </SessionProvider>
+    </div>
   )
 }
 
