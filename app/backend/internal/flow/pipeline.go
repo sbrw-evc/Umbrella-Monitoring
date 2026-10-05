@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/textx"
 )
 
 type Lineage struct {
@@ -466,10 +468,10 @@ func head(r []Record, n int) []Record {
 }
 
 func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
+	if c := textx.Runes(s, n); c != s {
+		return c + "…"
 	}
-	return s[:n] + "…"
+	return s
 }
 
 // ParsePins reads pinned node outputs stored with a draft.

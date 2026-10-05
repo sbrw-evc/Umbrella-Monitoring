@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/flow"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/textx"
 )
 
 const (
@@ -357,8 +358,8 @@ func finish(ctx context.Context, tx pgx.Tx, r Request, status string, events int
 }
 
 func clip(s string, n int) string {
-	if len(s) <= n {
-		return s
+	if c := textx.Runes(s, n); c != s {
+		return c + "…"
 	}
-	return s[:n] + "…"
+	return s
 }

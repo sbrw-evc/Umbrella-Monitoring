@@ -20,6 +20,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/textx"
 )
 
 var (
@@ -393,11 +394,7 @@ func (g *Gateway) SendTest(ctx context.Context, key string) error {
 	return g.post(ctx, set.Events(), Build("", false, key, alert.Command{Action: alert.PDResolve, Alert: a}))
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
-}
+// truncate cuts to n characters, as the Events API counts its limits.
+func truncate(s string, n int) string { return textx.Runes(s, n) }
 
 var _ alert.Sender = (*Gateway)(nil)
