@@ -12,6 +12,14 @@ type managedUserView struct {
 	userView
 	DisplayName string `json:"display_name"`
 	TeamName    string `json:"team_name,omitempty"`
+	// Services are the business services of the incident scope; Missing marks one deleted since.
+	Services []userServiceRef `json:"services"`
+}
+
+type userServiceRef struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Missing bool   `json:"missing,omitempty"`
 }
 
 func (a *App) registerUsers(mux *http.ServeMux) {
@@ -31,17 +39,25 @@ func actorOf(r *http.Request) Actor {
 }
 
 func (a *App) managedViews(users []model.User) []managedUserView {
-	teams := map[string]string{}
+	teams, services := map[string]string{}, map[string]string{}
 	a.deps.Store.Read(func(d *store.Data) {
 		for id, t := range d.Teams {
 			teams[id] = t.Name
+		}
+		for id, s := range d.Services {
+			services[id] = s.Name
 		}
 	})
 	out := make([]managedUserView, 0, len(users))
 	for _, u := range users {
 		v := a.view(u, "")
 		v.Permissions = nil
-		out = append(out, managedUserView{userView: v, DisplayName: u.Profile.DisplayName(u.Username), TeamName: teams[u.TeamID]})
+		refs := make([]userServiceRef, 0, len(u.ServiceIDs))
+		for _, id := range u.ServiceIDs {
+			name, ok := services[id]
+			refs = append(refs, userServiceRef{ID: id, Name: userOr(name, id), Missing: !ok})
+		}
+		out = append(out, managedUserView{userView: v, DisplayName: u.Profile.DisplayName(u.Username), TeamName: teams[u.TeamID], Services: refs})
 	}
 	return out
 }

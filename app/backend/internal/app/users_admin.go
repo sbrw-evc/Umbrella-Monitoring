@@ -69,7 +69,11 @@ type UserChanges struct {
 	Profile *model.Profile `json:"profile"`
 	RoleID  *string        `json:"role_id"`
 	TeamID  *string        `json:"team_id"`
+	// ServiceIDs replaces the business services whose incidents the user sees; empty: all.
+	ServiceIDs *[]string `json:"service_ids"`
 }
+
+const maxUserServices = 200
 
 type PasswordReset struct {
 	Password           string `json:"password"`
@@ -269,8 +273,39 @@ func (s *UsersService) Update(actor Actor, id string, in UserChanges) (model.Use
 			u.TeamID = team
 			changes = append(changes, "team "+userOr(team, "none"))
 		}
+		if in.ServiceIDs != nil {
+			scope, err := userServiceScope(d, *in.ServiceIDs)
+			if err != nil {
+				return "", err
+			}
+			if !slices.Equal(scope, u.ServiceIDs) {
+				u.ServiceIDs = scope
+				changes = append(changes, "services "+userOr(strings.Join(scope, " "), "all"))
+			}
+		}
 		return strings.Join(changes, ", "), nil
 	})
+}
+
+// userServiceScope checks and normalizes the business services of a user's incident scope:
+// every one must exist; duplicates and blanks are dropped; nil means no limit.
+func userServiceScope(d *store.Data, ids []string) ([]string, error) {
+	var out []string
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || slices.Contains(out, id) {
+			continue
+		}
+		if d.Services[id] == nil {
+			return nil, invalid("service_not_found", nil)
+		}
+		out = append(out, id)
+	}
+	if len(out) > maxUserServices {
+		return nil, invalid("too_many_services", nil)
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 func (s *UsersService) SetLocked(actor Actor, id string, locked bool) (model.User, error) {

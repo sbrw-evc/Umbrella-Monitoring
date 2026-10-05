@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -220,6 +221,9 @@ type Filter struct {
 	Suppressed bool
 	Since      time.Time
 	Limit      int
+	// ScopeServiceIDs limits everything, counts included, to alerts of these business services;
+	// empty means no limit.
+	ScopeServiceIDs []string
 }
 
 type Counts struct {
@@ -265,6 +269,12 @@ func (f Filter) where() (string, []any) {
 	}
 	if f.ServiceID != "" {
 		conds = append(conds, arg(f.ServiceID)+" = ANY(service_ids)")
+	}
+	if len(f.ScopeServiceIDs) > 0 {
+		if f.ServiceID != "" && !slices.Contains(f.ScopeServiceIDs, f.ServiceID) {
+			conds = append(conds, "FALSE")
+		}
+		conds = append(conds, "service_ids && "+arg(f.ScopeServiceIDs)+"::text[]")
 	}
 	if f.CIID != "" {
 		conds = append(conds, "ci_id = "+arg(f.CIID))
@@ -318,8 +328,9 @@ func list(ctx context.Context, q querier, f Filter) (Page, error) {
 		out.Alerts, out.More = out.Alerts[:limit], true
 	}
 	c := &out.Counts
+	scope, scopeArgs := Filter{ScopeServiceIDs: f.ScopeServiceIDs}.where()
 	rows, err = q.Query(ctx, `SELECT status, severity, pd_state, (doc->>'fallback')::boolean, (doc->>'suppressed')::boolean, ci_id = '', count(*)::int
-		FROM alerts WHERE status <> 'resolved' GROUP BY 1, 2, 3, 4, 5, 6`)
+		FROM alerts WHERE status <> 'resolved' AND `+scope+` GROUP BY 1, 2, 3, 4, 5, 6`, scopeArgs...)
 	if err != nil {
 		return out, err
 	}

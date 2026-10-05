@@ -35,7 +35,7 @@ export function UsersPage() {
         if (n !== request.current) return
         setUsers(list)
         setTotal(r.users.length)
-        setRefs({ roles: r.roles, teams: r.teams })
+        setRefs({ roles: r.roles, teams: r.teams, services: r.services ?? [] })
       }),
     [run],
   )

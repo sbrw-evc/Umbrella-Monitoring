@@ -80,6 +80,17 @@ func TestCMDBEvents(t *testing.T) {
 		t.Fatalf("SVC-4 = %+v", h)
 	}
 
+	// A viewer limited to some business services gets events only for the items of those.
+	scoped := s.Map(context.Background(), "SVC-2")
+	for _, c := range scoped.CIs {
+		if n := c.Events.Critical + c.Events.Warning + c.Events.Info; (n > 0) != (c.ID == "CI-2") {
+			t.Fatalf("scoped %s = %+v", c.ID, c.Events)
+		}
+	}
+	if !scoped.Events.Scoped || m.Events.Scoped {
+		t.Fatalf("scoped flag = %v / %v", scoped.Events.Scoped, m.Events.Scoped)
+	}
+
 	// Without the event tables the map still comes, and says why events are missing.
 	s.firing = func(context.Context, time.Time) ([]ingest.FiringEvent, error) { return nil, errors.New("down") }
 	if m := s.Map(context.Background()); m.Events.Available || m.Events.Error != "down" || len(m.CIs) != 3 {

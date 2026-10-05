@@ -104,6 +104,9 @@ type User struct {
 	// since then is kept.
 	MappedRole string `json:"mapped_role,omitempty"`
 	MappedTeam string `json:"mapped_team,omitempty"`
+	// ServiceIDs are the business services whose incidents the user sees; empty means all.
+	// Administrators always see every incident.
+	ServiceIDs []string `json:"service_ids,omitempty"`
 	// Telegram is the chat ID backup notification sends to.
 	Telegram           string     `json:"telegram"`
 	MustChangePassword bool       `json:"must_change_password"`

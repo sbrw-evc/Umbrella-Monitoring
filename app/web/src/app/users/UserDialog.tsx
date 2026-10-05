@@ -9,7 +9,7 @@ import { ProfileFieldsGrid } from '../profile/ProfileFieldsGrid'
 import { useAction, type Action } from '../profile/useAction'
 import { useSession } from '../session'
 import { profileChanged, profileOf, type ProfileFields } from '../types'
-import { AccessFields, type Access } from './AccessFields'
+import { AccessFields, ScopeField, type Access } from './AccessFields'
 import { SourcePill, StatusPill } from './Badges'
 import { adminOf, type ManagedUser, type Refs } from './model'
 import { freshPassword, NewPasswordFields, usePasswordValid, type NewPassword } from './NewPasswordFields'
@@ -176,18 +176,23 @@ function EditView({
   const local = user.source === 'local'
   const [profile, setProfile] = useState<ProfileFields>(() => profileOf(user))
   const [access, setAccess] = useState<Access>(() => accessOf(user))
+  const [scope, setScope] = useState<string[]>(() => user.service_ids ?? [])
 
   useEffect(() => {
     setProfile(profileOf(user))
     setAccess(accessOf(user))
+    setScope(user.service_ids ?? [])
   }, [user])
 
   const saved = accessOf(user)
-  const dirty = (local && profileChanged(profile, profileOf(user))) || access.role_id !== saved.role_id || access.team_id !== saved.team_id
+  const savedScope = user.service_ids ?? []
+  const scopeChanged = scope.length !== savedScope.length || scope.some((id) => !savedScope.includes(id))
+  const dirty =
+    (local && profileChanged(profile, profileOf(user))) || access.role_id !== saved.role_id || access.team_id !== saved.team_id || scopeChanged
 
   const save = () =>
     action.run(async () => {
-      const body = { ...(local ? { profile } : {}), role_id: access.role_id, team_id: access.team_id }
+      const body = { ...(local ? { profile } : {}), role_id: access.role_id, team_id: access.team_id, service_ids: scope }
       onChanged(await api<ManagedUser>('PUT', `/api/users/${encodeURIComponent(user.id)}`, body))
       return t('usr.saved')
     })
@@ -212,8 +217,9 @@ function EditView({
       </section>
       <section className="stack usr-section">
         <h3>{t('usr.section.access')}</h3>
-        <fieldset className="plain-fieldset" disabled={!rights.edit}>
+        <fieldset className="plain-fieldset stack" disabled={!rights.edit}>
           <AccessFields refs={refs} value={access} onChange={setAccess} roleLocked={rights.self} roleHint={roleHint} />
+          <ScopeField refs={refs} value={scope} known={user.services} admin={access.role_id === 'admin'} onChange={setScope} />
         </fieldset>
       </section>
       {(rights.lock || rights.password || rights.remove) && (

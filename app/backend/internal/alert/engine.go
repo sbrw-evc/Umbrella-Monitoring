@@ -397,6 +397,12 @@ var (
 
 // Act applies an action of a person: ack, resolve or comment.
 func (e *Engine) Act(ctx context.Context, id, action, actor, text string) (Alert, error) {
+	return e.ActIn(ctx, id, action, actor, text, nil)
+}
+
+// ActIn is Act for a person who sees only the alerts of some business services (see
+// Alert.InScope): any other alert is ErrNotFound.
+func (e *Engine) ActIn(ctx context.Context, id, action, actor, text string, scope []string) (Alert, error) {
 	now := e.now()
 	var out Alert
 	var cmd *Command
@@ -405,7 +411,7 @@ func (e *Engine) Act(ctx context.Context, id, action, actor, text string) (Alert
 		if err != nil {
 			return err
 		}
-		if a == nil {
+		if a == nil || !a.InScope(scope) {
 			return ErrNotFound
 		}
 		c := &change{a: a}

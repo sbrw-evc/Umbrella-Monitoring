@@ -31,8 +31,9 @@ type TeamRef = { id: string; name: string }
 
 export function IncidentsPage() {
   const t = useT(strings)
-  const { can } = useSession()
+  const { can, user } = useSession()
   const actor = can('incidents:ack')
+  const scoped = user.role !== 'admin' && (user.service_ids?.length ?? 0) > 0
   const [filters, setFilters] = useState<Filters>(() => filtersFromURL(window.location.search))
   const [openID, setOpenID] = useState<string | null>(() => new URLSearchParams(window.location.search).get('id'))
   const [epoch, setEpoch] = useState(0)
@@ -88,6 +89,7 @@ export function IncidentsPage() {
 
   return (
     <div className="ci-page inc-page">
+      {scoped && <Banner kind="info" title={t('inc.scoped')} />}
       <Tiles counts={counts} filters={filters} set={set} />
       <div className="card svc-toolbar">
         <div className="svc-toolbar-row">
