@@ -756,6 +756,12 @@ func sameRoute(a, b Route) bool {
 	return true
 }
 
+// Note adds a line to the timeline of an alert, for what happened outside the engine (backup
+// notification).
+func (e *Engine) Note(ctx context.Context, id, kind, code string, args map[string]string) error {
+	return note(ctx, e.db, id, []Entry{{At: e.now(), Kind: kind, Code: code, Args: args}})
+}
+
 func (e *Engine) List(ctx context.Context, f Filter) (Page, error) { return list(ctx, e.db, f) }
 
 func (e *Engine) Get(ctx context.Context, id string) (Alert, []Entry, error) {

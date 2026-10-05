@@ -1,0 +1,51 @@
+.al-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px 28px;
+  align-items: start;
+}
+
+.al-col {
+  min-width: 0;
+}
+
+.al-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.al-sub {
+  margin: 8px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.al-route {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)) 36px;
+  gap: 12px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.al-remove {
+  margin-bottom: 4px;
+}
+
+.al-test {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.al-test-row {
+  display: flex;
+  gap: 8px;
+  max-width: 520px;
+}
+
+.al-test-row .input {
+  flex: 1;
+}

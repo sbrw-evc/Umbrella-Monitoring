@@ -31,6 +31,7 @@ type harness struct {
 	st    *store.Store
 	bao   *secretstest.Fake
 	vault *secrets.Client
+	app   *app.App
 }
 
 func newHarness(t *testing.T) *harness {

@@ -19,6 +19,7 @@ export type User = ProfileFields & {
   team_id?: string
   must_change_password?: boolean
   timezone: string
+  telegram?: string
   last_login_at?: string
   csrf?: string
   gravatar?: string

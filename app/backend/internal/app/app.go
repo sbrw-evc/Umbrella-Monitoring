@@ -13,6 +13,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/credentials"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pagerduty"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
@@ -67,14 +68,16 @@ type App struct {
 	cmdb      *CMDBService
 	groups    *GroupsService
 
-	creds      *CredentialsService
-	connectors *ConnectorsService
-	queue      *ingest.Queue
-	alerts     *alert.Engine
-	pdGateway  *pagerduty.Gateway
-	pagerduty  *PagerDutyService
-	ready      atomic.Bool
-	rates      rates
+	creds         *CredentialsService
+	connectors    *ConnectorsService
+	queue         *ingest.Queue
+	alerts        *alert.Engine
+	pdGateway     *pagerduty.Gateway
+	pagerduty     *PagerDutyService
+	notifier      *notify.Service
+	notifications *NotificationsService
+	ready         atomic.Bool
+	rates         rates
 }
 
 func New(opt Options, deps Deps) *App {
@@ -139,10 +142,14 @@ func New(opt Options, deps Deps) *App {
 	}
 	a.pdGateway = pagerduty.New(deps.Store, resolver)
 	a.pagerduty = NewPagerDutyService(deps.Store, vault, a.pdGateway)
+	a.notifier = notify.New(deps.Store, resolver)
+	a.notifications = NewNotificationsService(deps.Store, vault, a.notifier)
 	if queue != nil {
 		a.alerts = alert.New(deps.Backend.Pool(), deps.Store)
 		a.alerts.SetSender(a.pdGateway)
+		a.alerts.SetNotifier(a.notifier)
 		a.pdGateway.SetResults(a.alerts)
+		a.notifier.SetResults(a.alerts)
 		queue.SetSink(a.alertSink)
 	}
 	a.cmdb = NewCMDBService(deps.Store, firing)
@@ -167,7 +174,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })
@@ -199,9 +206,15 @@ func (a *App) Run(ctx context.Context) {
 		case <-time.After(10 * time.Second):
 		}
 	}
+	if key, err := alert.LinkKey(ctx, a.deps.Backend.Pool()); err != nil {
+		slog.Error("acknowledgement links are off: no signing key", "err", err)
+	} else {
+		a.notifier.SetLinks(notify.NewLinks(key))
+	}
 	a.ready.Store(true)
 	go a.alerts.Run(ctx)
 	go a.pdGateway.Run(ctx)
+	go a.notifier.Run(ctx)
 	a.queue.Run(ctx, 2, a.process)
 }
 

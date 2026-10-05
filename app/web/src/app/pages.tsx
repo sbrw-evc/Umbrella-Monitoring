@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import { Activity, BellRing, Boxes, Briefcase, Cable, Database, KeyRound, LockKeyhole, Network, Server, ShieldCheck, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
+import { Activity, BellRing, Boxes, Briefcase, Cable, Database, KeyRound, LockKeyhole, Network, Server, ShieldCheck, Siren, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
 import { CIsPage } from './cis/CIsPage'
 import { IncidentsPage } from './incidents/IncidentsPage'
 import { CMDBMapPage } from './cmdb/CMDBMapPage'
@@ -8,6 +8,7 @@ import { CredentialsPage } from './connectors/CredentialsPage'
 import { NetBoxPage } from './netbox/NetBoxPage'
 import { RolesPage } from './roles/RolesPage'
 import { ServicesPage } from './services/ServicesPage'
+import { AlertingSettings } from './settings/alerting/AlertingSettings'
 import { DirectorySettings } from './settings/directory/DirectorySettings'
 import { OpenBaoSettings } from './settings/openbao/OpenBaoSettings'
 import { PolicySettings } from './settings/policy/PolicySettings'
@@ -47,6 +48,7 @@ export const PAGES: PageDef[] = [
   { id: 'roles', path: '/roles', group: 'org', icon: UserCog, Component: RolesPage, subtitle: 'page.roles.subtitle' },
   { id: 'teams', path: '/teams', group: 'org', icon: UsersRound, Component: TeamsPage, subtitle: 'page.teams.subtitle' },
   { id: 'status', path: '/settings/status', group: 'settings', icon: Activity, Component: SystemStatus },
+  { id: 'settings.alerting', path: '/settings/alerting', group: 'settings', icon: Siren, Component: AlertingSettings, subtitle: 'page.settings.alerting.subtitle' },
   { id: 'settings.postgres', path: '/settings/postgresql', group: 'settings', icon: Database, Component: PostgresSettings, subtitle: 'page.settings.subtitle' },
   { id: 'settings.openbao', path: '/settings/openbao', group: 'settings', icon: KeyRound, Component: OpenBaoSettings, subtitle: 'page.settings.subtitle' },
   { id: 'settings.ldap', path: '/settings/ldap', group: 'settings', icon: Network, Component: DirectorySettings, subtitle: 'page.settings.subtitle' },

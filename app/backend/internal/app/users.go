@@ -11,6 +11,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/entra"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
@@ -163,6 +164,21 @@ func (s *UserService) SetTimezone(id string, tz string) (model.User, error) {
 			detail = "default"
 		}
 		d.AddAudit(store.AuditEntry{Actor: u.Username, Action: "user.preferences", Object: u.ID, Detail: "timezone " + detail})
+	})
+}
+
+// SetTelegram sets the Telegram chat backup notification sends to; empty clears it.
+func (s *UserService) SetTelegram(id string, chat string) (model.User, error) {
+	chat = strings.TrimSpace(chat)
+	if chat != "" && !notify.ValidChat(chat) {
+		return model.User{}, invalid("invalid_telegram", nil)
+	}
+	return s.update(id, func(d *store.Data, u *model.User) {
+		if u.Telegram == chat {
+			return
+		}
+		u.Telegram = chat
+		d.AddAudit(store.AuditEntry{Actor: u.Username, Action: "user.preferences", Object: u.ID, Detail: "telegram chat changed"})
 	})
 }
 

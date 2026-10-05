@@ -31,6 +31,8 @@ export const navStrings: Dict = {
     'page.settings.openbao': 'OpenBao',
     'page.settings.ldap': 'LDAP / AD / Entra ID',
     'page.settings.policy': 'Password policy',
+    'page.settings.alerting': 'Alerting',
+    'page.settings.alerting.subtitle': 'PagerDuty, backup notification by mail and Telegram.',
     'page.settings.subtitle': 'Connections and security of this Umbrella installation.',
   },
   ru: {
@@ -63,6 +65,8 @@ export const navStrings: Dict = {
     'page.settings.openbao': 'OpenBao',
     'page.settings.ldap': 'LDAP / AD / Entra ID',
     'page.settings.policy': 'Парольная политика',
+    'page.settings.alerting': 'Оповещения',
+    'page.settings.alerting.subtitle': 'PagerDuty и резервное оповещение по почте и в Telegram.',
     'page.settings.subtitle': 'Подключения и безопасность этой установки Umbrella.',
   },
 }

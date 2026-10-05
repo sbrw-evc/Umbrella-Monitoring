@@ -6,6 +6,7 @@ import { fullName } from '../types'
 import { AccountCard } from './AccountCard'
 import { PasswordCard } from './PasswordCard'
 import { PersonalCard } from './PersonalCard'
+import { TelegramCard } from './TelegramCard'
 import { TimezoneCard } from './TimezoneCard'
 
 export function ProfilePage() {
@@ -26,6 +27,7 @@ export function ProfilePage() {
         <PersonalCard />
         {user.source === 'local' && <PasswordCard />}
         <TimezoneCard />
+        <TelegramCard />
         <AccountCard />
       </div>
     </>

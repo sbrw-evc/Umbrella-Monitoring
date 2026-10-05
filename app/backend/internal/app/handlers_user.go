@@ -21,6 +21,7 @@ func (a *App) respondUser(w http.ResponseWriter, r *http.Request, u model.User, 
 
 type preferencesInput struct {
 	Timezone *string `json:"timezone"`
+	Telegram *string `json:"telegram"`
 }
 
 func (a *App) preferences(w http.ResponseWriter, r *http.Request) {
@@ -29,12 +30,13 @@ func (a *App) preferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := current(r).user.ID
-	if in.Timezone == nil {
-		u, err := a.users.Get(id)
-		a.respondUser(w, r, u, err)
-		return
+	u, err := a.users.Get(id)
+	if err == nil && in.Telegram != nil {
+		u, err = a.users.SetTelegram(id, *in.Telegram)
 	}
-	u, err := a.users.SetTimezone(id, *in.Timezone)
+	if err == nil && in.Timezone != nil {
+		u, err = a.users.SetTimezone(id, *in.Timezone)
+	}
 	a.respondUser(w, r, u, err)
 }
 

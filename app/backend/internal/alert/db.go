@@ -2,6 +2,7 @@ package alert
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -50,6 +51,11 @@ CREATE TABLE IF NOT EXISTS alert_timeline (
 	author   text NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS alert_timeline_alert ON alert_timeline (alert_id, id);
+
+CREATE TABLE IF NOT EXISTS alert_keys (
+	name  text PRIMARY KEY,
+	value bytea NOT NULL
+);
 `
 
 // lockKey serializes folding events into alerts between workers and Umbrella instances, so
@@ -69,6 +75,38 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 var ErrNotFound = errors.New("alert not found")
+
+// LinkKey is the key acknowledgement links in notifications are signed with. It is made once
+// and shared by every Umbrella instance through the database.
+func LinkKey(ctx context.Context, pool *pgxpool.Pool) ([]byte, error) {
+	fresh := make([]byte, 32)
+	if _, err := rand.Read(fresh); err != nil {
+		return nil, err
+	}
+	var key []byte
+	err := pool.QueryRow(ctx, `WITH ins AS (INSERT INTO alert_keys (name, value) VALUES ('links', $1) ON CONFLICT (name) DO NOTHING RETURNING value)
+		SELECT value FROM ins UNION ALL SELECT value FROM alert_keys WHERE name = 'links' LIMIT 1`, fresh).Scan(&key)
+	return key, err
+}
+
+// note adds lines to the timeline of an alert without changing the alert.
+func note(ctx context.Context, db *pgxpool.Pool, id string, entries []Entry) error {
+	for _, e := range entries {
+		args := e.Args
+		if args == nil {
+			args = map[string]string{}
+		}
+		tag, err := db.Exec(ctx, `INSERT INTO alert_timeline (alert_id, at, kind, code, args, author)
+			SELECT id, $2, $3, $4, $5, $6 FROM alerts WHERE id = $1`, id, e.At, e.Kind, e.Code, args, e.Author)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+	}
+	return nil
+}
 
 type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row

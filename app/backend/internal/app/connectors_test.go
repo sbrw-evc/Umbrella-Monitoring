@@ -67,7 +67,7 @@ func newPGHarness(t *testing.T) *harness {
 	})
 	srv := httptest.NewServer(a.Handler())
 	t.Cleanup(srv.Close)
-	h := &harness{t: t, srv: srv, st: st, bao: bao, vault: vault}
+	h := &harness{t: t, srv: srv, st: st, bao: bao, vault: vault, app: a}
 	deadline := time.Now().Add(15 * time.Second)
 	for !a.IngestReady() {
 		if time.Now().After(deadline) {

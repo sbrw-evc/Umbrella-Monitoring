@@ -33,9 +33,10 @@ type UserRef struct {
 }
 
 type Refs struct {
-	Roles []RoleRef `json:"roles"`
-	Teams []TeamRef `json:"teams"`
-	Users []UserRef `json:"users"`
+	Roles    []RoleRef    `json:"roles"`
+	Teams    []TeamRef    `json:"teams"`
+	Users    []UserRef    `json:"users"`
+	Services []ServiceRef `json:"services"`
 }
 
 type CatalogView struct {
@@ -59,7 +60,7 @@ func (a *App) catalog(w http.ResponseWriter, r *http.Request) {
 func byName(a, b string) int { return strings.Compare(strings.ToLower(a), strings.ToLower(b)) }
 
 func (a *App) collectRefs() Refs {
-	out := Refs{Roles: []RoleRef{}, Teams: []TeamRef{}, Users: []UserRef{}}
+	out := Refs{Roles: []RoleRef{}, Teams: []TeamRef{}, Users: []UserRef{}, Services: []ServiceRef{}}
 	a.deps.Store.Read(func(d *store.Data) {
 		for _, r := range d.Roles {
 			out.Roles = append(out.Roles, RoleRef{ID: r.ID, Name: r.Name, System: r.System})
@@ -71,9 +72,13 @@ func (a *App) collectRefs() Refs {
 			out.Users = append(out.Users, UserRef{ID: u.ID, Username: u.Username, Name: u.Profile.DisplayName(u.Username), Source: u.Source,
 				Disabled: u.Disabled, RoleID: d.RoleOf(u).ID, TeamID: u.TeamID})
 		}
+		for _, s := range d.Services {
+			out.Services = append(out.Services, ServiceRef{ID: s.ID, Name: s.Name})
+		}
 	})
 	slices.SortFunc(out.Roles, func(x, y RoleRef) int { return byName(x.Name, y.Name) })
 	slices.SortFunc(out.Teams, func(x, y TeamRef) int { return byName(x.Name, y.Name) })
 	slices.SortFunc(out.Users, func(x, y UserRef) int { return byName(x.Name, y.Name) })
+	slices.SortFunc(out.Services, func(x, y ServiceRef) int { return byName(x.Name, y.Name) })
 	return out
 }
