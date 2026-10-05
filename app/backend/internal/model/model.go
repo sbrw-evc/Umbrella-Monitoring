@@ -102,8 +102,10 @@ type User struct {
 	// MappedRole and MappedTeam are the values a group mapping last gave the user. When the
 	// mapping stops matching, a value still equal to them is withdrawn; a value changed by hand
 	// since then is kept.
-	MappedRole         string     `json:"mapped_role,omitempty"`
-	MappedTeam         string     `json:"mapped_team,omitempty"`
+	MappedRole string `json:"mapped_role,omitempty"`
+	MappedTeam string `json:"mapped_team,omitempty"`
+	// Telegram is the chat ID backup notification sends to.
+	Telegram           string     `json:"telegram"`
 	MustChangePassword bool       `json:"must_change_password"`
 	PasswordRef        string     `json:"-"`
 	ExternalID         string     `json:"-"`

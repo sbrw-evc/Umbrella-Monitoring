@@ -19,6 +19,7 @@ type Data struct {
 	Connectors  map[string]*model.Connector
 	Credentials map[string]*model.Credential
 	ConfigItems map[string]*model.ConfigItem
+	Maintenance map[string]*model.Maintenance
 	// NetBoxContacts maps NetBox contact IDs to the user accounts made or found for them.
 	NetBoxContacts map[int]string
 	NetBoxSync     model.SyncState
@@ -75,6 +76,9 @@ func (d *Data) init() {
 	if d.ConfigItems == nil {
 		d.ConfigItems = map[string]*model.ConfigItem{}
 	}
+	if d.Maintenance == nil {
+		d.Maintenance = map[string]*model.Maintenance{}
+	}
 	if d.NetBoxContacts == nil {
 		d.NetBoxContacts = map[int]string{}
 	}
@@ -94,6 +98,13 @@ func (s *Store) Write(f func(d *Data)) {
 	defer s.mu.Unlock()
 	s.version++
 	f(&s.d)
+}
+
+// Version changes with every write, so readers can tell whether a copy they keep is stale.
+func (s *Store) Version() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.version
 }
 
 func (d *Data) NextID(prefix string) string {
