@@ -1,0 +1,10 @@
+.directory-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+
+.directory-actions .hint {
+  margin-right: auto;
+}

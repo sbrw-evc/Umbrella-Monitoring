@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/credentials"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
@@ -18,8 +19,13 @@ func Migrate(ctx context.Context, st *store.Store, vault credentials.Vault) erro
 			d.AddAudit(store.AuditEntry{Actor: "system", Action: "settings.password_policy", Detail: "default policy applied"})
 			changed = true
 		}
+		now := time.Now().UTC()
 		for _, u := range d.Users {
 			if splitName(u) {
+				changed = true
+			}
+			if u.Source == model.SourceLocal && u.PasswordChangedAt.IsZero() {
+				u.PasswordChangedAt = now
 				changed = true
 			}
 		}

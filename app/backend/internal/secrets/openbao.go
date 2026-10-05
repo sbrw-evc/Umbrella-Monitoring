@@ -482,6 +482,7 @@ type Status struct {
 	Addr        string     `json:"addr,omitempty"`
 	Mount       string     `json:"mount,omitempty"`
 	Auth        string     `json:"auth,omitempty"`
+	Namespace   string     `json:"namespace,omitempty"`
 	Reachable   bool       `json:"reachable"`
 	Initialized bool       `json:"initialized"`
 	Sealed      bool       `json:"sealed"`
@@ -489,6 +490,7 @@ type Status struct {
 	ClusterName string     `json:"cluster_name,omitempty"`
 	TokenOK     bool       `json:"token_ok"`
 	TokenExpiry *time.Time `json:"token_expires,omitempty"`
+	Renewable   bool       `json:"renewable"`
 	Policies    []string   `json:"policies,omitempty"`
 	MountOK     bool       `json:"mount_ok"`
 	Error       string     `json:"error,omitempty"`
@@ -500,7 +502,7 @@ func (c *Client) Status(ctx context.Context) Status {
 	if !c.Enabled() {
 		return Status{Error: ErrNotConfigured.Error()}
 	}
-	s := Status{Configured: true, Addr: c.cfg.Addr, Mount: c.cfg.Mount, Auth: c.authMethod()}
+	s := Status{Configured: true, Addr: c.cfg.Addr, Mount: c.cfg.Mount, Auth: c.authMethod(), Namespace: c.cfg.Namespace}
 	var h struct {
 		Initialized bool   `json:"initialized"`
 		Sealed      bool   `json:"sealed"`
@@ -527,7 +529,7 @@ func (c *Client) Status(ctx context.Context) Status {
 		s.Error = err.Error()
 		return c.withLast(s)
 	}
-	s.TokenOK, s.Policies = true, info.Policies
+	s.TokenOK, s.Policies, s.Renewable = true, info.Policies, info.Renewable
 	if info.TTL > 0 {
 		t := time.Now().Add(time.Duration(info.TTL) * time.Second)
 		s.TokenExpiry = &t

@@ -105,8 +105,9 @@ func (s *UserService) ChangePassword(ctx context.Context, id, current, next stri
 	if err != nil {
 		return err
 	}
+	now := s.now()
 	_, err = s.update(id, func(d *store.Data, u *model.User) {
-		u.PasswordRef = ref
+		u.PasswordRef, u.PasswordChangedAt = ref, now
 		d.AddAudit(store.AuditEntry{Actor: u.Username, Action: "user.password", Object: u.ID})
 	})
 	return err

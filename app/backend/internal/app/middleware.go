@@ -23,6 +23,13 @@ func current(r *http.Request) session {
 	return s
 }
 
+var allowedWhenExpired = map[string]bool{
+	"GET /api/auth/me":           true,
+	"POST /api/auth/logout":      true,
+	"PUT /api/auth/me/password":  true,
+	"GET /api/users/{id}/avatar": true,
+}
+
 func (a *App) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(CookieName)
@@ -50,6 +57,10 @@ func (a *App) authed(next http.HandlerFunc) http.HandlerFunc {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead &&
 			subtle.ConstantTimeCompare([]byte(r.Header.Get(CSRFHeader)), []byte(ss.CSRF)) != 1 {
 			writeError(w, invalidCSRF)
+			return
+		}
+		if !allowedWhenExpired[r.Pattern] && a.policy.Age(*u).Expired {
+			writeError(w, ErrPasswordExpired)
 			return
 		}
 		next(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, session{user: *u, ss: ss})))

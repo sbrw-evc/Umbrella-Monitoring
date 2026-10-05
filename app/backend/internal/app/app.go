@@ -33,16 +33,21 @@ type Deps struct {
 	Backend  *store.PGBackend
 	Store    *store.Store
 	Sessions *auth.Sessions
+	Runtime  Runtime
 }
 
 type App struct {
-	opt      Options
-	deps     Deps
-	auth     *AuthService
-	users    *UserService
-	settings *SettingsService
-	status   *StatusService
-	limiter  *Limiter
+	opt       Options
+	deps      Deps
+	auth      *AuthService
+	users     *UserService
+	settings  *SettingsService
+	status    *StatusService
+	limiter   *Limiter
+	policy    *PolicyService
+	directory *DirectoryService
+	postgres  *PostgresService
+	openbao   *OpenBaoService
 }
 
 func New(opt Options, deps Deps) *App {
@@ -53,13 +58,17 @@ func New(opt Options, deps Deps) *App {
 	dir := ldapDirectory{}
 	users := NewUserService(deps.Store, passwords)
 	return &App{
-		opt:      opt,
-		deps:     deps,
-		users:    users,
-		auth:     NewAuthService(deps.Store, passwords, deps.Vault, dir, users),
-		settings: NewSettingsService(deps.Store),
-		status:   NewStatusService(deps.Store, deps.Vault, deps.Backend, dir, opt.Version),
-		limiter:  NewLimiter(maxFailures, failWindow, lockout),
+		opt:       opt,
+		deps:      deps,
+		users:     users,
+		auth:      NewAuthService(deps.Store, passwords, deps.Vault, dir, users),
+		settings:  NewSettingsService(deps.Store),
+		status:    NewStatusService(deps.Store, deps.Vault, deps.Backend, dir, opt.Version),
+		limiter:   NewLimiter(maxFailures, failWindow, lockout),
+		policy:    NewPolicyService(deps.Store),
+		directory: NewDirectoryService(deps.Store, deps.Vault, dir, deps.Sessions),
+		postgres:  NewPostgresService(deps.Store, deps.Backend, deps.Vault, deps.Runtime, deps.Config),
+		openbao:   NewOpenBaoService(deps.Store, deps.Vault, deps.Runtime, deps.Config),
 	}
 }
 
@@ -80,6 +89,9 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.admin(a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.admin(a.system)))
+	for _, register := range []func(*http.ServeMux){a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerPolicy} {
+		register(mux)
+	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })
 	mux.Handle("/", a.opt.Web)
 	return httpx.Secure(mux)

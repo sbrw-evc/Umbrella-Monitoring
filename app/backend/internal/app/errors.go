@@ -21,6 +21,8 @@ var (
 	ErrTooManyAttempts      = errors.New("too many failed attempts")
 	ErrNotFound             = errors.New("not found")
 	ErrUnauthenticated      = errors.New("unauthenticated")
+	ErrPasswordExpired      = errors.New("the password has expired")
+	ErrNoLocalAdmin         = errors.New("no active local administrator would remain")
 
 	invalidCSRF = errors.New("csrf")
 	forbidden   = errors.New("forbidden")
@@ -58,6 +60,8 @@ var statuses = []struct {
 	{ErrNotFound, http.StatusNotFound, "not_found"},
 	{invalidCSRF, http.StatusForbidden, "csrf"},
 	{forbidden, http.StatusForbidden, "forbidden"},
+	{ErrPasswordExpired, http.StatusForbidden, "password_expired"},
+	{ErrNoLocalAdmin, http.StatusConflict, "no_local_admin"},
 }
 
 func writeError(w http.ResponseWriter, err error) {

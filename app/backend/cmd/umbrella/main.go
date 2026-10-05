@@ -50,22 +50,74 @@ func (s *switchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 type runtime struct {
-	mu      sync.Mutex
-	cancel  context.CancelFunc
-	done    chan struct{}
-	backend *store.PGBackend
+	mu       sync.Mutex
+	switchMu sync.Mutex
+	cancel   context.CancelFunc
+	done     chan struct{}
+	cfg      config.File
+	vault    *secrets.Client
+	backend  *store.PGBackend
+	st       *store.Store
+	dataDir  string
+	handler  *switchHandler
+	launch   func(config.File, *secrets.Client, *store.PGBackend, *store.Store)
 }
 
-func (rt *runtime) stop() {
+func (rt *runtime) halt() (config.File, *secrets.Client, *store.PGBackend, *store.Store, bool) {
 	rt.mu.Lock()
-	cancel, done, backend := rt.cancel, rt.done, rt.backend
+	cancel, done := rt.cancel, rt.done
+	cfg, vault, backend, st := rt.cfg, rt.vault, rt.backend, rt.st
+	rt.cancel, rt.done = nil, nil
 	rt.mu.Unlock()
 	if cancel == nil {
-		return
+		return cfg, vault, backend, st, false
 	}
 	cancel()
 	<-done
-	backend.Close()
+	return cfg, vault, backend, st, true
+}
+
+func (rt *runtime) stop() {
+	if _, _, backend, _, ok := rt.halt(); ok {
+		backend.Close()
+	}
+}
+
+func (rt *runtime) Switch(ctx context.Context, transfer func(ctx context.Context) (config.File, error)) error {
+	rt.switchMu.Lock()
+	defer rt.switchMu.Unlock()
+	rt.handler.Set(maintenance{})
+	oldCfg, oldVault, oldBackend, oldSt, ok := rt.halt()
+	if !ok {
+		return errors.New("umbrella is not running")
+	}
+	restore := func(err error) error {
+		rt.launch(oldCfg, oldVault, oldBackend, oldSt)
+		return err
+	}
+	cfg, err := transfer(ctx)
+	if err != nil {
+		return restore(err)
+	}
+	vault, backend, st, err := open(ctx, cfg, 15*time.Second)
+	if err != nil {
+		return restore(err)
+	}
+	if err := config.Write(rt.dataDir, cfg); err != nil {
+		backend.Close()
+		return restore(err)
+	}
+	oldBackend.Close()
+	rt.launch(cfg, vault, backend, st)
+	slog.Info("umbrella reconfigured", "openbao", cfg.OpenBao.Addr, "storage", backend.Where())
+	return nil
+}
+
+type maintenance struct{}
+
+func (maintenance) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Retry-After", "2")
+	httpx.Error(w, http.StatusServiceUnavailable, "switching", errors.New("Umbrella is switching its connections, try again in a moment"))
 }
 
 func main() {
@@ -104,9 +156,9 @@ func main() {
 		slog.Warn("sessions not restored", "err", err)
 	}
 
-	rt := &runtime{}
 	handler := &switchHandler{}
-	start := func(cfg config.File, vault *secrets.Client, backend *store.PGBackend, st *store.Store) {
+	rt := &runtime{dataDir: *dataDir, handler: handler}
+	rt.launch = func(cfg config.File, vault *secrets.Client, backend *store.PGBackend, st *store.Store) {
 		bg, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 		go vault.Run(bg)
@@ -115,18 +167,24 @@ func main() {
 			close(done)
 		}()
 		rt.mu.Lock()
-		rt.cancel, rt.done, rt.backend = cancel, done, backend
+		rt.cancel, rt.done = cancel, done
+		rt.cfg, rt.vault, rt.backend, rt.st = cfg, vault, backend, st
 		rt.mu.Unlock()
-		a := app.New(opts, app.Deps{Config: cfg, Vault: vault, Backend: backend, Store: st, Sessions: sessions})
+		a := app.New(opts, app.Deps{Config: cfg, Vault: vault, Backend: backend, Store: st, Sessions: sessions, Runtime: rt})
 		handler.Set(a.Handler())
 	}
+	start := rt.launch
 
 	cfg, found, err := config.Read(*dataDir)
 	if err != nil {
 		fail("configuration", err)
 	}
 	if found && cfg.CompletedAt != nil {
-		vault, backend, st, err := open(ctx, cfg)
+		wait, err := time.ParseDuration(env("UMBRELLA_STARTUP_WAIT", "2m"))
+		if err != nil {
+			wait = 2 * time.Minute
+		}
+		vault, backend, st, err := open(ctx, cfg, wait)
 		if err != nil {
 			fail("startup", err)
 		}
@@ -163,14 +221,10 @@ func main() {
 	slog.Info("umbrella stopped")
 }
 
-func open(ctx context.Context, cfg config.File) (*secrets.Client, *store.PGBackend, *store.Store, error) {
+func open(ctx context.Context, cfg config.File, wait time.Duration) (*secrets.Client, *store.PGBackend, *store.Store, error) {
 	vault, err := cfg.OpenBao.Client()
 	if err != nil {
 		return nil, nil, nil, err
-	}
-	wait, err := time.ParseDuration(env("UMBRELLA_STARTUP_WAIT", "2m"))
-	if err != nil {
-		wait = 2 * time.Minute
 	}
 	if err := vault.Ready(ctx, wait); err != nil {
 		return nil, nil, nil, fmt.Errorf("OpenBao %s: %w", cfg.OpenBao.Addr, err)

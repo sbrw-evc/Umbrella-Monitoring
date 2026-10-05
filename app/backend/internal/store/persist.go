@@ -141,6 +141,14 @@ func (s *Store) Flush() error {
 	return nil
 }
 
+func (s *Store) Export() ([]byte, error) {
+	var buf bytes.Buffer
+	s.mu.RLock()
+	err := gob.NewEncoder(&buf).Encode(snapshot{Format: snapshotFormat, SavedAt: time.Now(), Data: s.d})
+	s.mu.RUnlock()
+	return buf.Bytes(), err
+}
+
 func WriteFileAtomic(path string, data []byte) error {
 	tmp := path + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)

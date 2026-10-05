@@ -39,6 +39,12 @@ func TestMigrate(t *testing.T) {
 		if u := d.Users["USR-2"]; u.LastName != "" {
 			t.Fatalf("directory users keep directory data: %+v", u.Profile)
 		}
+		if d.Users["USR-1"].PasswordChangedAt.IsZero() || d.Users["USR-3"].PasswordChangedAt.IsZero() {
+			t.Fatal("local users must get a password change time so they do not expire at once")
+		}
+		if !d.Users["USR-2"].PasswordChangedAt.IsZero() {
+			t.Fatal("directory users have no local password age")
+		}
 		if d.Users["USR-2"].PasswordRef != "" {
 			t.Fatal("directory user must not get a password")
 		}

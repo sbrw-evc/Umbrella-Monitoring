@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/config"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
@@ -22,6 +23,10 @@ type Directory interface {
 type Database interface {
 	Where() string
 	Info(ctx context.Context) (store.PGInfo, error)
+}
+
+type Runtime interface {
+	Switch(ctx context.Context, transfer func(ctx context.Context) (config.File, error)) error
 }
 
 type ldapDirectory struct{}

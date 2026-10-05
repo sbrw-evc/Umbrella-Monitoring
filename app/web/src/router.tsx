@@ -6,6 +6,14 @@ type Router = { path: string; navigate: (to: string, options?: NavigateOptions) 
 
 const RouterContext = createContext<Router>({ path: '/', navigate: () => {} })
 
+export const SCROLL_ROOT_ID = 'app-main'
+
+function scrollToTop() {
+  const root = document.getElementById(SCROLL_ROOT_ID)
+  if (root) root.scrollTo({ top: 0 })
+  else window.scrollTo({ top: 0 })
+}
+
 function currentPath() {
   return document.location.pathname || '/'
 }
@@ -24,7 +32,7 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     if (replace) window.history.replaceState(null, '', to)
     else window.history.pushState(null, '', to)
     setPath(currentPath())
-    window.scrollTo({ top: 0 })
+    scrollToTop()
   }, [])
 
   const value = useMemo(() => ({ path, navigate }), [path, navigate])

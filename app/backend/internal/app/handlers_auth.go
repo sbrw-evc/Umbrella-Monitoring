@@ -42,7 +42,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	ss := a.deps.Sessions.Create(u.ID)
 	u = a.auth.Signed(u.ID, clientIP(r))
 	a.setCookie(w, ss.ID, int(auth.MaxLifetime/time.Second))
-	httpx.JSON(w, http.StatusOK, view(u, ss.CSRF))
+	httpx.JSON(w, http.StatusOK, a.view(u, ss.CSRF))
 }
 
 func (a *App) logout(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +55,7 @@ func (a *App) logout(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) me(w http.ResponseWriter, r *http.Request) {
 	s := current(r)
-	httpx.JSON(w, http.StatusOK, view(s.user, s.ss.CSRF))
+	httpx.JSON(w, http.StatusOK, a.view(s.user, s.ss.CSRF))
 }
 
 func (a *App) setCookie(w http.ResponseWriter, value string, maxAge int) {

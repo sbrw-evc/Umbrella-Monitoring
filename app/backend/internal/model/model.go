@@ -89,17 +89,18 @@ type User struct {
 	Username string `json:"username"`
 	Name     string `json:"name"`
 	Profile
-	Avatar       []byte     `json:"-"`
-	AvatarSource string     `json:"avatar_source,omitempty"`
-	AvatarAt     *time.Time `json:"avatar_at,omitempty"`
-	Source       string     `json:"source"`
-	Timezone     string     `json:"timezone"`
-	Role         string     `json:"role"`
-	PasswordRef  string     `json:"-"`
-	PasswordHash string     `json:"-"`
-	Disabled     bool       `json:"disabled"`
-	CreatedAt    time.Time  `json:"created_at"`
-	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
+	Avatar            []byte     `json:"-"`
+	AvatarSource      string     `json:"avatar_source,omitempty"`
+	AvatarAt          *time.Time `json:"avatar_at,omitempty"`
+	Source            string     `json:"source"`
+	Timezone          string     `json:"timezone"`
+	Role              string     `json:"role"`
+	PasswordRef       string     `json:"-"`
+	PasswordHash      string     `json:"-"`
+	PasswordChangedAt time.Time  `json:"password_changed_at,omitzero"`
+	Disabled          bool       `json:"disabled"`
+	CreatedAt         time.Time  `json:"created_at"`
+	LastLoginAt       *time.Time `json:"last_login_at,omitempty"`
 }
 
 type Settings struct {

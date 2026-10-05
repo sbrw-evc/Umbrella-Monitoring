@@ -10,6 +10,8 @@ const KEY = 'umbrella.locale'
 
 export const common: Dict = {
   en: {
+    'num.dec': 'Decrease',
+    'num.inc': 'Increase',
     'app.name': 'Umbrella Monitoring',
     'theme.light': 'Light',
     'theme.dark': 'Dark',
@@ -62,6 +64,8 @@ export const common: Dict = {
     'err.unknown': 'Something went wrong.',
   },
   ru: {
+    'num.dec': 'Уменьшить',
+    'num.inc': 'Увеличить',
     'app.name': 'Umbrella Monitoring',
     'theme.light': 'Светлая',
     'theme.dark': 'Тёмная',

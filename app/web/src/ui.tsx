@@ -9,7 +9,7 @@ import {
   type SelectHTMLAttributes,
   type TextareaHTMLAttributes,
 } from 'react'
-import { AlertTriangle, CheckCircle2, Eye, EyeOff, Info, Loader2, Moon, Sun, X, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Eye, EyeOff, Info, Loader2, Minus, Moon, Plus, Sun, X, XCircle } from 'lucide-react'
 import { AnimatePresence, motion, type HTMLMotionProps, type Transition } from 'motion/react'
 import { useLocale, useT } from './i18n'
 import { useTheme } from './theme'
@@ -74,7 +74,19 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea {...props} className="input textarea" />
 }
 
-export function Switch({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
+export function Switch({
+  checked,
+  onChange,
+  label,
+  hint,
+  aside,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  label: string
+  hint?: string
+  aside?: ReactNode
+}) {
   const id = useId()
   return (
     <div className="switch-row">
@@ -85,6 +97,96 @@ export function Switch({ checked, onChange, label, hint }: { checked: boolean; o
         <span>{label}</span>
         {hint && <span className="hint">{hint}</span>}
       </label>
+      <AnimatePresence initial={false}>
+        {aside && (
+          <motion.div
+            className="switch-aside"
+            initial={{ opacity: 0, x: 8 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 8 }}
+            transition={{ duration: 0.16 }}
+          >
+            {aside}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+export function Stepper({
+  value,
+  onChange,
+  min,
+  max,
+  label,
+  id,
+  suffix,
+}: {
+  value: number
+  onChange: (v: number) => void
+  min: number
+  max: number
+  label?: string
+  id?: string
+  suffix?: string
+}) {
+  const t = useT()
+  const [draft, setDraft] = useState(String(value))
+  useEffect(() => setDraft(String(value)), [value])
+  const clamp = (v: number) => Math.min(max, Math.max(min, Math.trunc(v)))
+  const commit = (text: string) => {
+    const n = Number(text)
+    const next = text.trim() === '' || Number.isNaN(n) ? value : clamp(n)
+    setDraft(String(next))
+    if (next !== value) onChange(next)
+  }
+  const step = (d: number) => onChange(clamp(value + d))
+  return (
+    <div className="stepper" role="group" aria-label={label}>
+      <button type="button" className="stepper-btn" onClick={() => step(-1)} disabled={value <= min} aria-label={t('num.dec')} tabIndex={-1}>
+        <Minus size={14} />
+      </button>
+      <input
+        id={id}
+        className="stepper-input"
+        inputMode="numeric"
+        aria-label={label}
+        value={draft}
+        size={Math.max(String(max).length, 2)}
+        onChange={(e) => {
+          const text = e.target.value.replace(/[^0-9]/g, '')
+          setDraft(text)
+          const n = Number(text)
+          if (text !== '' && n >= min && n <= max) onChange(n)
+        }}
+        onBlur={(e) => commit(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            step(1)
+          } else if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            step(-1)
+          } else if (e.key === 'Enter') commit(draft)
+        }}
+      />
+      {suffix && <span className="stepper-suffix">{suffix}</span>}
+      <button type="button" className="stepper-btn" onClick={() => step(1)} disabled={value >= max} aria-label={t('num.inc')} tabIndex={-1}>
+        <Plus size={14} />
+      </button>
+    </div>
+  )
+}
+
+export function SettingRow({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <div className="setting-row">
+      <div className="setting-text">
+        <span>{label}</span>
+        {hint && <span className="hint">{hint}</span>}
+      </div>
+      <div className="setting-control">{children}</div>
     </div>
   )
 }

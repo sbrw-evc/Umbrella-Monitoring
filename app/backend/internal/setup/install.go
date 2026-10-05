@@ -23,14 +23,14 @@ type adminInput struct {
 }
 
 type completeInput struct {
-	Locale   string               `json:"locale"`
-	Theme    string               `json:"theme"`
-	Timezone string               `json:"timezone"`
-	Policy   model.PasswordPolicy `json:"password_policy"`
-	OpenBao  config.OpenBao       `json:"openbao"`
-	Postgres pgInput              `json:"postgres"`
-	LDAP     ldapInput            `json:"ldap"`
-	Admin    adminInput           `json:"admin"`
+	Locale   string                `json:"locale"`
+	Theme    string                `json:"theme"`
+	Timezone string                `json:"timezone"`
+	Policy   model.PasswordPolicy  `json:"password_policy"`
+	OpenBao  config.OpenBao        `json:"openbao"`
+	Postgres pgInput               `json:"postgres"`
+	LDAP     directory.TestRequest `json:"ldap"`
+	Admin    adminInput            `json:"admin"`
 }
 
 type stepError struct {
@@ -75,7 +75,7 @@ func (m *Module) apply(ctx context.Context, in completeInput) (Result, error) {
 	if err != nil {
 		return res, fail(http.StatusBadRequest, "openbao_invalid", err)
 	}
-	vault, rep := checkOpenBao(ctx, ob)
+	vault, rep := ob.Check(ctx)
 	if !rep.OK {
 		return res, fail(http.StatusBadRequest, "openbao_unavailable", errors.New(rep.Error))
 	}
@@ -92,7 +92,7 @@ func (m *Module) apply(ctx context.Context, in completeInput) (Result, error) {
 		ldapCfg.Enabled = true
 	}
 
-	pg, err := in.Postgres.config().Normalize()
+	pg, err := in.Postgres.Config().Normalize()
 	if err != nil {
 		return res, fail(http.StatusBadRequest, "postgres_invalid", err)
 	}
@@ -116,12 +116,12 @@ func (m *Module) apply(ctx context.Context, in completeInput) (Result, error) {
 		return res, fail(http.StatusBadGateway, "openbao_write_failed", err)
 	}
 	if ldapCfg.Enabled {
-		ref, err := vault.PutRef(ctx, secretLDAP, "bind_password", in.LDAP.BindPassword)
+		ref, err := vault.PutRef(ctx, directory.SecretPath, directory.SecretKey, in.LDAP.BindPassword)
 		if err != nil {
 			return res, fail(http.StatusBadGateway, "openbao_write_failed", err)
 		}
 		ldapCfg.BindPasswordRef = ref
-	} else if err := vault.Delete(ctx, secretLDAP); err != nil && !errors.Is(err, secrets.ErrNotFound) {
+	} else if err := vault.Delete(ctx, directory.SecretPath); err != nil && !errors.Is(err, secrets.ErrNotFound) {
 		slog.Warn("setup: old directory secret not removed", "err", err)
 	}
 
@@ -160,7 +160,7 @@ func (m *Module) apply(ctx context.Context, in completeInput) (Result, error) {
 		backend.Close()
 		return res, fail(http.StatusBadGateway, "openbao_write_failed", err)
 	}
-	st.Write(func(d *store.Data) { d.Users[adminID].PasswordRef = passRef })
+	st.Write(func(d *store.Data) { d.Users[adminID].PasswordRef, d.Users[adminID].PasswordChangedAt = passRef, now })
 	if err := st.Flush(); err != nil {
 		backend.Close()
 		return res, fail(http.StatusBadGateway, "postgres_write_failed", err)

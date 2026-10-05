@@ -21,6 +21,9 @@ export type User = ProfileFields & {
   has_avatar?: boolean
   avatar_version?: string
   avatar_source?: 'upload' | 'ldap'
+  password_expired?: boolean
+  password_expiry_warning?: boolean
+  password_expires_at?: string
 }
 
 export const PROFILE_KEYS: (keyof ProfileFields)[] = ['last_name', 'first_name', 'middle_name', 'title', 'department', 'manager', 'email']

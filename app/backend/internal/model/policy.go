@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -16,6 +17,9 @@ const (
 	PolicyMinLength = 8
 	PolicyMaxLength = 128
 	PolicyMaxCount  = 16
+
+	PolicyMaxAgeDays  = 3650
+	PolicyMaxWarnDays = 90
 
 	MaxPasswordLength = 256
 )
@@ -38,6 +42,8 @@ type PasswordPolicy struct {
 	MinSpecial       int    `json:"min_special"`
 	RequireMixedCase bool   `json:"require_mixed_case"`
 	Letters          string `json:"letters"`
+	MaxAgeDays       int    `json:"max_age_days"`
+	WarnDays         int    `json:"warn_days"`
 }
 
 func DefaultPasswordPolicy() PasswordPolicy {
@@ -65,6 +71,14 @@ func (p PasswordPolicy) Normalize() (PasswordPolicy, error) {
 		p.Letters = LettersAny
 	default:
 		return p, errors.New("allowed letters must be latin, cyrillic, latin_cyrillic or any")
+	}
+	if p.MaxAgeDays < 0 || p.MaxAgeDays > PolicyMaxAgeDays {
+		return p, fmt.Errorf("password lifetime must be between 1 and %d days, or 0 for no expiry", PolicyMaxAgeDays)
+	}
+	if p.MaxAgeDays == 0 {
+		p.WarnDays = 0
+	} else if p.WarnDays < 0 || p.WarnDays > PolicyMaxWarnDays || p.WarnDays >= p.MaxAgeDays {
+		return p, fmt.Errorf("expiry warning must be between 0 and %d days and shorter than the password lifetime", PolicyMaxWarnDays)
 	}
 	need := p.MinDigits + p.MinSpecial
 	if p.RequireMixedCase {
@@ -148,4 +162,22 @@ func (p PasswordPolicy) Validate(password, username string) error {
 		return &PolicyError{Violations: v}
 	}
 	return nil
+}
+
+type PasswordAge struct {
+	ExpiresAt time.Time
+	Expired   bool
+	Warning   bool
+}
+
+func (p PasswordPolicy) Age(changedAt, now time.Time) PasswordAge {
+	if p.MaxAgeDays <= 0 || changedAt.IsZero() {
+		return PasswordAge{}
+	}
+	expires := changedAt.AddDate(0, 0, p.MaxAgeDays)
+	return PasswordAge{
+		ExpiresAt: expires,
+		Expired:   !now.Before(expires),
+		Warning:   !now.Before(expires.AddDate(0, 0, -p.WarnDays)),
+	}
 }

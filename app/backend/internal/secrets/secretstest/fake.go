@@ -96,6 +96,16 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 		reply(200, map[string]any{"data": map[string]any{"ttl": 3600, "renewable": true, "policies": []string{"umbrella"}}})
 	case p == "auth/token/renew-self":
 		reply(200, map[string]any{"auth": map[string]any{"lease_duration": 3600, "renewable": true}})
+	case strings.HasPrefix(p, "sys/internal/ui/mounts/"):
+		reply(200, map[string]any{"data": map[string]any{"type": "kv", "options": map[string]string{"version": "2"}}})
+	case strings.Contains(p, "/metadata/") && r.Method == http.MethodGet && r.URL.Query().Get("list") == "true":
+		mount, prefix, _ := strings.Cut(p, "/metadata/")
+		keys := f.keysUnder(mount + "/" + prefix)
+		if len(keys) == 0 {
+			reply(404, map[string]any{"errors": []string{}})
+			return
+		}
+		reply(200, map[string]any{"data": map[string]any{"keys": keys}})
 	case strings.Contains(p, "/data/"):
 		mount, path, _ := strings.Cut(p, "/data/")
 		key := mount + "/" + path
@@ -122,4 +132,23 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		reply(404, map[string]any{"errors": []string{}})
 	}
+}
+
+func (f *Fake) keysUnder(prefix string) []string {
+	seen := map[string]bool{}
+	var keys []string
+	for k := range f.data {
+		rest, ok := strings.CutPrefix(k, prefix)
+		if !ok || rest == "" {
+			continue
+		}
+		if dir, _, nested := strings.Cut(rest, "/"); nested {
+			rest = dir + "/"
+		}
+		if !seen[rest] {
+			seen[rest] = true
+			keys = append(keys, rest)
+		}
+	}
+	return keys
 }

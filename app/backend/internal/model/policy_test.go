@@ -3,6 +3,7 @@ package model
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestPasswordPolicy(t *testing.T) {
@@ -59,5 +60,51 @@ func TestPolicyNormalize(t *testing.T) {
 	p, err := PasswordPolicy{MinLength: 8, MinDigits: 5}.Normalize()
 	if err != nil || p.MinDigits != 0 || p.Letters != LettersAny {
 		t.Errorf("normalized = %+v, %v", p, err)
+	}
+}
+
+func TestPolicyMaxAge(t *testing.T) {
+	bad := []PasswordPolicy{
+		{MinLength: 8, MaxAgeDays: -1},
+		{MinLength: 8, MaxAgeDays: PolicyMaxAgeDays + 1},
+		{MinLength: 8, MaxAgeDays: 30, WarnDays: 30},
+		{MinLength: 8, MaxAgeDays: 365, WarnDays: PolicyMaxWarnDays + 1},
+		{MinLength: 8, MaxAgeDays: 30, WarnDays: -1},
+	}
+	for i, b := range bad {
+		if _, err := b.Normalize(); err == nil {
+			t.Errorf("case %d must fail: %+v", i, b)
+		}
+	}
+	p, err := PasswordPolicy{MinLength: 8, WarnDays: 10}.Normalize()
+	if err != nil || p.WarnDays != 0 {
+		t.Fatalf("no expiry must drop the warning: %+v, %v", p, err)
+	}
+	if age := p.Age(time.Now().AddDate(-10, 0, 0), time.Now()); age.Expired || age.Warning || !age.ExpiresAt.IsZero() {
+		t.Fatalf("policy without max age expired a password: %+v", age)
+	}
+
+	p, err = PasswordPolicy{MinLength: 8, MaxAgeDays: 90, WarnDays: 14}.Normalize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		now              time.Time
+		expired, warning bool
+	}{
+		{changed.AddDate(0, 0, 10), false, false},
+		{changed.AddDate(0, 0, 76), false, true},
+		{changed.AddDate(0, 0, 90).Add(-time.Second), false, true},
+		{changed.AddDate(0, 0, 90), true, true},
+	}
+	for _, c := range cases {
+		age := p.Age(changed, c.now)
+		if age.Expired != c.expired || age.Warning != c.warning || !age.ExpiresAt.Equal(changed.AddDate(0, 0, 90)) {
+			t.Errorf("at %v: %+v", c.now, age)
+		}
+	}
+	if age := p.Age(time.Time{}, changed); age.Expired {
+		t.Fatal("unknown change time must not expire the password")
 	}
 }

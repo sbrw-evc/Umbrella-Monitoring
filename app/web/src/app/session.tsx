@@ -8,6 +8,8 @@ export type Session = {
   defaultTz: string
   policy: PasswordPolicy
   update: (u: User) => void
+  refresh: () => Promise<void>
+  setPolicy: (p: PasswordPolicy) => void
   expire: () => void
 }
 

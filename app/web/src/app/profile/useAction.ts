@@ -13,7 +13,7 @@ export type Action = {
 
 export function useAction(): Action {
   const t = useT(strings)
-  const { expire } = useSession()
+  const { expire, refresh } = useSession()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Action['error']>(null)
   const [notice, setNotice] = useState('')
@@ -28,12 +28,13 @@ export function useAction(): Action {
         if (message) setNotice(message)
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) expire()
+        else if (e instanceof ApiError && e.code === 'password_expired') await refresh()
         else setError(errorText(t, e))
       } finally {
         setBusy(false)
       }
     },
-    [t, expire],
+    [t, expire, refresh],
   )
 
   return { busy, error, notice, run }

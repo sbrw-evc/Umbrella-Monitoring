@@ -16,7 +16,7 @@ func (a *App) respondUser(w http.ResponseWriter, r *http.Request, u model.User, 
 		writeError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, view(u, current(r).ss.CSRF))
+	httpx.JSON(w, http.StatusOK, a.view(u, current(r).ss.CSRF))
 }
 
 type preferencesInput struct {

@@ -8,6 +8,8 @@ export type PasswordPolicy = {
   min_special: number
   require_mixed_case: boolean
   letters: Letters
+  max_age_days: number
+  warn_days: number
 }
 
 export type Violation = 'length' | 'digits' | 'special' | 'mixed_case' | 'letters' | 'username' | 'control'
@@ -20,7 +22,12 @@ export const defaultPolicy: PasswordPolicy = {
   min_special: 1,
   require_mixed_case: true,
   letters: 'latin',
+  max_age_days: 0,
+  warn_days: 0,
 }
+
+export const MAX_AGE_DAYS = 3650
+export const MAX_WARN_DAYS = 90
 
 const LETTER = /\p{L}/u
 const DIGIT = /\p{Nd}/u
@@ -35,12 +42,16 @@ const SCRIPT: Record<Letters, RegExp | null> = {
   any: null,
 }
 
-export function policyError(p: PasswordPolicy): string | null {
+export type PolicyProblem = 'length' | 'digits' | 'special' | 'fit' | 'max_age' | 'warn'
+
+export function policyError(p: PasswordPolicy): PolicyProblem | null {
   if (!Number.isInteger(p.min_length) || p.min_length < 8 || p.min_length > 128) return 'length'
   if (p.require_digits && (!Number.isInteger(p.min_digits) || p.min_digits < 1 || p.min_digits > 16)) return 'digits'
   if (p.require_special && (!Number.isInteger(p.min_special) || p.min_special < 1 || p.min_special > 16)) return 'special'
   const need = (p.require_digits ? p.min_digits : 0) + (p.require_special ? p.min_special : 0) + (p.require_mixed_case ? 2 : 0)
   if (need > p.min_length) return 'fit'
+  if (!Number.isInteger(p.max_age_days) || p.max_age_days < 0 || p.max_age_days > MAX_AGE_DAYS) return 'max_age'
+  if (p.max_age_days > 0 && (!Number.isInteger(p.warn_days) || p.warn_days < 0 || p.warn_days > MAX_WARN_DAYS || p.warn_days >= p.max_age_days)) return 'warn'
   return null
 }
 
@@ -113,4 +124,19 @@ export const policyStrings = {
 export function ruleText(t: (k: string, v?: Record<string, string | number>) => string, rule: Violation, p: PasswordPolicy) {
   const n = rule === 'length' ? p.min_length : rule === 'digits' ? p.min_digits : rule === 'special' ? p.min_special : 0
   return t(`pp.${rule}`, { n, letters: t(`pp.letters.${p.letters}`) })
+}
+
+type Translate = (k: string, v?: Record<string, string | number>) => string
+
+export function expiryText(t: Translate, p: PasswordPolicy) {
+  if (!p.max_age_days) return t('pol.maxAge.never')
+  const days = t('pol.maxAge.days', { n: p.max_age_days })
+  return p.warn_days ? `${days}, ${t('pol.maxAge.warn', { n: p.warn_days })}` : days
+}
+
+export function policyRows(t: Translate, p: PasswordPolicy): [string, string][] {
+  const content = rules(p)
+    .filter((r) => r !== 'username')
+    .map((r): [string, string] => [t(`pol.row.${r}`), ruleText(t, r, p)])
+  return [...content, [t('pol.row.max_age'), expiryText(t, p)]]
 }
