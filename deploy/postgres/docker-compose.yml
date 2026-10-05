@@ -4,6 +4,7 @@ services:
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:17-alpine}
     restart: unless-stopped
+    command: postgres -c shared_preload_libraries=pg_stat_statements
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-umbrella}
       POSTGRES_USER: ${POSTGRES_USER:-umbrella}
@@ -26,6 +27,24 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+
+  postgres-init:
+    image: ${POSTGRES_IMAGE:-postgres:17-alpine}
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-umbrella}
+      POSTGRES_USER: ${POSTGRES_USER:-umbrella}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    command: >
+      sh -c "
+      psql -h postgres -U $$POSTGRES_USER -d $$POSTGRES_DB -c 'SHOW shared_preload_libraries;' &&
+      psql -h postgres -U $$POSTGRES_USER -d $$POSTGRES_DB -c 'CREATE EXTENSION IF NOT EXISTS pg_stat_statements;' &&
+      psql -h postgres -U $$POSTGRES_USER -d $$POSTGRES_DB -c \"SELECT extname, extversion FROM pg_extension WHERE extname='pg_stat_statements';\"
+      "
+    networks: [umbrella]
 
   pgadmin:
     image: ${PGADMIN_IMAGE:-dpage/pgadmin4:9}
