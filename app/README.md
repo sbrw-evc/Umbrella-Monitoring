@@ -4,6 +4,8 @@
 
 Коннекторы, приём вебхуков и визуальный конструктор по плану из [`n8n.md`](../n8n.md): [docs/connectors.md](docs/connectors.md).
 
+Сопоставление групп LDAP / AD и Entra ID с ролями и командами: [docs/group-mapping.md](docs/group-mapping.md).
+
 ## Что работает
 
 | Страница | Что умеет | Функция |

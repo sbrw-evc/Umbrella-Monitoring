@@ -1,5 +1,6 @@
 import type { Dict } from '../../../i18n'
 import { ldapStrings } from '../../../connections/ldapStrings'
+import { groupStrings } from './groupStrings'
 
 const page: Dict = {
   en: {
@@ -144,4 +145,4 @@ const page: Dict = {
   },
 }
 
-export const strings: Dict = { en: { ...ldapStrings.en, ...page.en }, ru: { ...ldapStrings.ru, ...page.ru } }
+export const strings: Dict = { en: { ...ldapStrings.en, ...groupStrings.en, ...page.en }, ru: { ...ldapStrings.ru, ...groupStrings.ru, ...page.ru } }
