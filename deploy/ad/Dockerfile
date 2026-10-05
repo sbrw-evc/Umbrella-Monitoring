@@ -6,7 +6,8 @@ RUN apt-get update \
  && rm -f /etc/samba/smb.conf
 COPY entrypoint.sh /entrypoint.sh
 COPY seed /seed
-RUN chmod 0755 /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh /seed/*.py \
+ && chmod 0755 /entrypoint.sh
 EXPOSE 389 636
 VOLUME ["/var/lib/samba", "/etc/samba"]
 ENTRYPOINT ["/entrypoint.sh"]

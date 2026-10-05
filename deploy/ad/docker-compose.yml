@@ -44,7 +44,7 @@ services:
   lam:
     image: ${LAM_IMAGE:-ldapaccountmanager/lam:stable}
     restart: unless-stopped
-    entrypoint: ["/bin/sh", "/prepare.sh"]
+    entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /prepare.sh > /tmp/prepare.sh && exec /bin/sh /tmp/prepare.sh"]
     environment:
       LDAP_SERVER: ldaps://${AD_HOST_NAME:-dc1}.${AD_DNS_DOMAIN:-corp.umbrella.lab}:636
       LDAP_DOMAIN: ${AD_DNS_DOMAIN:-corp.umbrella.lab}

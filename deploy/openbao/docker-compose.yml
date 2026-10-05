@@ -21,7 +21,7 @@ services:
     image: ${OPENBAO_IMAGE:-openbao/openbao:2.7.1}
     restart: unless-stopped
     user: "0"
-    entrypoint: ["/bin/sh", "/config/init.sh"]
+    entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /config/init.sh > /tmp/init.sh && exec /bin/sh /tmp/init.sh"]
     environment:
       BAO_ADDR: http://openbao:8200
       WATCH: ${OPENBAO_AUTO_UNSEAL:-true}
