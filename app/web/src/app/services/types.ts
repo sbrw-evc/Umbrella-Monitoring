@@ -10,6 +10,10 @@ export type TeamLabel = { id: string; name: string; path: string[]; deleted: boo
 
 export type ServiceRef = { id: string; name: string }
 
+export type ServiceCI = { id: string; name: string; kind: string; status: string; source: string; netbox: boolean; deleted: boolean }
+
+export type ServiceNetBox = { tag_id: number; slug: string; name: string; url: string; synced_at?: string }
+
 export type Service = {
   id: string
   name: string
@@ -21,6 +25,9 @@ export type Service = {
   tags: string[]
   links: Link[]
   depends_on: string[]
+  ci_ids: string[]
+  cis: ServiceCI[]
+  netbox?: ServiceNetBox
   created_at: string
   updated_at: string
   owner: TeamLabel

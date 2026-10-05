@@ -21,7 +21,7 @@ export function ServiceEditor(props: Props) {
   )
 }
 
-function blockedDependencies(all: Service[], self: string) {
+export function blockedDependencies(all: Service[], self: string) {
   const users = new Map<string, string[]>()
   for (const s of all) for (const d of s.depends_on) users.set(d, [...(users.get(d) ?? []), s.id])
   const out = new Set<string>()
