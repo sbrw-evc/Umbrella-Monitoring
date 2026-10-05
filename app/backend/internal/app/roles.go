@@ -176,6 +176,7 @@ func (s *RolesService) Delete(actor model.User, id, reassignTo string) error {
 			u.Role = target.ID
 		}
 		delete(d.Roles, id)
+		dropMappingRefs(d, id, "")
 		detail := r.Name
 		if len(members) > 0 {
 			detail = fmt.Sprintf("%s; %d member(s) moved to %s", r.Name, len(members), target.Name)

@@ -47,6 +47,10 @@ type Server struct {
 	codes map[string]grant
 	// Nonce, when set, replaces the nonce in the next ID token.
 	Nonce string
+	// Others are tenant users the application can look up with its own token besides User.
+	Others []User
+	// DenyApp makes Microsoft Graph refuse the application token, as without GroupMember.Read.All.
+	DenyApp bool
 }
 
 type grant struct {
@@ -166,6 +170,10 @@ func (s *Server) Sign(claims map[string]any) string {
 }
 
 func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Authorization") == "Bearer app-token" {
+		s.appGraph(w, r)
+		return
+	}
 	s.mu.Lock()
 	g, ok := s.codes[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]
 	s.mu.Unlock()
@@ -188,22 +196,50 @@ func (s *Server) graph(w http.ResponseWriter, r *http.Request) {
 	case "/v1.0/me/photo/$value":
 		http.NotFound(w, r)
 	case "/v1.0/me/transitiveMemberOf/microsoft.graph.group":
-		// One group per page, to exercise paging.
-		i := 0
-		if v := r.URL.Query().Get("page"); v != "" {
-			i = int(v[0] - '0')
-		}
-		out := map[string]any{"value": []map[string]string{}}
-		if i < len(u.Groups) {
-			out["value"] = []map[string]string{{"id": u.Groups[i]}}
-			if i+1 < len(u.Groups) {
-				out["@odata.nextLink"] = s.URL + r.URL.Path + "?page=" + string(rune('0'+i+1))
-			}
-		}
-		writeJSON(w, http.StatusOK, out)
+		s.groupPage(w, r, u)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// appGraph answers requests made with the application token: group lists of any tenant user.
+func (s *Server) appGraph(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	deny, users := s.DenyApp, append([]User{s.User}, s.Others...)
+	s.mu.Unlock()
+	if deny {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": map[string]string{"code": "Authorization_RequestDenied", "message": "Insufficient privileges to complete the operation."}})
+		return
+	}
+	id, ok := strings.CutPrefix(r.URL.Path, "/v1.0/users/")
+	id, ok2 := strings.CutSuffix(id, "/transitiveMemberOf/microsoft.graph.group")
+	if ok && ok2 {
+		for _, u := range users {
+			if strings.EqualFold(u.ObjectID, id) {
+				s.groupPage(w, r, u)
+				return
+			}
+		}
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": map[string]string{"code": "Request_ResourceNotFound", "message": "none"}})
+		return
+	}
+	http.NotFound(w, r)
+}
+
+// groupPage lists one group per page, to exercise paging.
+func (s *Server) groupPage(w http.ResponseWriter, r *http.Request, u User) {
+	i := 0
+	if v := r.URL.Query().Get("page"); v != "" {
+		i = int(v[0] - '0')
+	}
+	out := map[string]any{"value": []map[string]string{}}
+	if i < len(u.Groups) {
+		out["value"] = []map[string]string{{"id": u.Groups[i]}}
+		if i+1 < len(u.Groups) {
+			out["@odata.nextLink"] = s.URL + r.URL.Path + "?page=" + string(rune('0'+i+1))
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

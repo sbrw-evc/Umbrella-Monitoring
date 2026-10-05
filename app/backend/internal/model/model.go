@@ -92,13 +92,18 @@ type User struct {
 	Username string `json:"username"`
 	Name     string `json:"name"`
 	Profile
-	Avatar             []byte     `json:"-"`
-	AvatarSource       string     `json:"avatar_source,omitempty"`
-	AvatarAt           *time.Time `json:"avatar_at,omitempty"`
-	Source             string     `json:"source"`
-	Timezone           string     `json:"timezone"`
-	Role               string     `json:"role"`
-	TeamID             string     `json:"team_id"`
+	Avatar       []byte     `json:"-"`
+	AvatarSource string     `json:"avatar_source,omitempty"`
+	AvatarAt     *time.Time `json:"avatar_at,omitempty"`
+	Source       string     `json:"source"`
+	Timezone     string     `json:"timezone"`
+	Role         string     `json:"role"`
+	TeamID       string     `json:"team_id"`
+	// MappedRole and MappedTeam are the values a group mapping last gave the user. When the
+	// mapping stops matching, a value still equal to them is withdrawn; a value changed by hand
+	// since then is kept.
+	MappedRole         string     `json:"mapped_role,omitempty"`
+	MappedTeam         string     `json:"mapped_team,omitempty"`
 	MustChangePassword bool       `json:"must_change_password"`
 	PasswordRef        string     `json:"-"`
 	ExternalID         string     `json:"-"`
@@ -117,6 +122,7 @@ type Settings struct {
 	LDAP          directory.Config `json:"ldap"`
 	Entra         entra.Config     `json:"entra"`
 	NetBox        netbox.Config    `json:"netbox"`
+	Groups        GroupMappings    `json:"groups"`
 	SetupAt       time.Time        `json:"setup_at"`
 	SetupBy       string           `json:"setup_by"`
 }

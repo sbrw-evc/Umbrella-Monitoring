@@ -8,6 +8,7 @@ import { Banner, Button, Field, formatDate, Input, Password, Rows, Switch } from
 import { ProfileCard } from '../../profile/ProfileCard'
 import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
+import { DIRECTORY_CHANGED } from './GroupMappingSettings'
 import { strings } from './strings'
 
 const CALLBACK = '/api/auth/entra/callback'
@@ -134,6 +135,7 @@ export function EntraSettings() {
       const body = draft.enabled ? { config: configOf(draft), client_secret: draft.client_secret } : { config: { enabled: false } }
       apply(await api<EntraView>('PUT', '/api/settings/entra', body))
       setCheck(null)
+      window.dispatchEvent(new Event(DIRECTORY_CHANGED))
       return t('en.saved')
     })
 

@@ -18,6 +18,7 @@ type Secrets interface {
 type Directory interface {
 	Authenticate(cfg directory.Config, bindPassword, username, password string) (directory.Identity, error)
 	Test(cfg directory.Config, bindPassword, username, password string) (directory.Probe, error)
+	Memberships(cfg directory.Config, bindPassword string, usernames []string) (map[string]directory.Membership, error)
 }
 
 type Database interface {
@@ -34,6 +35,10 @@ type ldapDirectory struct{}
 
 func (ldapDirectory) Authenticate(cfg directory.Config, bindPassword, username, password string) (directory.Identity, error) {
 	return directory.Authenticate(cfg, bindPassword, username, password)
+}
+
+func (ldapDirectory) Memberships(cfg directory.Config, bindPassword string, usernames []string) (map[string]directory.Membership, error) {
+	return directory.Memberships(cfg, bindPassword, usernames)
 }
 
 func (ldapDirectory) Test(cfg directory.Config, bindPassword, username, password string) (directory.Probe, error) {

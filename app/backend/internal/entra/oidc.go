@@ -356,16 +356,17 @@ func account(ctx context.Context, c Config, cl claims, access string) (Account, 
 	id.Name = firstSet(strings.TrimSpace(id.Name), id.Username)
 	id.DN = a.ObjectID
 
-	if c.AdminGroupID == "" && c.UserGroupID == "" {
+	if c.AdminGroupID == "" && c.UserGroupID == "" && !c.ReadGroups {
 		return a, nil
 	}
 	groups := cl.Groups
 	if !cl.groupsComplete() {
 		var err error
-		if groups, err = memberOf(ctx, c, access); err != nil {
+		if groups, err = memberOf(ctx, c, access, "/v1.0/me"); err != nil {
 			return a, err
 		}
 	}
+	id.Groups, id.GroupsKnown = lowerAll(groups), true
 	member := func(gid string) bool {
 		return gid != "" && slices.ContainsFunc(groups, func(g string) bool { return strings.EqualFold(g, gid) })
 	}
@@ -376,13 +377,14 @@ func account(ctx context.Context, c Config, cl claims, access string) (Account, 
 	return a, nil
 }
 
-// memberOf lists the groups the user belongs to, directly or through nested groups.
-func memberOf(ctx context.Context, c Config, access string) ([]string, error) {
+// memberOf lists the groups the user belongs to, directly or through nested groups. who is
+// "/v1.0/me" with a delegated token or "/v1.0/users/{id}" with an application token.
+func memberOf(ctx context.Context, c Config, access, who string) ([]string, error) {
 	if access == "" {
 		return nil, errors.New("group membership: no Microsoft Graph access token")
 	}
 	var out []string
-	next := graphURL(c, "/v1.0/me/transitiveMemberOf/microsoft.graph.group?$select=id&$top=999")
+	next := graphURL(c, who+"/transitiveMemberOf/microsoft.graph.group?$select=id&$top=999")
 	for page := 0; next != "" && page < 50; page++ {
 		var res struct {
 			Value []struct {
@@ -390,8 +392,8 @@ func memberOf(ctx context.Context, c Config, access string) ([]string, error) {
 			} `json:"value"`
 			Next string `json:"@odata.nextLink"`
 		}
-		if _, err := getJSON(ctx, next, access, &res); err != nil {
-			return nil, fmt.Errorf("group membership: %w", err)
+		if code, err := getJSON(ctx, next, access, &res); err != nil {
+			return nil, graphError{code: code, err: fmt.Errorf("group membership: %w", err)}
 		}
 		for _, g := range res.Value {
 			out = append(out, g.ID)

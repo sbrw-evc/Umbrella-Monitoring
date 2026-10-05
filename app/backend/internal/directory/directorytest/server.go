@@ -65,6 +65,17 @@ func Start(t *testing.T, entries ...Entry) *Server {
 	return s
 }
 
+// Put adds an entry or replaces the one with the same DN.
+func (s *Server) Put(e Entry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if x := s.find(e.DN); x != nil {
+		*x = e
+		return
+	}
+	s.entries = append(s.entries, e)
+}
+
 func (s *Server) find(dn string) *Entry {
 	for i := range s.entries {
 		if strings.EqualFold(s.entries[i].DN, dn) {

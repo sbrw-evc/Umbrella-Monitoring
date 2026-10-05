@@ -10,6 +10,7 @@ import { ProfileCard } from '../../profile/ProfileCard'
 import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { EntraSettings } from './EntraSettings'
+import { DIRECTORY_CHANGED, GroupMappingSettings } from './GroupMappingSettings'
 import { strings } from './strings'
 import './directory.css'
 
@@ -74,6 +75,7 @@ export function DirectorySettings() {
       const body = draft.enabled ? { config: ldapConfig(draft), bind_password: draft.bind_password } : { config: { enabled: false } }
       apply(await api<DirectoryView>('PUT', '/api/settings/ldap', body))
       setCheck(null)
+      window.dispatchEvent(new Event(DIRECTORY_CHANGED))
       return t('dir.saved')
     })
 
@@ -167,6 +169,7 @@ export function DirectorySettings() {
         </AnimatePresence>
       </ProfileCard>
       <EntraSettings />
+      <GroupMappingSettings />
     </>
   )
 }
