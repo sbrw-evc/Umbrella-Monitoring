@@ -1,0 +1,95 @@
+.mon-kind {
+  margin-right: 6px;
+}
+
+.mon-kind-zabbix {
+  background: var(--error-soft);
+  color: var(--error);
+}
+
+.mon-kind-prometheus {
+  background: var(--warn-soft, var(--surface-2));
+  color: var(--warn);
+}
+
+.mon-warn {
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.mon-error {
+  margin-top: 4px;
+  max-width: 320px;
+  font-size: 12.5px;
+  color: var(--error);
+  overflow-wrap: anywhere;
+}
+
+.mon-table td {
+  vertical-align: top;
+}
+
+.mon-table .cn-name a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mon-ci {
+  min-width: 200px;
+}
+
+.mon-actions {
+  margin-top: 4px;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.mon-actions .btn {
+  padding: 2px 8px;
+  min-height: 0;
+  font-size: 13px;
+}
+
+.mon-source-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mon-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mon-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.mon-option.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.mon-link-search {
+  flex: none;
+}
+
+.mon-url {
+  min-width: 200px;
+}
+
+.mon-url code {
+  overflow-wrap: anywhere;
+}
+
+.mon-sync .btn {
+  white-space: nowrap;
+}

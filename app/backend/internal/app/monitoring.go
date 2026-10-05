@@ -163,6 +163,9 @@ func (m *hostMatcher) match(src *model.MonitoringSource, h model.MonitoringHost)
 			ids := m.index[k]
 			if len(ids) == 1 {
 				how := c.how
+				if net.ParseIP(full) != nil {
+					how = MatchIP
+				}
 				ciName := strings.ToLower(m.d.ConfigItems[ids[0]].Name)
 				ciShort, _, _ := strings.Cut(ciName, ".")
 				if how != MatchIP && net.ParseIP(full) == nil && ((k == short && k != full) || (k == ciShort && k != ciName)) {

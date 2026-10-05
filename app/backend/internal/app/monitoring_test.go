@@ -64,6 +64,7 @@ func newMonitoringFixture(t *testing.T) *monitoringFixture {
 	f.prom = monitoringtest.StartPrometheus(t)
 	f.prom.Target("node", "srv-db-01.corp.local:9100", true)
 	f.prom.Target("node", "10.0.0.50:9100", false)
+	f.prom.Target("node", "10.0.0.3:9100", true)
 	return f
 }
 
@@ -123,7 +124,7 @@ func TestMonitoringMatchesHostsWithCIs(t *testing.T) {
 
 	f.sources()
 	l := f.hosts("")
-	if l.Summary.Total != 8 {
+	if l.Summary.Total != 9 {
 		t.Fatalf("hosts: %+v", l.Summary)
 	}
 	want := map[string][2]string{
@@ -149,6 +150,9 @@ func TestMonitoringMatchesHostsWithCIs(t *testing.T) {
 	}
 	if v := byHost(l, "srv-db-01.corp.local"); v.CI == nil || v.CI.ID != db || v.SourceID != f.psrc.ID || v.State != model.HostUp {
 		t.Errorf("prometheus host: %+v", v)
+	}
+	if v := byHost(l, "10.0.0.3"); v.CI == nil || v.CI.ID != sw || v.Match != app.MatchIP {
+		t.Errorf("a host named by its IP address: %+v", v)
 	}
 	if un := f.hosts("?match=unmatched"); un.Summary.Unmatched != 3 || len(un.Items) != 3 {
 		t.Errorf("unmatched: %+v", un)
@@ -184,8 +188,8 @@ func TestMonitoringMatchesHostsWithCIs(t *testing.T) {
 	}
 	v = app.HostView{}
 	f.expect(http.MethodGet, "/api/cis/"+sw, nil, http.StatusOK, &ci)
-	if !ci.NotMonitored {
-		t.Error("an excluded host does not cover the item")
+	if len(ci.Monitoring) != 1 || ci.Monitoring[0].Kind != "prometheus" {
+		t.Errorf("an excluded host does not cover the item: %+v", ci.Monitoring)
 	}
 	f.expect(http.MethodPost, "/api/monitoring/link", app.LinkInput{SourceID: swh.SourceID, Key: swh.Key, Mode: "auto"}, http.StatusOK, &v)
 	if v.CI == nil || v.CI.ID != sw {

@@ -72,3 +72,22 @@ button.ci-tile:hover {
 .ci-dn code {
   word-break: break-all;
 }
+
+.ci-monitors {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ci-monitors a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ci-table .cn-name {
+  text-align: left;
+}
