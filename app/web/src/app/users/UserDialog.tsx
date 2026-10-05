@@ -300,6 +300,7 @@ function DeleteView({ user, onBack, onDeleted }: { user: ManagedUser; onBack: ()
     <>
       <Banner kind="warn" title={t('usr.delete.text', { login: user.username })}>
         {user.source === 'ldap' && t('usr.delete.ldap')}
+        {user.source === 'entra' && t('usr.delete.entra')}
       </Banner>
       <Outcome action={action} />
       <Footer>

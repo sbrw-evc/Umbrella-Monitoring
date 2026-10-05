@@ -2,7 +2,7 @@ import { api } from '../../api'
 import type { AvatarUser } from '../../Avatar'
 
 export type Member = AvatarUser & {
-  source: 'local' | 'ldap'
+  source: 'local' | 'ldap' | 'entra'
   disabled: boolean
   role_id: string
   team_id: string
@@ -11,7 +11,7 @@ export type Member = AvatarUser & {
 
 export type RoleRef = { id: string; name: string; system: boolean }
 export type TeamRef = { id: string; name: string; parent_id: string }
-export type UserRef = { id: string; username: string; name: string; source: 'local' | 'ldap'; disabled: boolean; role_id: string; team_id: string }
+export type UserRef = { id: string; username: string; name: string; source: 'local' | 'ldap' | 'entra'; disabled: boolean; role_id: string; team_id: string }
 export type Refs = { roles: RoleRef[]; teams: TeamRef[]; users: UserRef[] }
 
 export function loadRefs() {

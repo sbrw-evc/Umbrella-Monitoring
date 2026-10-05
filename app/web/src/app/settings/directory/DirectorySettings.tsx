@@ -9,6 +9,7 @@ import { Banner, Button, formatDate, Rows, Switch } from '../../../ui'
 import { ProfileCard } from '../../profile/ProfileCard'
 import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
+import { EntraSettings } from './EntraSettings'
 import { strings } from './strings'
 import './directory.css'
 
@@ -165,6 +166,7 @@ export function DirectorySettings() {
           )}
         </AnimatePresence>
       </ProfileCard>
+      <EntraSettings />
     </>
   )
 }

@@ -145,7 +145,8 @@
   border: 1px solid var(--border);
 }
 
-.usr-source-ldap {
+.usr-source-ldap,
+.usr-source-entra {
   background: var(--accent-soft);
   color: var(--accent);
   border-color: transparent;

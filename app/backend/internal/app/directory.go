@@ -156,21 +156,26 @@ func passwordNote(given string) string {
 }
 
 func directoryView(d *store.Data) DirectoryView {
-	out := DirectoryView{Config: d.Settings.LDAP.Public(), BindPasswordSet: d.Settings.LDAP.BindPasswordRef != "", LocalAdmins: localAdmins(d)}
+	return DirectoryView{Config: d.Settings.LDAP.Public(), BindPasswordSet: d.Settings.LDAP.BindPasswordRef != "", LocalAdmins: localAdmins(d),
+		Users: sourceUsers(d, model.SourceLDAP)}
+}
+
+func sourceUsers(d *store.Data, source string) DirectoryUsers {
+	var out DirectoryUsers
 	for _, u := range d.Users {
-		if u.Source != model.SourceLDAP {
+		if u.Source != source {
 			continue
 		}
-		out.Users.Total++
+		out.Total++
 		if u.Role == model.RoleAdmin {
-			out.Users.Admins++
+			out.Admins++
 		}
 		if u.Disabled {
-			out.Users.Disabled++
+			out.Disabled++
 		}
-		if u.LastLoginAt != nil && (out.Users.LastSignIn == nil || u.LastLoginAt.After(*out.Users.LastSignIn)) {
+		if u.LastLoginAt != nil && (out.LastSignIn == nil || u.LastLoginAt.After(*out.LastSignIn)) {
 			at := *u.LastLoginAt
-			out.Users.LastSignIn = &at
+			out.LastSignIn = &at
 		}
 	}
 	return out

@@ -50,7 +50,7 @@ func (s *AuthService) Authenticate(name, password string) (model.User, error) {
 		}
 		return *u, nil
 	}
-	if !ldap.Enabled || (u != nil && u.Disabled) {
+	if !ldap.Enabled || (u != nil && (u.Disabled || u.Source == model.SourceEntra)) {
 		auth.CheckPassword("", password)
 		return model.User{}, ErrInvalidCredentials
 	}
