@@ -23,6 +23,7 @@ type Directory interface {
 type Database interface {
 	Where() string
 	Info(ctx context.Context) (store.PGInfo, error)
+	Health(ctx context.Context) (store.PGHealth, error)
 }
 
 type Runtime interface {

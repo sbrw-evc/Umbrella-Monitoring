@@ -127,6 +127,9 @@ func TestQueue(t *testing.T) {
 	if err != nil || sum["CON-1"].Received != 2 || sum["CON-1"].OpenFailures != 2 || sum["CON-1"].LastReceived == nil {
 		t.Errorf("summary = %+v, %v", sum, err)
 	}
+	if o, err := q.Overview(ctx); err != nil || o.Pending != 0 || o.Received != 3 || o.OpenFailures != 3 || o.Events != 1 || o.LastReceived == nil {
+		t.Errorf("overview = %+v, %v", o, err)
+	}
 
 	out, err := q.Reprocess(ctx, "CON-1", []int64{fails[0].ID}, 2)
 	if err != nil || out.Requeued != 1 {

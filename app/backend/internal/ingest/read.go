@@ -258,3 +258,34 @@ func (q *Queue) Forget(ctx context.Context, connectorID string) error {
 		return nil
 	})
 }
+
+// Overview is the intake as a whole: the queue and the last 24 hours of every connector.
+type Overview struct {
+	Pending       int        `json:"pending"`
+	OldestPending *time.Time `json:"oldest_pending,omitempty"`
+	OpenFailures  int        `json:"open_failures"`
+	Received      int        `json:"received_24h"`
+	Rejected      int        `json:"rejected_24h"`
+	Failed        int        `json:"failed_24h"`
+	Events        int        `json:"events_24h"`
+	Duplicates    int        `json:"duplicates_24h"`
+	LatencyAvg    int        `json:"latency_avg_ms"`
+	LatencyMax    int        `json:"latency_max_ms"`
+	LastReceived  *time.Time `json:"last_received,omitempty"`
+}
+
+func (q *Queue) Overview(ctx context.Context) (Overview, error) {
+	var o Overview
+	err := q.pool.QueryRow(ctx, `SELECT
+			(SELECT count(*)::int FROM ingest_requests WHERE status = 'pending'),
+			(SELECT min(received_at) FROM ingest_requests WHERE status = 'pending'),
+			(SELECT count(*)::int FROM ingest_failures WHERE resolved_at IS NULL),
+			coalesce(sum(received), 0)::int, coalesce(sum(rejected), 0)::int, coalesce(sum(failed), 0)::int,
+			coalesce(sum(events), 0)::int, coalesce(sum(duplicates), 0)::int,
+			coalesce(sum(latency_ms) / nullif(sum(received), 0), 0)::int, coalesce(max(latency_max), 0),
+			max(bucket) FILTER (WHERE received > 0)
+		FROM connector_stats WHERE bucket >= now() - interval '24 hours'`).Scan(
+		&o.Pending, &o.OldestPending, &o.OpenFailures, &o.Received, &o.Rejected, &o.Failed,
+		&o.Events, &o.Duplicates, &o.LatencyAvg, &o.LatencyMax, &o.LastReceived)
+	return o, err
+}

@@ -27,6 +27,8 @@ const (
 
 type Options struct {
 	Version       string
+	Commit        string
+	BuiltAt       string
 	SecureCookies bool
 	Web           http.Handler
 }
@@ -79,10 +81,16 @@ func New(opt Options, deps Deps) *App {
 	}
 	creds := NewCredentialsService(deps.Store, vault)
 	var queue *ingest.Queue
+	var db Database
 	if deps.Backend != nil {
 		queue = ingest.New(deps.Backend.Pool())
+		db = deps.Backend
 	}
-	return &App{
+	var sessions SessionCounter
+	if deps.Sessions != nil {
+		sessions = deps.Sessions
+	}
+	a := &App{
 		creds:      creds,
 		connectors: NewConnectorsService(deps.Store, creds),
 		queue:      queue,
@@ -92,7 +100,6 @@ func New(opt Options, deps Deps) *App {
 		accounts:   NewUsersService(deps.Store, passwords, deps.Vault, deps.Sessions),
 		auth:       NewAuthService(deps.Store, passwords, deps.Vault, dir, users),
 		settings:   NewSettingsService(deps.Store),
-		status:     NewStatusService(deps.Store, deps.Vault, deps.Backend, dir, opt.Version),
 		limiter:    NewLimiter(maxFailures, failWindow, lockout),
 		policy:     NewPolicyService(deps.Store),
 		access:     NewAccessService(deps.Store),
@@ -104,6 +111,8 @@ func New(opt Options, deps Deps) *App {
 		teams:      NewTeamsService(deps.Store),
 		services:   NewServicesService(deps.Store),
 	}
+	a.status = NewStatusService(deps.Store, vault, db, dir, sessions, queue, a.ingestReady, opt)
+	return a
 }
 
 func (a *App) Handler() http.Handler {
