@@ -1,10 +1,11 @@
 import type { ComponentType } from 'react'
-import { Activity, BellRing, Boxes, Briefcase, Cable, Database, KeyRound, LockKeyhole, Network, Server, ShieldCheck, Siren, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
+import { Activity, BellRing, Boxes, CalendarClock, Briefcase, Cable, Database, KeyRound, LockKeyhole, Network, Server, ShieldCheck, Siren, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
 import { CIsPage } from './cis/CIsPage'
 import { IncidentsPage } from './incidents/IncidentsPage'
 import { CMDBMapPage } from './cmdb/CMDBMapPage'
 import { ConnectorsPage } from './connectors/ConnectorsPage'
 import { CredentialsPage } from './connectors/CredentialsPage'
+import { MaintenancePage } from './maintenance/MaintenancePage'
 import { NetBoxPage } from './netbox/NetBoxPage'
 import { RolesPage } from './roles/RolesPage'
 import { ServicesPage } from './services/ServicesPage'
@@ -38,6 +39,7 @@ const MOVED: Record<string, string> = { '/status': '/settings/status' }
 
 export const PAGES: PageDef[] = [
   { id: 'incidents', path: '/incidents', group: 'main', icon: BellRing, Component: IncidentsPage, subtitle: 'page.incidents.subtitle' },
+  { id: 'maintenance', path: '/maintenance', group: 'main', icon: CalendarClock, Component: MaintenancePage, subtitle: 'page.maintenance.subtitle' },
   { id: 'services', path: '/services', group: 'overview', icon: Briefcase, Component: ServicesPage, subtitle: 'page.services.subtitle' },
   { id: 'cis', path: '/cis', group: 'overview', icon: Boxes, Component: CIsPage, subtitle: 'page.cis.subtitle' },
   { id: 'cmdb', path: '/cmdb', group: 'overview', icon: Waypoints, Component: CMDBMapPage, subtitle: 'page.cmdb.subtitle' },

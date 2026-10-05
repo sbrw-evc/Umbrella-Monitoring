@@ -57,6 +57,10 @@ var pages = []Page{
 		view,
 		{"ack", Text{"Acknowledge, resolve and comment incidents", "Подтверждение, решение и комментарии инцидентов"}},
 	}},
+	{"maintenance", GroupMain, Text{"Maintenance windows", "Сервисные окна"}, []Feature{
+		view,
+		{"edit", Text{"Plan, change, finish and delete maintenance windows", "Планирование, изменение, завершение и удаление сервисных окон"}},
+	}},
 	{"services", GroupOverview, Text{"Business services", "Бизнес-сервисы"}, []Feature{
 		view,
 		{"edit", Text{"Create, change and delete services, bind configuration items, link services to NetBox", "Создание, изменение и удаление сервисов, привязка КЕ, связь с NetBox"}},

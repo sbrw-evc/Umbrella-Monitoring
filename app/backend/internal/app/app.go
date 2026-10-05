@@ -76,6 +76,7 @@ type App struct {
 	pagerduty     *PagerDutyService
 	notifier      *notify.Service
 	notifications *NotificationsService
+	maintenance   *MaintenanceService
 	ready         atomic.Bool
 	rates         rates
 }
@@ -104,28 +105,29 @@ func New(opt Options, deps Deps) *App {
 		sessions = deps.Sessions
 	}
 	a := &App{
-		creds:      creds,
-		connectors: NewConnectorsService(deps.Store, creds),
-		queue:      queue,
-		opt:        opt,
-		deps:       deps,
-		users:      users,
-		accounts:   NewUsersService(deps.Store, passwords, deps.Vault, deps.Sessions),
-		auth:       NewAuthService(deps.Store, passwords, deps.Vault, dir, users),
-		settings:   NewSettingsService(deps.Store),
-		limiter:    NewLimiter(maxFailures, failWindow, lockout),
-		policy:     NewPolicyService(deps.Store),
-		access:     NewAccessService(deps.Store),
-		directory:  NewDirectoryService(deps.Store, deps.Vault, dir, deps.Sessions),
-		entra:      NewEntraService(deps.Store, deps.Vault, users, deps.Sessions),
-		postgres:   NewPostgresService(deps.Store, deps.Backend, deps.Vault, deps.Runtime, deps.Config),
-		openbao:    NewOpenBaoService(deps.Store, deps.Vault, deps.Runtime, deps.Config),
-		roles:      NewRolesService(deps.Store),
-		teams:      NewTeamsService(deps.Store),
-		services:   NewServicesService(deps.Store, nb),
-		netbox:     nb,
-		cis:        NewCIService(deps.Store, nb),
-		groups:     NewGroupsService(deps.Store, vault, dir),
+		creds:       creds,
+		connectors:  NewConnectorsService(deps.Store, creds),
+		queue:       queue,
+		opt:         opt,
+		deps:        deps,
+		users:       users,
+		accounts:    NewUsersService(deps.Store, passwords, deps.Vault, deps.Sessions),
+		auth:        NewAuthService(deps.Store, passwords, deps.Vault, dir, users),
+		settings:    NewSettingsService(deps.Store),
+		limiter:     NewLimiter(maxFailures, failWindow, lockout),
+		policy:      NewPolicyService(deps.Store),
+		access:      NewAccessService(deps.Store),
+		directory:   NewDirectoryService(deps.Store, deps.Vault, dir, deps.Sessions),
+		entra:       NewEntraService(deps.Store, deps.Vault, users, deps.Sessions),
+		postgres:    NewPostgresService(deps.Store, deps.Backend, deps.Vault, deps.Runtime, deps.Config),
+		openbao:     NewOpenBaoService(deps.Store, deps.Vault, deps.Runtime, deps.Config),
+		roles:       NewRolesService(deps.Store),
+		teams:       NewTeamsService(deps.Store),
+		services:    NewServicesService(deps.Store, nb),
+		netbox:      nb,
+		cis:         NewCIService(deps.Store, nb),
+		groups:      NewGroupsService(deps.Store, vault, dir),
+		maintenance: NewMaintenanceService(deps.Store),
 	}
 	var firing firingSource
 	if queue != nil {
@@ -174,7 +176,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })
