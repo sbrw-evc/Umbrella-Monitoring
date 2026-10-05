@@ -6,7 +6,7 @@ type refChange struct {
 }
 
 func (d *Data) secretRefs() []*string {
-	refs := []*string{&d.Settings.LDAP.BindPasswordRef}
+	refs := []*string{&d.Settings.LDAP.BindPasswordRef, &d.Settings.Entra.ClientSecretRef}
 	for _, u := range d.Users {
 		refs = append(refs, &u.PasswordRef)
 	}

@@ -52,6 +52,7 @@ type App struct {
 	policy    *PolicyService
 	access    *AccessService
 	directory *DirectoryService
+	entra     *EntraService
 	postgres  *PostgresService
 	openbao   *OpenBaoService
 	roles     *RolesService
@@ -96,6 +97,7 @@ func New(opt Options, deps Deps) *App {
 		policy:     NewPolicyService(deps.Store),
 		access:     NewAccessService(deps.Store),
 		directory:  NewDirectoryService(deps.Store, deps.Vault, dir, deps.Sessions),
+		entra:      NewEntraService(deps.Store, deps.Vault, users, deps.Sessions),
 		postgres:   NewPostgresService(deps.Store, deps.Backend, deps.Vault, deps.Runtime, deps.Config),
 		openbao:    NewOpenBaoService(deps.Store, deps.Vault, deps.Runtime, deps.Config),
 		roles:      NewRolesService(deps.Store),
@@ -121,7 +123,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })
@@ -162,9 +164,10 @@ type metaView struct {
 	SetupRequired bool   `json:"setup_required"`
 	Version       string `json:"version"`
 	LDAPEnabled   bool   `json:"ldap_enabled"`
+	EntraEnabled  bool   `json:"entra_enabled"`
 }
 
 func (a *App) meta(w http.ResponseWriter, r *http.Request) {
 	s := a.settings.Get()
-	httpx.JSON(w, http.StatusOK, metaView{defaultsView: defaultsOf(s), Mode: "ready", Version: a.opt.Version, LDAPEnabled: s.LDAP.Enabled})
+	httpx.JSON(w, http.StatusOK, metaView{defaultsView: defaultsOf(s), Mode: "ready", Version: a.opt.Version, LDAPEnabled: s.LDAP.Enabled, EntraEnabled: s.Entra.Enabled})
 }

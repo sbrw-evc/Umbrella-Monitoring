@@ -152,7 +152,7 @@ export function SystemStatus() {
                 ],
                 [t('field.setupAt'), formatDate(s.settings.setup_at, locale, tz)],
                 [t('field.setupBy'), s.settings.setup_by],
-                [t('field.users'), t('field.users.value', { total, local: s.users.local ?? 0, ldap: s.users.ldap ?? 0 })],
+                [t('field.users'), t('field.users.value', { total, local: s.users.local ?? 0, ldap: s.users.ldap ?? 0, entra: s.users.entra ?? 0 })],
                 [t('field.appVersion'), s.version],
               ]}
             />

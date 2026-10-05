@@ -8,11 +8,13 @@ import (
 	"unicode"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/entra"
 )
 
 const (
 	SourceLocal = "local"
 	SourceLDAP  = "ldap"
+	SourceEntra = "entra"
 
 	RoleAdmin = "admin"
 	RoleUser  = "user"
@@ -98,6 +100,7 @@ type User struct {
 	TeamID             string     `json:"team_id"`
 	MustChangePassword bool       `json:"must_change_password"`
 	PasswordRef        string     `json:"-"`
+	ExternalID         string     `json:"-"`
 	PasswordHash       string     `json:"-"`
 	PasswordChangedAt  time.Time  `json:"password_changed_at,omitzero"`
 	Disabled           bool       `json:"disabled"`
@@ -111,6 +114,7 @@ type Settings struct {
 	DefaultTZ     string           `json:"default_timezone"`
 	Password      PasswordPolicy   `json:"password_policy"`
 	LDAP          directory.Config `json:"ldap"`
+	Entra         entra.Config     `json:"entra"`
 	SetupAt       time.Time        `json:"setup_at"`
 	SetupBy       string           `json:"setup_by"`
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/avatar"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/credentials"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/entra"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
@@ -165,6 +166,16 @@ func (s *UserService) SetTimezone(id string, tz string) (model.User, error) {
 }
 
 func (s *UserService) SyncDirectory(id directory.Identity) (model.User, error) {
+	return s.syncExternal(model.SourceLDAP, "", id)
+}
+
+// SyncEntra creates or updates the account of a Microsoft Entra ID user. The account is bound to
+// the Entra object ID, so a reused sign-in name cannot take over somebody else's account.
+func (s *UserService) SyncEntra(a entra.Account) (model.User, error) {
+	return s.syncExternal(model.SourceEntra, a.ObjectID, a.Identity)
+}
+
+func (s *UserService) syncExternal(source, externalID string, id directory.Identity) (model.User, error) {
 	var photo []byte
 	if id.HasPhoto {
 		if img, err := avatar.Normalize(id.Photo); err == nil {
@@ -181,12 +192,21 @@ func (s *UserService) SyncDirectory(id directory.Identity) (model.User, error) {
 	s.st.Write(func(d *store.Data) {
 		x := d.UserByName(id.Username)
 		if x == nil {
-			x = &model.User{ID: d.NextID("USR"), Username: id.Username, Source: model.SourceLDAP, CreatedAt: now}
+			x = &model.User{ID: d.NextID("USR"), Username: id.Username, Source: source, ExternalID: externalID, CreatedAt: now}
 			d.Users[x.ID] = x
 		}
-		if x.Source != model.SourceLDAP {
+		if x.Source != source || x.Disabled {
 			out = *x
 			return
+		}
+		if externalID != "" {
+			if x.ExternalID == "" {
+				x.ExternalID = externalID
+			}
+			if x.ExternalID != externalID {
+				out = *x
+				return
+			}
 		}
 		x.Profile, x.Name = profile, id.Name
 		switch {
@@ -207,7 +227,7 @@ func (s *UserService) SyncDirectory(id directory.Identity) (model.User, error) {
 		}
 		out = *x
 	})
-	if out.Source != model.SourceLDAP {
+	if out.Source != source || out.Disabled || out.ExternalID != externalID {
 		return model.User{}, ErrInvalidCredentials
 	}
 	return out, nil

@@ -1,5 +1,5 @@
-import { useState, type FormEvent } from 'react'
-import { api, setCsrf, type Meta } from '../api'
+import { useEffect, useState, type FormEvent } from 'react'
+import { ApiError, api, setCsrf, type Meta } from '../api'
 import { errorText, useT } from '../i18n'
 import { Banner, Brand, Button, Field, Input, Password, Preferences } from '../ui'
 import { strings } from './strings'
@@ -10,7 +10,9 @@ export function SignIn({ meta, onSignedIn }: { meta: Meta; onSignedIn: (u: User)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<{ message: string; detail?: string } | null>(null)
+  const [error, setError] = useState<{ message: string; detail?: string } | null>(() => redirectError(t))
+  const [leaving, setLeaving] = useState(false)
+  useEffect(dropRedirectError, [])
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -48,9 +50,50 @@ export function SignIn({ meta, onSignedIn }: { meta: Meta; onSignedIn: (u: User)
             {t('signin.submit')}
           </Button>
           {meta.ldap_enabled && <p className="hint">{t('signin.ldap')}</p>}
+          {meta.entra_enabled && (
+            <>
+              <div className="signin-or">{t('signin.or')}</div>
+              <Button
+                type="button"
+                busy={leaving}
+                onClick={() => {
+                  setLeaving(true)
+                  window.location.assign('/api/auth/entra/start')
+                }}
+              >
+                <MicrosoftMark />
+                {t('signin.entra')}
+              </Button>
+            </>
+          )}
         </form>
       </div>
       <p className="hint">{meta.version}</p>
     </div>
+  )
+}
+
+// redirectError reads the error the Microsoft sign-in left in the address.
+function redirectError(t: (k: string) => string) {
+  const code = new URLSearchParams(window.location.search).get('signin_error')
+  return code ? errorText(t, new ApiError(401, code)) : null
+}
+
+function dropRedirectError() {
+  const params = new URLSearchParams(window.location.search)
+  if (!params.has('signin_error')) return
+  params.delete('signin_error')
+  const rest = params.toString()
+  window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash)
+}
+
+function MicrosoftMark() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden>
+      <rect x="1" y="1" width="9" height="9" fill="#f25022" />
+      <rect x="11" y="1" width="9" height="9" fill="#7fba00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00a4ef" />
+      <rect x="11" y="11" width="9" height="9" fill="#ffb900" />
+    </svg>
   )
 }

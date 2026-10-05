@@ -10,6 +10,7 @@ export type Meta = {
   default_locale: Locale
   default_timezone: string
   ldap_enabled?: boolean
+  entra_enabled?: boolean
   container?: boolean
   password_policy?: PasswordPolicy
 }

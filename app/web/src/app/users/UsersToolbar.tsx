@@ -53,6 +53,7 @@ export function UsersToolbar({ refs, filters, onChange, onCreate }: { refs: Refs
               <option value="">{any}</option>
               <option value="local">{t('usr.source.local')}</option>
               <option value="ldap">{t('usr.source.ldap')}</option>
+              <option value="entra">{t('usr.source.entra')}</option>
             </Select>
           )}
         </Field>
