@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import { Activity, BellRing, Boxes, CalendarClock, Briefcase, Cable, Database, KeyRound, LockKeyhole, Network, Server, ShieldCheck, Siren, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
+import { Activity, BellRing, Boxes, CalendarClock, Briefcase, Cable, Database, Gauge, KeyRound, LockKeyhole, Network, Server, ShieldCheck, Siren, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
 import { CIsPage } from './cis/CIsPage'
 import { IncidentsPage } from './incidents/IncidentsPage'
 import { CMDBMapPage } from './cmdb/CMDBMapPage'
@@ -7,6 +7,7 @@ import { ConnectorsPage } from './connectors/ConnectorsPage'
 import { CredentialsPage } from './connectors/CredentialsPage'
 import { MaintenancePage } from './maintenance/MaintenancePage'
 import { NetBoxPage } from './netbox/NetBoxPage'
+import { RulesPage } from './rules/RulesPage'
 import { RolesPage } from './roles/RolesPage'
 import { ServicesPage } from './services/ServicesPage'
 import { AlertingSettings } from './settings/alerting/AlertingSettings'
@@ -46,6 +47,7 @@ export const PAGES: PageDef[] = [
   { id: 'connectors', path: '/connectors', group: 'automation', icon: Cable, Component: ConnectorsPage, nested: true },
   { id: 'credentials', path: '/credentials', group: 'automation', icon: LockKeyhole, Component: CredentialsPage, subtitle: 'page.credentials.subtitle' },
   { id: 'netbox', path: '/netbox', group: 'automation', icon: Server, Component: NetBoxPage, subtitle: 'page.netbox.subtitle' },
+  { id: 'rules', path: '/rules', group: 'automation', icon: Gauge, Component: RulesPage, subtitle: 'page.rules.subtitle' },
   { id: 'users', path: '/users', group: 'org', icon: Users, Component: UsersPage, subtitle: 'page.users.subtitle' },
   { id: 'roles', path: '/roles', group: 'org', icon: UserCog, Component: RolesPage, subtitle: 'page.roles.subtitle' },
   { id: 'teams', path: '/teams', group: 'org', icon: UsersRound, Component: TeamsPage, subtitle: 'page.teams.subtitle' },

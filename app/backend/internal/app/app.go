@@ -15,6 +15,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pagerduty"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/rules"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
@@ -77,6 +78,8 @@ type App struct {
 	notifier      *notify.Service
 	notifications *NotificationsService
 	maintenance   *MaintenanceService
+	rules         *RulesService
+	ruleEngine    *rules.Engine
 	ready         atomic.Bool
 	rates         rates
 }
@@ -154,6 +157,11 @@ func New(opt Options, deps Deps) *App {
 		a.notifier.SetResults(a.alerts)
 		queue.SetSink(a.alertSink)
 	}
+	a.ruleEngine = rules.New(deps.Store, ruleCredentials(creds))
+	a.rules = NewRulesService(deps.Store, a.ruleEngine, creds)
+	if a.alerts != nil {
+		a.ruleEngine.SetSink(a.alerts)
+	}
 	a.cmdb = NewCMDBService(deps.Store, firing)
 	a.status = NewStatusService(deps.Store, vault, db, dir, sessions, queue, a.ingestReady, opt)
 	return a
@@ -176,7 +184,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerRules} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })
@@ -217,6 +225,7 @@ func (a *App) Run(ctx context.Context) {
 	go a.alerts.Run(ctx)
 	go a.pdGateway.Run(ctx)
 	go a.notifier.Run(ctx)
+	go a.ruleEngine.Run(ctx)
 	a.queue.Run(ctx, 2, a.process)
 }
 

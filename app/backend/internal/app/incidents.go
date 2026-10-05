@@ -13,6 +13,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/flow"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/rules"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
@@ -96,6 +97,8 @@ func (a *App) getIncident(w http.ResponseWriter, r *http.Request) {
 		for _, src := range al.Sources {
 			if c := d.Connectors[src.ConnectorID]; c != nil {
 				names[src.ConnectorID] = c.Name
+			} else if r := d.Rules[strings.TrimPrefix(src.ConnectorID, rules.ConnectorPrefix)]; r != nil && strings.HasPrefix(src.ConnectorID, rules.ConnectorPrefix) {
+				names[src.ConnectorID] = r.Name
 			}
 		}
 	})
