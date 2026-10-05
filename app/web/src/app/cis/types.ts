@@ -1,7 +1,7 @@
 export const KINDS = ['device', 'vm', 'service', 'other'] as const
 export const STATUSES = ['active', 'planned', 'staged', 'offline', 'failed', 'decommissioning'] as const
 export const SOURCES = ['netbox', 'local'] as const
-export const FLAGS = ['no_owners', 'directory_missing'] as const
+export const FLAGS = ['no_owners', 'directory_missing', 'not_monitored'] as const
 
 export type Kind = (typeof KINDS)[number]
 
@@ -46,6 +46,8 @@ export type CI = {
   directory?: DirectoryInfo
   owners: Owner[]
   services: { id: string; name: string }[]
+  monitoring: Monitor[]
+  not_monitored: boolean
   editable: boolean
   registrable: boolean
   created_at: string
@@ -55,7 +57,28 @@ export type CI = {
   synced_at?: string
 }
 
-export type Summary = { total: number; netbox: number; local: number; registered: number; no_owners: number; directory_missing: number }
+export type Monitor = {
+  source_id: string
+  source_name: string
+  kind: 'zabbix' | 'prometheus'
+  key: string
+  host: string
+  name: string
+  state: string
+  url?: string
+  match: string
+}
+
+export type Summary = {
+  total: number
+  netbox: number
+  local: number
+  registered: number
+  no_owners: number
+  directory_missing: number
+  not_monitored: number
+  monitoring_sources: number
+}
 
 export type CIList = { items: CI[]; tags: string[]; summary: Summary }
 

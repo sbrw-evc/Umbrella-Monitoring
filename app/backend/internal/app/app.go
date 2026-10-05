@@ -47,27 +47,28 @@ type Deps struct {
 }
 
 type App struct {
-	opt       Options
-	deps      Deps
-	auth      *AuthService
-	users     *UserService
-	accounts  *UsersService
-	settings  *SettingsService
-	status    *StatusService
-	limiter   *Limiter
-	policy    *PolicyService
-	access    *AccessService
-	directory *DirectoryService
-	entra     *EntraService
-	postgres  *PostgresService
-	openbao   *OpenBaoService
-	roles     *RolesService
-	teams     *TeamsService
-	services  *ServicesService
-	netbox    *NetBoxService
-	cis       *CIService
-	cmdb      *CMDBService
-	groups    *GroupsService
+	opt        Options
+	deps       Deps
+	auth       *AuthService
+	users      *UserService
+	accounts   *UsersService
+	settings   *SettingsService
+	status     *StatusService
+	limiter    *Limiter
+	policy     *PolicyService
+	access     *AccessService
+	directory  *DirectoryService
+	entra      *EntraService
+	postgres   *PostgresService
+	openbao    *OpenBaoService
+	roles      *RolesService
+	teams      *TeamsService
+	services   *ServicesService
+	netbox     *NetBoxService
+	cis        *CIService
+	cmdb       *CMDBService
+	groups     *GroupsService
+	monitoring *MonitoringService
 
 	creds         *CredentialsService
 	connectors    *ConnectorsService
@@ -163,6 +164,7 @@ func New(opt Options, deps Deps) *App {
 		a.ruleEngine.SetSink(a.alerts)
 	}
 	a.cmdb = NewCMDBService(deps.Store, firing)
+	a.monitoring = NewMonitoringService(deps.Store, creds, a.cis)
 	a.status = NewStatusService(deps.Store, vault, db, dir, sessions, queue, a.ingestReady, opt)
 	return a
 }
@@ -184,7 +186,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerRules, a.registerGrafana} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerRules, a.registerGrafana} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })
@@ -192,12 +194,13 @@ func (a *App) Handler() http.Handler {
 	return httpx.Secure(mux)
 }
 
-// Run synchronizes NetBox and directory groups on their schedules, prepares the ingest and alert
+// Run synchronizes NetBox, directory groups and monitoring hosts on their schedules, prepares the ingest and alert
 // tables, processes received requests and runs the alert engine until ctx ends. Without PostgreSQL
 // (tests) the intake answers 503.
 func (a *App) Run(ctx context.Context) {
 	go a.netbox.Run(ctx)
 	go a.groups.Run(ctx)
+	go a.monitoring.Run(ctx)
 	if a.queue == nil {
 		return
 	}

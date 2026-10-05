@@ -327,6 +327,12 @@ func (s *CredentialsService) Delete(ctx context.Context, actor, id string) error
 				return
 			}
 		}
+		for _, src := range d.MonitoringSources {
+			if src.CredentialID == id {
+				err = ErrCredentialInUse
+				return
+			}
+		}
 		name = c.Name
 		delete(d.Credentials, id)
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "credential.delete", Object: id, Detail: name})

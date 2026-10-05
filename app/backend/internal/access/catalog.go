@@ -84,6 +84,13 @@ var pages = []Page{
 		{"edit", Text{"Change the connection and synchronization settings", "Изменение подключения и настроек синхронизации"}},
 		{"sync", Text{"Run synchronization", "Запуск синхронизации"}},
 	}},
+	{"monitoring", GroupAuto, Text{"Monitoring systems", "Системы мониторинга"}, []Feature{
+		view,
+		test,
+		{"edit", Text{"Add, change and delete Zabbix and Prometheus connections", "Добавление, изменение и удаление подключений Zabbix и Prometheus"}},
+		{"sync", Text{"Read host lists", "Загрузка списков хостов"}},
+		{"link", Text{"Link hosts to configuration items and create items from hosts", "Привязка хостов к КЕ и создание КЕ из хостов"}},
+	}},
 	{"credentials", GroupAuto, Text{"Credentials", "Учётные данные"}, []Feature{
 		view,
 		{"edit", Text{"Create, replace and delete credentials", "Создание, замена и удаление учётных данных"}},

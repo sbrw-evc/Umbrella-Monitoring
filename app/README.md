@@ -6,6 +6,8 @@
 
 Сопоставление групп LDAP / AD и Entra ID с ролями и командами: [docs/group-mapping.md](docs/group-mapping.md).
 
+Хосты Zabbix и Prometheus, сопоставленные с КЕ: [docs/monitoring-hosts.md](docs/monitoring-hosts.md).
+
 ## Что работает
 
 | Страница | Что умеет | Функция |

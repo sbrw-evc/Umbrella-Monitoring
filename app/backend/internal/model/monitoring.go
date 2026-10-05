@@ -1,0 +1,72 @@
+package model
+
+import "time"
+
+const (
+	MonitoringZabbix     = "zabbix"
+	MonitoringPrometheus = "prometheus"
+
+	HostUp       = "up"
+	HostPartial  = "partial"
+	HostDown     = "down"
+	HostUnknown  = "unknown"
+	HostDisabled = "disabled"
+
+	// HostNoCI is the link of a host someone said belongs to no configuration item, so the
+	// automatic match is not used for it.
+	HostNoCI = "-"
+)
+
+// MonitoringSource is a monitoring system (Zabbix or a Prometheus-compatible API) whose host
+// list is read and matched with configuration items. The credential, when set, is one of the
+// credential catalog.
+type MonitoringSource struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Kind         string `json:"kind"`
+	URL          string `json:"url"`
+	CredentialID string `json:"credential_id,omitempty"`
+	SkipVerify   bool   `json:"skip_verify"`
+	Enabled      bool   `json:"enabled"`
+	SyncMinutes  int    `json:"sync_minutes"`
+	// Prometheus: the instant query that lists targets and the label that names the host.
+	Query     string `json:"query,omitempty"`
+	HostLabel string `json:"host_label,omitempty"`
+
+	Hosts []MonitoringHost `json:"-"`
+	// Links are hosts linked by hand: host key to configuration item ID, or HostNoCI.
+	Links map[string]string `json:"-"`
+	Sync  MonitoringSync    `json:"sync"`
+
+	CreatedBy string    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedBy string    `json:"updated_by"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// MonitoringHost is a host as the monitoring system knows it.
+type MonitoringHost struct {
+	// Key identifies the host within its source: the Zabbix host ID or the Prometheus host name.
+	Key string `json:"key"`
+	// Host is the technical name, Name the visible one.
+	Host   string   `json:"host"`
+	Name   string   `json:"name"`
+	IPs    []string `json:"ips"`
+	DNS    []string `json:"dns"`
+	Groups []string `json:"groups"`
+	// Endpoints are the Prometheus instances of the host.
+	Endpoints []string `json:"endpoints,omitempty"`
+	State     string   `json:"state"`
+	URL       string   `json:"url,omitempty"`
+}
+
+// MonitoringSync is the last reading of the host list of a source.
+type MonitoringSync struct {
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at"`
+	OK         bool      `json:"ok"`
+	Error      string    `json:"error,omitempty"`
+	Actor      string    `json:"actor"`
+	Hosts      int       `json:"hosts"`
+	Version    string    `json:"version,omitempty"`
+}

@@ -64,10 +64,13 @@ type CIOwnerView struct {
 
 type CIView struct {
 	model.ConfigItem
-	Owners      []CIOwnerView `json:"owners"`
-	Services    []ServiceRef  `json:"services"`
-	Editable    bool          `json:"editable"`
-	Registrable bool          `json:"registrable"`
+	Owners     []CIOwnerView `json:"owners"`
+	Services   []ServiceRef  `json:"services"`
+	Monitoring []CIMonitor   `json:"monitoring"`
+	// NotMonitored: a device or virtual machine no monitoring system covers.
+	NotMonitored bool `json:"not_monitored"`
+	Editable     bool `json:"editable"`
+	Registrable  bool `json:"registrable"`
 }
 
 type CISummary struct {
@@ -77,6 +80,9 @@ type CISummary struct {
 	Registered       int `json:"registered"`
 	NoOwners         int `json:"no_owners"`
 	DirectoryMissing int `json:"directory_missing"`
+	NotMonitored     int `json:"not_monitored"`
+	// MonitoringSources counts the turned-on monitoring systems; without any, coverage is not judged.
+	MonitoringSources int `json:"monitoring_sources"`
 }
 
 type CIList struct {
@@ -91,7 +97,7 @@ type CIFilter struct {
 	Source string
 	Status string
 	Owner  string
-	// Flag: no_owners or directory_missing.
+	// Flag: no_owners, directory_missing or not_monitored.
 	Flag string
 }
 
@@ -119,13 +125,19 @@ func servicesByCI(d *store.Data) map[string][]ServiceRef {
 	return out
 }
 
-func ciView(d *store.Data, ci *model.ConfigItem) CIView { return ciViewWith(d, ci, servicesByCI(d)) }
+func ciView(d *store.Data, ci *model.ConfigItem) CIView {
+	return ciViewWith(d, ci, servicesByCI(d), monitorsByCI(d), enabledSources(d) > 0)
+}
 
-func ciViewWith(d *store.Data, ci *model.ConfigItem, services map[string][]ServiceRef) CIView {
-	v := CIView{ConfigItem: *ci, Owners: []CIOwnerView{}, Services: services[ci.ID], Editable: !ci.Imported()}
+func ciViewWith(d *store.Data, ci *model.ConfigItem, services map[string][]ServiceRef, monitors map[string][]CIMonitor, judged bool) CIView {
+	v := CIView{ConfigItem: *ci, Owners: []CIOwnerView{}, Services: services[ci.ID], Monitoring: monitors[ci.ID], Editable: !ci.Imported()}
 	if v.Services == nil {
 		v.Services = []ServiceRef{}
 	}
+	if v.Monitoring == nil {
+		v.Monitoring = []CIMonitor{}
+	}
+	v.NotMonitored = judged && notMonitored(ci, v.Monitoring)
 	v.Registrable = !ci.Imported() && ci.NetBox == nil && netboxKindOf[ci.Kind] != ""
 	if v.IPs == nil {
 		v.IPs = []string{}
@@ -160,7 +172,9 @@ func (s *CIService) List(f CIFilter) CIList {
 	q := strings.ToLower(strings.TrimSpace(f.Query))
 	s.st.Read(func(d *store.Data) {
 		tags := map[string]bool{}
-		services := servicesByCI(d)
+		services, monitors := servicesByCI(d), monitorsByCI(d)
+		out.Summary.MonitoringSources = enabledSources(d)
+		judged := out.Summary.MonitoringSources > 0
 		for _, ci := range d.ConfigItems {
 			sum := &out.Summary
 			sum.Total++
@@ -181,7 +195,10 @@ func (s *CIService) List(f CIFilter) CIList {
 			for _, t := range ci.Tags {
 				tags[t] = true
 			}
-			v := ciViewWith(d, ci, services)
+			v := ciViewWith(d, ci, services, monitors, judged)
+			if v.NotMonitored {
+				sum.NotMonitored++
+			}
 			if f.matches(v, q) {
 				out.Items = append(out.Items, v)
 			}
@@ -207,7 +224,8 @@ func (f CIFilter) matches(v CIView, q string) bool {
 		f.Source != "" && v.Source != f.Source,
 		f.Owner != "" && !slices.ContainsFunc(v.Owners, func(o CIOwnerView) bool { return o.ID == f.Owner }),
 		f.Flag == "no_owners" && len(v.Owners) > 0,
-		f.Flag == "directory_missing" && (v.Directory == nil || v.Directory.Status != model.DirectoryMissing):
+		f.Flag == "directory_missing" && (v.Directory == nil || v.Directory.Status != model.DirectoryMissing),
+		f.Flag == "not_monitored" && !v.NotMonitored:
 		return false
 	}
 	if q == "" {
@@ -221,6 +239,9 @@ func (f CIFilter) matches(v CIView, q string) bool {
 	}
 	for _, svc := range v.Services {
 		fields = append(fields, svc.Name)
+	}
+	for _, m := range v.Monitoring {
+		fields = append(fields, m.Host, m.Name)
 	}
 	if v.NetBox != nil {
 		fields = append(fields, "netbox:"+strconv.Itoa(v.NetBox.ID))

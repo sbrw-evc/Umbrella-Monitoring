@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -219,18 +218,8 @@ func attachEvents(d *store.Data, cis map[string]*MapCI, events []ingest.FiringEv
 		}
 	}
 	for id := range cis {
-		ci := d.ConfigItems[id]
-		add(ci.Name, id)
-		if net.ParseIP(ci.Name) == nil {
-			if short, _, ok := strings.Cut(ci.Name, "."); ok {
-				add(short, id)
-			}
-		}
-		for _, ip := range ci.IPs {
-			add(ip, id)
-		}
-		if ci.Directory != nil {
-			add(ci.Directory.DNSName, id)
+		for _, k := range alert.CIKeys(d.ConfigItems[id]) {
+			add(k, id)
 		}
 	}
 	for _, e := range events {

@@ -7,7 +7,7 @@ import { useLocale, useT } from '../../i18n'
 import { Banner, Button, formatDate, Modal, Rows } from '../../ui'
 import { Chips } from '../services/Badges'
 import { useSession } from '../session'
-import { SourcePill, StatusPill } from './Badges'
+import { MonitorState, SourcePill, StatusPill } from './Badges'
 import { strings } from './strings'
 import type { Attrs, CI } from './types'
 
@@ -109,6 +109,7 @@ function Body({ ci }: { ci: CI }) {
     ),
   ])
   if (ci.directory) rows.push([t('ci.field.directory'), <Directory key="d" ci={ci} />])
+  if (ci.monitoring.length > 0 || ci.not_monitored) rows.push([t('ci.field.monitoring'), <Monitors key="m" ci={ci} />])
   rows.push(
     [t('ci.field.id'), <code key="i">{ci.id}</code>],
     [t('ci.field.created'), `${formatDate(ci.created_at, locale, timezone)} · ${ci.created_by}`],
@@ -162,5 +163,28 @@ function Directory({ ci }: { ci: CI }) {
         </div>
       )}
     </div>
+  )
+}
+
+function Monitors({ ci }: { ci: CI }) {
+  const t = useT(strings)
+  if (ci.monitoring.length === 0) return <span className="pill pill-warn">{t('ci.mon.none')}</span>
+  return (
+    <ul className="ci-monitors">
+      {ci.monitoring.map((m) => (
+        <li key={m.source_id + '/' + m.key}>
+          <MonitorState state={m.state} /> <span className="cn-name">{m.source_name}</span>
+          {' · '}
+          {m.url ? (
+            <a href={m.url} target="_blank" rel="noopener noreferrer">
+              {m.name || m.host}
+              <ExternalLink size={13} aria-hidden />
+            </a>
+          ) : (
+            m.name || m.host
+          )}
+        </li>
+      ))}
+    </ul>
   )
 }

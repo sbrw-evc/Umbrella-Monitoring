@@ -342,6 +342,7 @@ func (s *ServicesService) UnlinkNetBox(ctx context.Context, actor, id string) (S
 
 // dropCI removes a deleted configuration item from every service.
 func dropCI(d *store.Data, id string) {
+	dropHostLinks(d, id)
 	for _, svc := range d.Services {
 		if slices.Contains(svc.CIIDs, id) {
 			svc.CIIDs = orNil(slices.DeleteFunc(slices.Clone(svc.CIIDs), func(x string) bool { return x == id }))
