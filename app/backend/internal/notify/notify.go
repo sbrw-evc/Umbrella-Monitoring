@@ -158,12 +158,12 @@ type target struct {
 }
 
 type config struct {
-	set      model.Alerting
-	locale   string
-	email    string // the SMTP password
-	emailErr error
-	token    string // the Telegram bot token
-	tokenErr error
+	set    model.Alerting
+	locale string
+	// secret is the resolved secret of each enabled channel (the SMTP password, the bot
+	// token), secretErr why a channel has none it needs.
+	secret    map[string]string
+	secretErr map[string]error
 }
 
 func (s *Service) config() config {
@@ -174,15 +174,16 @@ func (s *Service) config() config {
 		c.set.Notify.ExtraTelegram = slices.Clone(d.Settings.Alerting.Notify.ExtraTelegram)
 		c.locale = d.Settings.DefaultLocale
 	})
-	n := c.set.Notify
-	if n.Email.Enabled && n.Email.PasswordRef != "" {
-		c.email, c.emailErr = s.resolve(n.Email.PasswordRef)
-	}
-	if n.Telegram.Enabled {
-		if n.Telegram.TokenRef == "" {
-			c.tokenErr = errors.New("the Telegram bot token is not set")
-		} else {
-			c.token, c.tokenErr = s.resolve(n.Telegram.TokenRef)
+	c.secret, c.secretErr = map[string]string{}, map[string]error{}
+	for _, ch := range channels {
+		if !ch.Enabled(c.set.Notify) {
+			continue
+		}
+		switch ref, err := ch.Secret(c.set.Notify); {
+		case err != nil:
+			c.secretErr[ch.Kind()] = err
+		case ref != "":
+			c.secret[ch.Kind()], c.secretErr[ch.Kind()] = s.resolve(ref)
 		}
 	}
 	return c
@@ -234,34 +235,39 @@ func (s *Service) targets(c config, a alert.Alert) []target {
 		}
 	})
 	def := loadTZ(defTZ)
+	on := enabled(n)
 	for _, p := range a.Route.Recipients() {
 		loc := def
 		if tz[p.UserID] != "" {
 			loc = loadTZ(tz[p.UserID])
 		}
-		if n.Email.Enabled && ValidEmail(p.Email) {
-			add(target{channel: ChannelEmail, address: p.Email, recipient: UserRecipient(p.UserID), tz: loc})
-		}
-		if n.Telegram.Enabled && ValidChat(p.Telegram) {
-			add(target{channel: ChannelTelegram, address: p.Telegram, recipient: UserRecipient(p.UserID), tz: loc})
-		}
-	}
-	if ch := a.Route.Channel; ch != nil {
-		if n.Email.Enabled && ValidEmail(ch.Email) {
-			add(target{channel: ChannelEmail, address: ch.Email, recipient: EmailRecipient(ch.Email), tz: def})
-		}
-		if n.Telegram.Enabled && ValidChat(ch.Telegram) {
-			add(target{channel: ChannelTelegram, address: ch.Telegram, recipient: TelegramRecipient(ch.Telegram), tz: def})
+		for _, ch := range on {
+			if addr := ch.Person(p); ch.Valid(addr) {
+				add(target{channel: ch.Kind(), address: addr, recipient: UserRecipient(p.UserID), tz: loc})
+			}
 		}
 	}
-	if n.Email.Enabled {
-		for _, e := range n.ExtraEmails {
-			add(target{channel: ChannelEmail, address: e, recipient: EmailRecipient(e), tz: def})
+	if team := a.Route.Channel; team != nil {
+		for _, ch := range on {
+			if addr := ch.Team(*team); ch.Valid(addr) {
+				add(target{channel: ch.Kind(), address: addr, recipient: ch.Recipient(addr), tz: def})
+			}
 		}
 	}
-	if n.Telegram.Enabled {
-		for _, chat := range n.ExtraTelegram {
-			add(target{channel: ChannelTelegram, address: chat, recipient: TelegramRecipient(chat), tz: def})
+	for _, ch := range on {
+		for _, addr := range ch.Extra(n) {
+			add(target{channel: ch.Kind(), address: addr, recipient: ch.Recipient(addr), tz: def})
+		}
+	}
+	return out
+}
+
+// enabled are the channels turned on, in their order.
+func enabled(n model.Notify) []channel {
+	var out []channel
+	for _, ch := range channels {
+		if ch.Enabled(n) {
+			out = append(out, ch)
 		}
 	}
 	return out
@@ -308,7 +314,7 @@ func (s *Service) Deliver(ctx context.Context, a alert.Alert) {
 		sent[t.channel] = append(sent[t.channel], t.address)
 		reached = append(reached, alert.Notified{Channel: t.channel, Address: t.address, Recipient: t.recipient})
 	}
-	for _, ch := range []string{ChannelEmail, ChannelTelegram} {
+	for _, ch := range Channels() {
 		if len(sent[ch]) > 0 {
 			s.note(ctx, a.ID, "notify_sent", map[string]string{"channel": ch, "to": strings.Join(sent[ch], ", ")})
 		}
@@ -322,19 +328,15 @@ func (s *Service) note(ctx context.Context, id, code string, args map[string]str
 }
 
 func (s *Service) send(ctx context.Context, c config, m composed, t target) error {
+	ch := channelOf(t.channel)
+	if ch == nil {
+		return fmt.Errorf("%w: %s", ErrUnknownChannel, t.channel)
+	}
 	attempt := func() error {
-		switch t.channel {
-		case ChannelEmail:
-			if c.emailErr != nil {
-				return errPermanent{c.emailErr}
-			}
-			return sendMail(ctx, c.set.Notify.Email, c.email, t.address, m.subject, m.text)
-		default:
-			if c.tokenErr != nil {
-				return errPermanent{c.tokenErr}
-			}
-			return sendTelegram(ctx, s.client, c.set.Notify.Telegram.APIURL, c.token, t.address, m.html)
+		if err := c.secretErr[t.channel]; err != nil {
+			return errPermanent{err}
 		}
+		return ch.Send(ctx, s, c.set.Notify, c.secret[t.channel], t.address, m)
 	}
 	wait := s.Backoff
 	var err error
@@ -555,7 +557,7 @@ func (s *Service) DeliverFollowUp(ctx context.Context, a alert.Alert) {
 	})
 	sent := map[string][]string{}
 	for _, n := range a.Notified {
-		if (n.Channel == ChannelEmail && !c.set.Notify.Email.Enabled) || (n.Channel == ChannelTelegram && !c.set.Notify.Telegram.Enabled) {
+		if ch := channelOf(n.Channel); ch == nil || !ch.Enabled(c.set.Notify) {
 			continue
 		}
 		loc := loadTZ(defTZ)
@@ -570,46 +572,47 @@ func (s *Service) DeliverFollowUp(ctx context.Context, a alert.Alert) {
 		}
 		sent[t.channel] = append(sent[t.channel], t.address)
 	}
-	for _, ch := range []string{ChannelEmail, ChannelTelegram} {
+	for _, ch := range Channels() {
 		if len(sent[ch]) > 0 {
 			s.note(ctx, a.ID, "notify_followup", map[string]string{"channel": ch, "to": strings.Join(sent[ch], ", "), "event": a.FollowUp})
 		}
 	}
 }
 
+// Test sends a test message to an address of a channel with the saved settings; the map tells
+// more for the interface (the name of the Telegram bot).
+func (s *Service) Test(ctx context.Context, kind, to string) (map[string]string, error) {
+	ch := channelOf(kind)
+	if ch == nil {
+		return nil, ErrUnknownChannel
+	}
+	c := s.config()
+	if !ch.Enabled(c.set.Notify) {
+		return nil, ErrDisabled
+	}
+	if err := c.secretErr[kind]; err != nil {
+		return nil, err
+	}
+	info, err := ch.Test(ctx, s, c.set.Notify, c.secret[kind], to, s.composeTest(c))
+	return info, unwrap(err)
+}
+
+func (s *Service) composeTest(c config) composed {
+	w := lang(c.locale)
+	return composed{subject: w["test"], text: w["test_body"] + "\n", html: "✅ <b>" + html.EscapeString(w["test"]) + "</b>\n" + html.EscapeString(w["test_body"])}
+}
+
 // TestEmail sends a test message with the saved settings.
 func (s *Service) TestEmail(ctx context.Context, to string) error {
-	c := s.config()
-	if !c.set.Notify.Email.Enabled {
-		return ErrDisabled
-	}
-	if c.emailErr != nil {
-		return c.emailErr
-	}
-	w := lang(c.locale)
-	return sendMail(ctx, c.set.Notify.Email, c.email, to, w["test"], w["test_body"]+"\n")
+	_, err := s.Test(ctx, ChannelEmail, to)
+	return err
 }
 
 // TestTelegram sends a test message to a chat with the saved settings and returns the name of
 // the bot.
 func (s *Service) TestTelegram(ctx context.Context, chat string) (string, error) {
-	c := s.config()
-	if !c.set.Notify.Telegram.Enabled {
-		return "", ErrDisabled
-	}
-	if c.tokenErr != nil {
-		return "", c.tokenErr
-	}
-	me, err := telegramCall(ctx, s.client, c.set.Notify.Telegram.APIURL, c.token, "getMe", map[string]any{})
-	if err != nil {
-		return "", unwrap(err)
-	}
-	w := lang(c.locale)
-	if err := sendTelegram(ctx, s.client, c.set.Notify.Telegram.APIURL, c.token, chat,
-		"✅ <b>"+html.EscapeString(w["test"])+"</b>\n"+html.EscapeString(w["test_body"])); err != nil {
-		return me.Result.Username, unwrap(err)
-	}
-	return me.Result.Username, nil
+	info, err := s.Test(ctx, ChannelTelegram, chat)
+	return info["bot"], err
 }
 
 func unwrap(err error) error {

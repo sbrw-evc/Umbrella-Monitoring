@@ -269,31 +269,20 @@ func (a *App) notifyTest(w http.ResponseWriter, r *http.Request) {
 	u := current(r).user
 	to := strings.TrimSpace(in.To)
 	out := map[string]any{"ok": true}
-	var err error
-	switch in.Channel {
-	case notify.ChannelEmail:
-		if to == "" {
-			to = u.Email
-		}
-		if !notify.ValidEmail(to) {
-			writeError(w, invalid("email_invalid", nil))
-			return
-		}
-		err = a.notifier.TestEmail(r.Context(), to)
-	case notify.ChannelTelegram:
-		if to == "" {
-			to = u.Telegram
-		}
-		if !notify.ValidChat(to) {
-			writeError(w, invalid("telegram_invalid", nil))
-			return
-		}
-		var bot string
-		bot, err = a.notifier.TestTelegram(r.Context(), to)
-		out["bot"] = bot
-	default:
+	if !slices.Contains(notify.Channels(), in.Channel) {
 		writeError(w, invalid("channel_invalid", nil))
 		return
+	}
+	if to == "" {
+		to = notify.UserAddress(in.Channel, u)
+	}
+	if !notify.ValidAddress(in.Channel, to) {
+		writeError(w, invalid(in.Channel+"_invalid", nil))
+		return
+	}
+	info, err := a.notifier.Test(r.Context(), in.Channel, to)
+	for k, v := range info {
+		out[k] = v
 	}
 	switch {
 	case errors.Is(err, notify.ErrDisabled):
