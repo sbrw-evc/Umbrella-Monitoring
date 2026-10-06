@@ -2,6 +2,10 @@ package model
 
 import "time"
 
+// MaxTeamDepth is the deepest a team hierarchy goes: a team and its ancestors are at most this
+// many teams.
+const MaxTeamDepth = 8
+
 type Team struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`

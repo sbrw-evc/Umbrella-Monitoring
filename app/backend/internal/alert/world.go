@@ -155,8 +155,6 @@ func (w *world) resolveCI(name string, labels map[string]string) (ci *model.Conf
 	return nil, false
 }
 
-var criticalityRank = map[string]int{model.CriticalityCritical: 4, model.CriticalityHigh: 3, model.CriticalityMedium: 2, model.CriticalityLow: 1}
-
 // route: the item belongs to business services; the owning team of the most critical active
 // one gets the alert, with its lead and members. A team with nobody hands it to its parent.
 // The people responsible for the item are kept as owners.
@@ -183,7 +181,7 @@ func (w *world) servicesOf(ciID string) []model.Service {
 		}
 	}
 	slices.SortStableFunc(svcs, func(a, b model.Service) int {
-		if c := cmp.Compare(criticalityRank[b.Criticality], criticalityRank[a.Criticality]); c != 0 {
+		if c := cmp.Compare(model.CriticalityRank(b.Criticality), model.CriticalityRank(a.Criticality)); c != 0 {
 			return c
 		}
 		if a.Status != b.Status {
@@ -220,7 +218,7 @@ func (w *world) routeServices(svcs []model.Service, owners []Person, now time.Ti
 		r.Service = &Ref{ID: s.ID, Name: s.Name}
 		r.Team = &Ref{ID: t.ID, Name: t.Name}
 		seen := map[string]bool{}
-		for cur, depth := t, 0; depth < 16 && len(r.People) == 0 && r.Channel == nil; depth++ {
+		for cur, depth := t, 0; depth < model.MaxTeamDepth && len(r.People) == 0 && r.Channel == nil; depth++ {
 			if seen[cur.ID] {
 				break
 			}

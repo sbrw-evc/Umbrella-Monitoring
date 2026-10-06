@@ -39,6 +39,14 @@ func TestSeverityCountsJSON(t *testing.T) {
 	}
 }
 
+func TestCriticalityRank(t *testing.T) {
+	for v, want := range map[string]int{CriticalityCritical: 4, CriticalityHigh: 3, CriticalityMedium: 2, CriticalityLow: 1, "": 0, "bogus": 0} {
+		if got := CriticalityRank(v); got != want {
+			t.Errorf("CriticalityRank(%q) = %d, want %d", v, got, want)
+		}
+	}
+}
+
 func TestMethods(t *testing.T) {
 	if MethodCounterpart(MethodRED) != MethodUSE || MethodCounterpart(MethodUSE) != MethodRED || MethodCounterpart(MethodOther) != "" {
 		t.Fatal("counterparts")

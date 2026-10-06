@@ -475,7 +475,7 @@ func (e *Engine) link(ctx context.Context, tx pgx.Tx, c *change, now time.Time) 
 	if len(a.Route.Services) == 0 || other == "" {
 		return nil
 	}
-	o, err := scanAlert(tx.QueryRow(ctx, `SELECT doc FROM alerts WHERE status <> '`+StatusResolved+`' AND method = $1 AND service_ids && $2
+	o, err := scanAlert(tx.QueryRow(ctx, `SELECT doc FROM alerts WHERE `+sqlActive+` AND method = $1 AND service_ids && $2
 		AND first_seen >= $3 AND id <> $4 ORDER BY first_seen DESC LIMIT 1 FOR UPDATE`, other, a.Route.ServiceIDs(), now.Add(-e.policy().window), a.ID))
 	if err != nil || o == nil {
 		return err
@@ -961,7 +961,7 @@ func (e *Engine) retry(a *Alert, now time.Time) *Command {
 // Reroute routes the active alerts of the given configuration items again, after the
 // catalog changed (an item moved to another service, a team got people).
 func (e *Engine) Reroute(ctx context.Context) error {
-	rows, err := e.db.Query(ctx, "SELECT id FROM alerts WHERE status <> 'resolved' AND ci_id <> ''")
+	rows, err := e.db.Query(ctx, "SELECT id FROM alerts WHERE "+sqlActive+" AND ci_id <> ''")
 	if err != nil {
 		return err
 	}
@@ -1037,7 +1037,7 @@ func (e *Engine) BindUnknown(ctx context.Context, actor string) ([]string, error
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(lockKey)); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, "SELECT id FROM alerts WHERE status <> 'resolved' AND ci_id = '' ORDER BY seq")
+		rows, err := tx.Query(ctx, "SELECT id FROM alerts WHERE "+sqlActive+" AND ci_id = '' ORDER BY seq")
 		if err != nil {
 			return err
 		}
