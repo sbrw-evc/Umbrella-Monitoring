@@ -7,12 +7,37 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/access"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/app"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory/directorytest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets/secretstest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
+
+func TestPresetRolePermissionsAreInTheCatalog(t *testing.T) {
+	want := []string{model.RoleViewer, model.RoleOnCall, model.RoleServiceOwner, model.RoleIntegrations, model.RoleNOCLead}
+	var ids []string
+	for _, r := range model.PresetRoles(model.LocaleEN, time.Now()) {
+		ids = append(ids, r.ID)
+		if r.Name == "" || r.Description == "" || len(r.Permissions) == 0 {
+			t.Fatalf("preset %s is incomplete: %+v", r.ID, r)
+		}
+		for _, p := range r.Permissions {
+			if !access.Valid(p) {
+				t.Fatalf("preset %s has unknown permission %q", r.ID, p)
+			}
+		}
+	}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("preset ids = %v, want %v", ids, want)
+	}
+	for _, r := range model.PresetRoles(model.LocaleRU, time.Now()) {
+		if r.Name == "" || r.Description == "" {
+			t.Fatalf("preset %s has no Russian text", r.ID)
+		}
+	}
+}
 
 func TestPresetRolesCreatedOnceAndEditable(t *testing.T) {
 	_, vault := secretstest.New(t)
