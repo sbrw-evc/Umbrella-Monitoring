@@ -15,6 +15,7 @@ import (
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/textx"
 )
 
 const (
@@ -429,9 +430,8 @@ func (e *Engine) Act(ctx context.Context, id, action, actor, text string) (Alert
 			if text == "" {
 				return ErrEmptyComment
 			}
-			if len(text) > 4000 {
-				text = text[:4000]
-			}
+			// The limit counts characters, not bytes, so a cut never splits one.
+			text = textx.Runes(text, 4000)
 			c.log(now, KindComment, "comment", map[string]string{"text": text}, actor)
 		default:
 			return ErrBadAction
