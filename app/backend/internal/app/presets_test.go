@@ -215,7 +215,9 @@ func TestNetBoxContactAccountsSwitch(t *testing.T) {
 func TestNetBoxContactAccountsKeptForExistingSettings(t *testing.T) {
 	_, vault := secretstest.New(t)
 	st := store.New()
-	st.Write(func(d *store.Data) { d.Settings.NetBox.URL, d.Settings.NetBox.SyncContacts = "https://netbox.example.org", true })
+	st.Write(func(d *store.Data) {
+		d.Settings.NetBox.URL, d.Settings.NetBox.SyncContacts = "https://netbox.example.org", true
+	})
 	if err := app.Migrate(context.Background(), st, vault); err != nil {
 		t.Fatal(err)
 	}
