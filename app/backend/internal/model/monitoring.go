@@ -60,6 +60,28 @@ type MonitoringHost struct {
 	URL       string   `json:"url,omitempty"`
 }
 
+// Normalize replaces missing lists with empty ones. The snapshot (gob) does not keep empty
+// lists, so a host read back after a restart has nil where it had [], and the API must still
+// send [] for them.
+func (h *MonitoringHost) Normalize() {
+	if h.IPs == nil {
+		h.IPs = []string{}
+	}
+	if h.DNS == nil {
+		h.DNS = []string{}
+	}
+	if h.Groups == nil {
+		h.Groups = []string{}
+	}
+}
+
+// NormalizeHosts normalizes every host of the source.
+func (s *MonitoringSource) NormalizeHosts() {
+	for i := range s.Hosts {
+		s.Hosts[i].Normalize()
+	}
+}
+
 // MonitoringSync is the last reading of the host list of a source.
 type MonitoringSync struct {
 	StartedAt  time.Time `json:"started_at"`

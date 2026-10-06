@@ -7,6 +7,7 @@ import { RouterProvider, SCROLL_ROOT_ID, useRouter } from '../router'
 import { ExpiredPassword } from './profile/ExpiredPassword'
 import { PasswordExpiryNotice } from './profile/PasswordExpiryNotice'
 import { ProfilePage } from './profile/ProfilePage'
+import { PageBoundary } from './PageBoundary'
 import { PageHead } from './PageHead'
 import { resolve, visiblePages } from './pages'
 import { SessionProvider, useSession, type Session } from './session'
@@ -146,12 +147,16 @@ function Pages() {
         transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
       >
         {target.kind === 'profile' ? (
-          <ProfilePage />
+          <PageBoundary resetKey={path}>
+            <ProfilePage />
+          </PageBoundary>
         ) : (
           <>
             <PasswordExpiryNotice link />
             {target.page.subtitle && <PageHead page={target.page} />}
-            <target.page.Component />
+            <PageBoundary resetKey={path}>
+              <target.page.Component />
+            </PageBoundary>
           </>
         )}
       </motion.main>

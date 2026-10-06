@@ -263,9 +263,12 @@ func (s *MonitoringService) sourceView(d *store.Data, m *hostMatcher, src *model
 		v.CredentialName = c.Name
 	}
 	for _, h := range src.Hosts {
-		if m.match(src, h).CIID != "" {
+		// The same groups as the host list: a host said to be no item is neither matched nor
+		// unmatched.
+		switch hm := m.match(src, h); {
+		case hm.CIID != "":
 			v.Matched++
-		} else {
+		case hm.How != MatchExcluded:
 			v.Unmatched++
 		}
 	}
@@ -428,7 +431,13 @@ func (s *MonitoringService) Test(ctx context.Context, in MonitoringSourceInput) 
 	if err != nil {
 		return MonitoringTestReport{Error: err.Error(), Sample: []model.MonitoringHost{}}, nil
 	}
-	out := MonitoringTestReport{OK: true, Version: res.Version, Hosts: len(res.Hosts), Sample: res.Hosts[:min(len(res.Hosts), 5)]}
+	out := MonitoringTestReport{OK: true, Version: res.Version, Hosts: len(res.Hosts), Sample: slices.Clone(res.Hosts[:min(len(res.Hosts), 5)])}
+	if out.Sample == nil {
+		out.Sample = []model.MonitoringHost{}
+	}
+	for i := range out.Sample {
+		out.Sample[i].Normalize()
+	}
 	return out, nil
 }
 
@@ -587,6 +596,7 @@ func (s *MonitoringService) Hosts(f HostFilter) HostList {
 		var all []HostView
 		for _, src := range sortedSources(d) {
 			for _, h := range src.Hosts {
+				h.Normalize()
 				hm := m.match(src, h)
 				v := HostView{MonitoringHost: h, SourceID: src.ID, SourceName: src.Name, Kind: src.Kind, Match: hm.How,
 					Candidates: []ServiceRef{}, AlsoIn: []HostRef{}}

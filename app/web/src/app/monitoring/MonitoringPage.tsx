@@ -46,10 +46,11 @@ type Host = {
   key: string
   host: string
   name: string
-  ips: string[]
-  dns: string[]
-  groups: string[]
-  endpoints?: string[]
+  // Lists may come as null from an older server (hosts read back from its snapshot).
+  ips: string[] | null
+  dns: string[] | null
+  groups: string[] | null
+  endpoints?: string[] | null
   state: string
   url?: string
   source_id: string
@@ -57,13 +58,13 @@ type Host = {
   kind: Kind
   ci?: Ref
   match: string
-  candidates: Ref[]
-  also_in: { source_id: string; source_name: string; key: string; host: string }[]
+  candidates: Ref[] | null
+  also_in: { source_id: string; source_name: string; key: string; host: string }[] | null
 }
 type Summary = { total: number; matched: number; unmatched: number; ambiguous: number; excluded: number }
 type HostList = { items: Host[]; summary: Summary; limited: boolean }
 type Credential = { id: string; name: string; type: string }
-type Report = { ok: boolean; error?: string; version?: string; hosts: number; sample: Host[] }
+type Report = { ok: boolean; error?: string; version?: string; hosts: number; sample: Host[] | null }
 
 const MATCHES = ['matched', 'unmatched', 'ambiguous', 'excluded'] as const
 const ran = (at?: string) => !!at && !at.startsWith('0001-')
@@ -376,8 +377,8 @@ function HostsTab({ sources, epoch, onChanged }: { sources: Source[]; epoch: num
                     {h.name && h.host && h.name !== h.host && <div className="muted cn-mono">{h.host}</div>}
                   </td>
                   <td>{h.source_name}</td>
-                  <td className="cn-mono">{[...h.ips, ...h.dns].join(', ') || <span className="muted">—</span>}</td>
-                  <td>{h.groups.length ? h.groups.join(', ') : <span className="muted">—</span>}</td>
+                  <td className="cn-mono">{[...(h.ips ?? []), ...(h.dns ?? [])].join(', ') || <span className="muted">—</span>}</td>
+                  <td>{h.groups?.length ? h.groups.join(', ') : <span className="muted">—</span>}</td>
                   <td>
                     <StatePill state={h.state} />
                   </td>
@@ -431,13 +432,13 @@ function HostCI({ h }: { h: Host }) {
     return (
       <div>
         <span className="pill pill-warn">{t('mon.match.ambiguous')}</span>
-        <div className="muted rl-sub">{h.candidates.map((c) => c.name).join(', ')}</div>
+        <div className="muted rl-sub">{(h.candidates ?? []).map((c) => c.name).join(', ')}</div>
       </div>
     )
   return (
     <div>
       <span className="pill pill-warn">{t('mon.match.none')}</span>
-      {h.also_in.length > 0 && <div className="muted rl-sub">{t('mon.also', { list: h.also_in.map((o) => `${o.source_name}: ${o.host}`).join(', ') })}</div>}
+      {(h.also_in?.length ?? 0) > 0 && <div className="muted rl-sub">{t('mon.also', { list: (h.also_in ?? []).map((o) => `${o.source_name}: ${o.host}`).join(', ') })}</div>}
     </div>
   )
 }
@@ -498,10 +499,10 @@ function LinkDialog({ host, onClose, onSaved }: { host: Host | null; onClose: ()
         <div className="stack">
           <p className="muted">{t('mon.link.text')}</p>
           <p className="hint">{t('mon.link.none.hint')}</p>
-          {host.candidates.length > 0 && (
+          {(host.candidates?.length ?? 0) > 0 && (
             <div className="mon-options">
               <span className="nb-group-title">{t('mon.link.candidates')}</span>
-              {host.candidates.map((c) => option(c))}
+              {(host.candidates ?? []).map((c) => option(c))}
             </div>
           )}
           <label className="svc-search mon-link-search">
@@ -557,7 +558,7 @@ function CreateDialog({ host, onClose, onSaved }: { host: Host | null; onClose: 
       {host && (
         <div className="stack">
           <p className="muted">{t('mon.create.text', { name: host.host || host.name })}</p>
-          {host.also_in.length > 0 && <p className="hint">{t('mon.create.also', { list: host.also_in.map((o) => `${o.source_name}: ${o.host}`).join(', ') })}</p>}
+          {(host.also_in?.length ?? 0) > 0 && <p className="hint">{t('mon.create.also', { list: (host.also_in ?? []).map((o) => `${o.source_name}: ${o.host}`).join(', ') })}</p>}
           <Field label={t('mon.create.kind')}>
             {(id) => (
               <Select id={id} value={kind} onChange={(e) => setKind(e.target.value)}>
@@ -738,7 +739,7 @@ function SourceEditor({
           (report.ok ? (
             <Banner kind="ok" title={t('mon.test.ok', { hosts: report.hosts })}>
               {report.version && <div>{t('mon.test.version', { version: report.version })}</div>}
-              {report.sample.length > 0 && <div className="cn-mono">{report.sample.map((h) => h.host || h.name).join(', ')}</div>}
+              {(report.sample?.length ?? 0) > 0 && <div className="cn-mono">{(report.sample ?? []).map((h) => h.host || h.name).join(', ')}</div>}
             </Banner>
           ) : (
             <Banner kind="error" title={t('mon.test.fail')}>
