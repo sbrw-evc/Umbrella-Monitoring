@@ -10,13 +10,18 @@ import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { reveal } from './PagerDutyCard'
 import { strings } from './strings'
-import type { NotifyView } from './types'
+import { SEVERITIES, type NotifyView } from './types'
+
+// Delays offered for backup notification, in seconds; '' is automatic.
+const DELAYS = [0, 60, 120, 300, 600, 900, 1800, 3600]
 
 type Draft = {
   email: NotifyView['email'] & { password: string; port_text: string }
   telegram: { enabled: boolean; api_url: string; token: string }
   extra_emails: string
   extra_telegram: string
+  delay: string
+  min_severity: string
 }
 
 function draftOf(v: NotifyView): Draft {
@@ -25,6 +30,8 @@ function draftOf(v: NotifyView): Draft {
     telegram: { enabled: v.telegram.enabled, api_url: v.telegram.api_url ?? '', token: '' },
     extra_emails: v.extra_emails.join('\n'),
     extra_telegram: v.extra_telegram.join('\n'),
+    delay: v.delay_seconds === null || v.delay_seconds === undefined ? '' : String(v.delay_seconds),
+    min_severity: v.min_severity || 'error',
   }
 }
 
@@ -49,6 +56,8 @@ function bodyOf(d: Draft) {
     telegram: { enabled: d.telegram.enabled, token: d.telegram.token, api_url: d.telegram.api_url },
     extra_emails: lines(d.extra_emails),
     extra_telegram: lines(d.extra_telegram),
+    delay_seconds: d.delay === '' ? null : Number(d.delay),
+    min_severity: d.min_severity,
   }
 }
 
@@ -95,6 +104,10 @@ export function NotifyCard() {
       return r.bot ? t('nt.test.okBot', { to: r.to, bot: r.bot }) : t('nt.test.ok', { to: r.to })
     })
 
+  const autoText = t(view.pd_enabled ? 'nt.delay.auto.pd' : 'nt.delay.auto.nopd')
+  const delayText = (v: number | null | undefined) =>
+    v === null || v === undefined ? t('nt.delay.auto', { auto: autoText }) : v === 0 ? t('nt.delay.now') : v % 60 === 0 ? t('nt.delay.min', { n: v / 60 }) : `${v} s`
+  const delays = draft.delay !== '' && !DELAYS.includes(Number(draft.delay)) ? [...DELAYS, Number(draft.delay)].sort((x, y) => x - y) : DELAYS
   const on = view.email.enabled || view.telegram.enabled
   const extra = [
     view.extra_emails.length ? t('nt.extra.n.emails', { n: view.extra_emails.length }) : '',
@@ -106,6 +119,7 @@ export function NotifyCard() {
     [t('nt.email'), view.email.enabled ? [t('pd.state.on'), view.email.host].filter(Boolean).join(' · ') : t('pd.state.off')],
     [t('nt.telegram'), t(view.telegram.enabled ? 'pd.state.on' : 'pd.state.off')],
     [t('nt.extra'), extra],
+    [t('nt.summary.when'), t('nt.summary.when.value', { delay: delayText(view.delay_seconds), severity: t(`sev.${view.min_severity || 'error'}`).toLowerCase() })],
   ]
 
   return (
@@ -174,6 +188,34 @@ export function NotifyCard() {
             </Reveal>
           </div>
         </fieldset>
+        <section className="al-section">
+          <h3 className="al-sub">{t('nt.when')}</h3>
+          <fieldset className="plain-fieldset grid-2" disabled={!canEdit}>
+            <Field label={t('nt.delay')} hint={t('nt.delay.hint')}>
+              {(id) => (
+                <Select id={id} value={draft.delay} onChange={(e) => setDraft({ ...draft, delay: e.target.value })}>
+                  <option value="">{t('nt.delay.auto', { auto: autoText })}</option>
+                  {delays.map((d) => (
+                    <option key={d} value={String(d)}>
+                      {delayText(d)}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+            <Field label={t('nt.min')} hint={t('nt.min.hint')}>
+              {(id) => (
+                <Select id={id} value={draft.min_severity} onChange={(e) => setDraft({ ...draft, min_severity: e.target.value })}>
+                  {SEVERITIES.map((s) => (
+                    <option key={s} value={s}>
+                      {t(`sev.${s}`)}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </Field>
+          </fieldset>
+        </section>
         <section className="al-section">
           <h3 className="al-sub">{t('nt.extra')}</h3>
           <fieldset className="plain-fieldset grid-2" disabled={!canEdit}>

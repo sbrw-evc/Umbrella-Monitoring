@@ -22,10 +22,11 @@ export type Person = { user_id: string; name: string; email?: string; telegram?:
 export type Route = { services: Ref[]; team?: Ref; people: Person[]; owners: Person[]; via: 'service' | 'ci_owners' | 'none'; at: string }
 
 export type PD = {
-  state: 'pending' | 'accepted' | 'acked' | 'failed' | 'skipped'
+  state: 'pending' | 'accepted' | 'acked' | 'failed' | 'skipped' | 'off'
   key: string
   route?: string
   error?: string
+  error_code?: string
   retry?: string
   attempt_at?: string
   incident_id?: string
@@ -58,6 +59,8 @@ export type Incident = {
   pd: PD
   fallback: boolean
   fallback_at?: string
+  fallback_state?: 'pending' | 'sending' | 'sent'
+  follow_up?: 'acknowledged' | 'resolved'
   related_id?: string
 }
 
@@ -70,6 +73,8 @@ export type Counts = {
   fallback: number
   suppressed: number
   unbound: number
+  // PagerDuty is turned on; while it is off its tile and column are hidden.
+  pd_enabled: boolean
 }
 
 export type Page = { alerts: Incident[]; counts: Counts; more: boolean }

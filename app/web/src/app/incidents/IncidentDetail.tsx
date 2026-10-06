@@ -26,10 +26,12 @@ export function StatusPill({ status }: { status: Incident['status'] }) {
   return <span className={`pill pill-${tone}`}>{t(`inc.status.${status}`)}</span>
 }
 
+// PDPill: "off" (PagerDuty is turned off) is grey and neutral, not a failure.
 export function PDPill({ state }: { state: PD['state'] }) {
   const t = useT(strings)
   const tone = state === 'accepted' || state === 'acked' ? 'ok' : state === 'failed' ? 'error' : state === 'pending' ? 'warn' : 'off'
-  return <span className={`pill pill-${tone}`}>{t(`inc.pd.${state}`)}</span>
+  const label = t(`inc.pd.${state}`)
+  return <span className={`pill pill-${tone}`}>{label === `inc.pd.${state}` ? state : label}</span>
 }
 
 type Props = { id: string | null; actor: boolean; onClose: () => void; onChanged: () => void; onOpen: (id: string) => void }

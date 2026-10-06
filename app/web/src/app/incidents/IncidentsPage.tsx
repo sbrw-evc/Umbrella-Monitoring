@@ -76,6 +76,7 @@ export function IncidentsPage() {
     return <p className="muted">{t('loading')}</p>
   }
   const { alerts, counts, more } = list.data
+  const pdOn = counts.pd_enabled !== false
   const actionable = alerts.filter((a) => a.status !== 'resolved')
   const allChecked = actionable.length > 0 && actionable.every((a) => checked.has(a.id))
 
@@ -171,7 +172,7 @@ export function IncidentsPage() {
                   <th>{t('inc.col.incident')}</th>
                   <th>{t('inc.col.owner')}</th>
                   <th>{t('inc.col.status')}</th>
-                  <th>{t('inc.col.pd')}</th>
+                  {pdOn && <th>{t('inc.col.pd')}</th>}
                   <th>{t('inc.col.seen')}</th>
                   <th className="num">{t('inc.col.count')}</th>
                 </tr>
@@ -183,6 +184,7 @@ export function IncidentsPage() {
                     a={a}
                     now={now}
                     actor={actor}
+                    pd={pdOn}
                     checked={checked.has(a.id)}
                     onCheck={(v) =>
                       setChecked((s) => {
@@ -245,10 +247,13 @@ function Tiles({ counts, filters, set }: { counts: Page['counts']; filters: Filt
           <span className="muted">{t(`inc.sev.${s}`)}</span>
         </button>
       ))}
-      <button type="button" className={`card ci-tile ci-tile-flag ${counts.pd_not_taken > 0 ? 'warn' : ''} ${filters.flag === 'pd' ? 'active' : ''}`} onClick={() => flag('pd')}>
-        <span className="ci-tile-value">{counts.pd_not_taken}</span>
-        <span className="muted">{t('inc.tile.pd')}</span>
-      </button>
+      {/* Without PagerDuty nothing is "not taken by PagerDuty": the tile is hidden. */}
+      {counts.pd_enabled !== false && (
+        <button type="button" className={`card ci-tile ci-tile-flag ${counts.pd_not_taken > 0 ? 'warn' : ''} ${filters.flag === 'pd' ? 'active' : ''}`} onClick={() => flag('pd')}>
+          <span className="ci-tile-value">{counts.pd_not_taken}</span>
+          <span className="muted">{t('inc.tile.pd')}</span>
+        </button>
+      )}
       <button type="button" className={`card ci-tile ci-tile-flag ${counts.fallback > 0 ? 'warn' : ''} ${filters.flag === 'fallback' ? 'active' : ''}`} onClick={() => flag('fallback')}>
         <span className="ci-tile-value">{counts.fallback}</span>
         <span className="muted">{t('inc.tile.fallback')}</span>
@@ -262,7 +267,23 @@ function Tiles({ counts, filters, set }: { counts: Page['counts']; filters: Filt
   )
 }
 
-function Row({ a, now, actor, checked, onCheck, onOpen }: { a: Incident; now: number; actor: boolean; checked: boolean; onCheck: (v: boolean) => void; onOpen: () => void }) {
+function Row({
+  a,
+  now,
+  actor,
+  pd,
+  checked,
+  onCheck,
+  onOpen,
+}: {
+  a: Incident
+  now: number
+  actor: boolean
+  pd: boolean
+  checked: boolean
+  onCheck: (v: boolean) => void
+  onOpen: () => void
+}) {
   const t = useT(strings)
   const owner = [a.route.services[0]?.name, a.route.team?.name].filter(Boolean).join(' · ')
   return (
@@ -291,9 +312,11 @@ function Row({ a, now, actor, checked, onCheck, onOpen }: { a: Incident; now: nu
         {a.suppressed && <span className="pill pill-off inc-badge">{t('inc.badge.suppressed')}</span>}
         {a.fallback && a.status !== 'resolved' && <span className="pill pill-warn inc-badge">{t('inc.badge.fallback')}</span>}
       </td>
-      <td>
-        <PDPill state={a.pd.state} />
-      </td>
+      {pd && (
+        <td>
+          <PDPill state={a.pd.state} />
+        </td>
+      )}
       <td title={a.last_seen}>{ago(t, a.last_seen, now)}</td>
       <td className="num">{a.count}</td>
     </tr>

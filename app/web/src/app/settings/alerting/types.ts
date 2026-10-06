@@ -63,6 +63,11 @@ export type NotifyView = {
   has_token: boolean
   public_url: string
   links: boolean
+  // null: automatic (2 min while PagerDuty is on, at once while it is off).
+  delay_seconds: number | null
+  min_severity: string
+  pd_enabled: boolean
+  auto_delay_seconds: number
 }
 
 export type Ref = { id: string; name: string }
