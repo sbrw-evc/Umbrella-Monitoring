@@ -27,14 +27,24 @@ type userServiceRef struct {
 }
 
 func (a *App) registerUsers(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/users", a.authed(a.can("users:view", a.listUsers)))
-	mux.HandleFunc("GET /api/users/{id}", a.authed(a.can("users:view", a.getUser)))
-	mux.HandleFunc("POST /api/users", a.authed(a.can("users:create", a.createUser)))
-	mux.HandleFunc("PUT /api/users/{id}", a.authed(a.can("users:edit", a.editUser)))
-	mux.HandleFunc("POST /api/users/{id}/lock", a.authed(a.can("users:lock", a.lockUser(true))))
-	mux.HandleFunc("POST /api/users/{id}/unlock", a.authed(a.can("users:lock", a.lockUser(false))))
-	mux.HandleFunc("PUT /api/users/{id}/password", a.authed(a.can("users:password", a.resetPassword)))
-	mux.HandleFunc("DELETE /api/users/{id}", a.authed(a.can("users:delete", a.deleteUser)))
+	a.route(mux, "GET /api/users", "users:view", a.listUsers)
+	a.route(mux, "GET /api/users/{id}", "users:view", fetch(func(r *http.Request) (managedUserView, error) {
+		return a.managed(a.accounts.Get(r.PathValue("id")))
+	}))
+	a.route(mux, "POST /api/users", "users:create", submit(http.StatusCreated, func(r *http.Request, in NewUser) (managedUserView, error) {
+		return a.managed(a.accounts.Create(r.Context(), actorOf(r), in))
+	}))
+	a.route(mux, "PUT /api/users/{id}", "users:edit", submit(http.StatusOK, func(r *http.Request, in UserChanges) (managedUserView, error) {
+		return a.managed(a.accounts.Update(actorOf(r), r.PathValue("id"), in))
+	}))
+	a.route(mux, "POST /api/users/{id}/lock", "users:lock", a.lockUser(true))
+	a.route(mux, "POST /api/users/{id}/unlock", "users:lock", a.lockUser(false))
+	a.route(mux, "PUT /api/users/{id}/password", "users:password", submit(http.StatusOK, func(r *http.Request, in PasswordReset) (managedUserView, error) {
+		return a.managed(a.accounts.SetPassword(r.Context(), actorOf(r), r.PathValue("id"), in))
+	}))
+	a.route(mux, "DELETE /api/users/{id}", "users:delete", remove(func(r *http.Request) error {
+		return a.accounts.Delete(r.Context(), actorOf(r), r.PathValue("id"))
+	}))
 }
 
 func actorOf(r *http.Request) Actor {
@@ -75,12 +85,12 @@ func (a *App) managedViews(users []model.User) []managedUserView {
 	return out
 }
 
-func (a *App) respondManaged(w http.ResponseWriter, status int, u model.User, err error) {
+// managed is the view of the user a change returns, or its error.
+func (a *App) managed(u model.User, err error) (managedUserView, error) {
 	if err != nil {
-		writeError(w, err)
-		return
+		return managedUserView{}, err
 	}
-	httpx.JSON(w, status, a.managedViews([]model.User{u})[0])
+	return a.managedViews([]model.User{u})[0], nil
 }
 
 func (a *App) listUsers(w http.ResponseWriter, r *http.Request) {
@@ -89,49 +99,8 @@ func (a *App) listUsers(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, a.managedViews(users))
 }
 
-func (a *App) getUser(w http.ResponseWriter, r *http.Request) {
-	u, err := a.accounts.Get(r.PathValue("id"))
-	a.respondManaged(w, http.StatusOK, u, err)
-}
-
-func (a *App) createUser(w http.ResponseWriter, r *http.Request) {
-	var in NewUser
-	if !httpx.Decode(w, r, &in) {
-		return
-	}
-	u, err := a.accounts.Create(r.Context(), actorOf(r), in)
-	a.respondManaged(w, http.StatusCreated, u, err)
-}
-
-func (a *App) editUser(w http.ResponseWriter, r *http.Request) {
-	var in UserChanges
-	if !httpx.Decode(w, r, &in) {
-		return
-	}
-	u, err := a.accounts.Update(actorOf(r), r.PathValue("id"), in)
-	a.respondManaged(w, http.StatusOK, u, err)
-}
-
 func (a *App) lockUser(locked bool) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		u, err := a.accounts.SetLocked(actorOf(r), r.PathValue("id"), locked)
-		a.respondManaged(w, http.StatusOK, u, err)
-	}
-}
-
-func (a *App) resetPassword(w http.ResponseWriter, r *http.Request) {
-	var in PasswordReset
-	if !httpx.Decode(w, r, &in) {
-		return
-	}
-	u, err := a.accounts.SetPassword(r.Context(), actorOf(r), r.PathValue("id"), in)
-	a.respondManaged(w, http.StatusOK, u, err)
-}
-
-func (a *App) deleteUser(w http.ResponseWriter, r *http.Request) {
-	if err := a.accounts.Delete(r.Context(), actorOf(r), r.PathValue("id")); err != nil {
-		writeError(w, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+	return fetch(func(r *http.Request) (managedUserView, error) {
+		return a.managed(a.accounts.SetLocked(actorOf(r), r.PathValue("id"), locked))
+	})
 }
