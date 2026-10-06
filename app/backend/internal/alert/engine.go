@@ -157,11 +157,8 @@ func (e *Engine) Ingest(ctx context.Context, events []Incoming) error {
 }
 
 func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now time.Time) ([]Command, error) {
-	ci := w.resolve(in.CI, in.Labels)
-	name := strings.TrimSpace(in.CI)
-	if v := strings.TrimSpace(in.Labels["ci"]); v != "" {
-		name = v
-	}
+	ci, excluded := w.resolveCI(in.CI, in.Labels)
+	name := eventCIName(in.CI, in.Labels)
 	signal := in.Signal
 	if strings.TrimSpace(signal) == "" {
 		signal = in.Title
@@ -235,6 +232,7 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 		if a.Method == "" {
 			a.Method = "other"
 		}
+		a.EventCI = name
 		c.a = a
 		c.log(now, KindStatus, "opened", nil, "")
 		if ci != nil {
@@ -290,6 +288,9 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 		c.log(now, KindStatus, "severity_raised", map[string]string{"from": prev, "to": a.Severity}, "")
 	}
 
+	if e.exclude(c, excluded, now) {
+		return nil, c.save(ctx, tx)
+	}
 	if m := w.maintenanceFor(a, now); m != nil {
 		if !a.Suppressed {
 			c.log(now, KindMaintenance, "suppressed", map[string]string{"window": m.Title, "id": m.ID}, "")
@@ -404,6 +405,13 @@ func (e *Engine) resolve(c *change, now time.Time, why, actor string) {
 // acknowledgement or resolution made during the window is what closes it.
 func (e *Engine) pdCmd(a *Alert, action Action, now time.Time) *Command {
 	if a.Suppressed && (action == PDTrigger || !pdHas(a)) {
+		return nil
+	}
+	if a.IsTest() {
+		// A test event never reaches PagerDuty.
+		if !pdHas(a) {
+			a.PD.State, a.PD.Retry = PDSkipped, ""
+		}
 		return nil
 	}
 	t := now
@@ -664,7 +672,7 @@ func (e *Engine) Tick(ctx context.Context) error {
 						a.PD.State, a.PD.Retry = PDSkipped, ""
 					}
 					c.log(now, KindMaintenance, "suppressed", map[string]string{"window": m.Title, "id": m.ID}, "")
-				case m == nil && a.Suppressed:
+				case m == nil && a.Suppressed && !a.Excluded:
 					a.Suppressed, a.MaintenanceID = false, ""
 					if a.PD.State == PDSkipped {
 						a.PD.State, a.PD.AttemptAt = PDPending, nil
@@ -706,6 +714,9 @@ func (e *Engine) Tick(ctx context.Context) error {
 		if notify != nil {
 			e.notify.Fallback(*notify)
 		}
+	}
+	if err := e.expireTests(ctx, now); err != nil && ctx.Err() == nil {
+		slog.Error("test alerts not resolved", "err", err)
 	}
 	if now.Sub(e.purgedAt) >= time.Hour {
 		e.purgedAt = now
@@ -854,6 +865,9 @@ func (e *Engine) Run(ctx context.Context) {
 				slog.Error("alert engine tick failed", "err", err)
 			}
 			if v := e.st.Version(); v != routed {
+				if err := e.Reresolve(ctx); err != nil && ctx.Err() == nil {
+					slog.Error("alerts not resolved again", "err", err)
+				}
 				if err := e.Reroute(ctx); err != nil && ctx.Err() == nil {
 					slog.Error("alerts not routed again", "err", err)
 				} else {

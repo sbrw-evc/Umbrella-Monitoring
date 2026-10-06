@@ -137,9 +137,12 @@ type Alert struct {
 	Title    string `json:"title"`
 	// CIID is empty while the item named by the events is not in the catalog; CIName keeps the
 	// name the events use.
-	CIID      string             `json:"ci_id,omitempty"`
-	CIName    string             `json:"ci_name"`
-	CIKind    string             `json:"ci_kind,omitempty"`
+	CIID   string `json:"ci_id,omitempty"`
+	CIName string `json:"ci_name"`
+	CIKind string `json:"ci_kind,omitempty"`
+	// EventCI is the name the first event gave the item; the item is found by it again when
+	// the hand-made links of monitoring hosts change.
+	EventCI   string             `json:"event_ci,omitempty"`
 	Signal    string             `json:"signal"`
 	Method    string             `json:"method"`
 	Severity  string             `json:"severity"`
@@ -157,12 +160,15 @@ type Alert struct {
 	AckedAt    *time.Time `json:"acked_at,omitempty"`
 	// Suppressed: a maintenance window covers the item or its service; no trigger is sent and no
 	// backup notification, but an incident PagerDuty already has is still acknowledged and resolved.
-	Suppressed    bool       `json:"suppressed"`
-	MaintenanceID string     `json:"maintenance_id,omitempty"`
-	Route         Route      `json:"route"`
-	PD            PD         `json:"pd"`
-	Fallback      bool       `json:"fallback"`
-	FallbackAt    *time.Time `json:"fallback_at,omitempty"`
+	Suppressed    bool   `json:"suppressed"`
+	MaintenanceID string `json:"maintenance_id,omitempty"`
+	// Excluded: the host of the events is marked «Не является КЕ» on the monitoring systems
+	// page; the alert is suppressed (not sent anywhere) for that reason, not a window.
+	Excluded   bool       `json:"excluded,omitempty"`
+	Route      Route      `json:"route"`
+	PD         PD         `json:"pd"`
+	Fallback   bool       `json:"fallback"`
+	FallbackAt *time.Time `json:"fallback_at,omitempty"`
 	// FallbackState is pending from the moment backup notification is due until the notifier
 	// reports it was attempted (sent); Tick hands a pending one to the notifier again, so it
 	// survives a restart or a full queue. FallbackTry is when it was last handed over.

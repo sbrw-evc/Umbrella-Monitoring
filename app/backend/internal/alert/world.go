@@ -55,6 +55,7 @@ func CIKeys(ci *model.ConfigItem) []string {
 type world struct {
 	cis         map[string]model.ConfigItem
 	index       map[string][]string
+	hostLinks   map[string]string
 	services    []model.Service
 	teams       map[string]model.Team
 	users       map[string]model.User
@@ -71,6 +72,7 @@ func snapshot(st *store.Store) *world {
 		}
 	}
 	st.Read(func(d *store.Data) {
+		w.indexHostLinks(d)
 		for id, ci := range d.ConfigItems {
 			c := *ci
 			c.Owners = slices.Clone(ci.Owners)
@@ -110,27 +112,44 @@ func snapshot(st *store.Store) *world {
 	return w
 }
 
-// resolve finds the configuration item an event is about: a ci label wins over the ci field;
-// the item is matched by ID, name, short name, IP address or the DNS name of its computer
-// object. An ambiguous name matches nothing.
+// resolve finds the configuration item an event is about (see resolveCI); a host said to
+// belong to no item resolves to nothing.
 func (w *world) resolve(name string, labels map[string]string) *model.ConfigItem {
-	if v := strings.TrimSpace(labels["ci"]); v != "" {
-		name = v
+	ci, _ := w.resolveCI(name, labels)
+	return ci
+}
+
+// resolveCI finds the configuration item an event is about: a ci label wins over the ci field.
+// The hosts linked by hand on the monitoring systems page come first: a linked host resolves
+// to its item, a host marked as no item is excluded. Then the item is matched by ID, name,
+// short name, IP address or the DNS name of its computer object. An ambiguous name matches
+// nothing.
+func (w *world) resolveCI(name string, labels map[string]string) (ci *model.ConfigItem, excluded bool) {
+	name = eventCIName(name, labels)
+	if name == "" {
+		return nil, false
 	}
-	if strings.TrimSpace(name) == "" {
-		return nil
+	keys := EventKeys(name)
+	for _, k := range keys {
+		if id, ok := w.hostLinks[k]; ok {
+			if id == model.HostNoCI {
+				return nil, true
+			}
+			c := w.cis[id]
+			return &c, false
+		}
 	}
-	for _, k := range EventKeys(name) {
+	for _, k := range keys {
 		ids := w.index[k]
 		if len(ids) == 1 {
-			ci := w.cis[ids[0]]
-			return &ci
+			c := w.cis[ids[0]]
+			return &c, false
 		}
 		if len(ids) > 1 {
-			return nil
+			return nil, false
 		}
 	}
-	return nil
+	return nil, false
 }
 
 var criticalityRank = map[string]int{model.CriticalityCritical: 4, model.CriticalityHigh: 3, model.CriticalityMedium: 2, model.CriticalityLow: 1}
