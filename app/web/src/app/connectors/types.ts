@@ -276,7 +276,7 @@ export type Credential = {
   fields: Record<string, string>
   secrets_set: string[]
   version: number
-  used_by: { id: string; name: string }[]
+  used_by: CredentialUse[]
   created_at: string
   created_by: string
   updated_at: string
@@ -315,4 +315,13 @@ export function outputsOf(t: NodeType | undefined, n: GraphNode): string[] {
   }
   if (t.can_fail && n.on_error === 'route_error') out.push('error')
   return out
+}
+
+// CredentialUse is a connector, monitoring system or metric source that uses a credential.
+export type CredentialUse = { kind: 'connector' | 'monitoring' | 'metric_source'; id: string; name: string }
+
+export function credentialUseLink(u: CredentialUse) {
+  if (u.kind === 'monitoring') return `/monitoring?system=${encodeURIComponent(u.id)}`
+  if (u.kind === 'metric_source') return '/rules?tab=sources'
+  return `/connectors/${encodeURIComponent(u.id)}`
 }

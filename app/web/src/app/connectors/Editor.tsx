@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ReactFlowProvider, useReactFlow, type Connection } from '@xyflow/react'
-import { ArrowLeft, ChevronDown, ChevronUp, Copy, Download, History, Lock, Redo2, Rocket, Settings, Square, Undo2 } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronUp, Copy, Download, History, Lock, Redo2, Rocket, Send, Settings, Square, Undo2 } from 'lucide-react'
 import { api, ApiError } from '../../api'
 import { ErrorBanner } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
@@ -12,6 +12,8 @@ import { Canvas, Palette } from './Canvas'
 import { ingestURL, StatusPill } from './ConnectorsPage'
 import { downloadJSON, newNode, signatures, staleNodes, uniqueId } from './graph'
 import { Inspector } from './Inspector'
+import { TestEvent } from './QuickConnect'
+import { sourcesStrings } from './sourcesStrings'
 import { EventsPanel, FailuresPanel, IssuesPanel, RequestsPanel, SamplesPanel, StatsPanel, TestPanel, type Tab } from './Panels'
 import { strings } from './strings'
 import {
@@ -82,6 +84,8 @@ function EditorInner({ id }: { id: string }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('test')
   const [panelOpen, setPanelOpen] = useState(true)
+  const [testing, setTesting] = useState(false)
+  const ts = useT(sourcesStrings)
   const [run, setRun] = useState<TestRun | null>(null)
   const [runSig, setRunSig] = useState<Record<string, string> | null>(null)
   const [all, setAll] = useState<TestAll | null>(null)
@@ -409,6 +413,12 @@ function EditorInner({ id }: { id: string }) {
               {t('cn.settings')}
             </Button>
           )}
+          {conn.published > 0 && (can('connectors:edit') || can('monitoring:edit')) && (
+            <Button variant="ghost" onClick={() => setTesting(true)}>
+              <Send size={16} />
+              {ts('src.test')}
+            </Button>
+          )}
           {canPublish && (
             <Button variant="primary" disabled={!canEdit && status === 'published'} onClick={() => setDialog('publish')}>
               <Rocket size={16} />
@@ -417,6 +427,9 @@ function EditorInner({ id }: { id: string }) {
           )}
         </div>
       </header>
+      <Modal open={testing} title={ts('src.test')} onClose={() => setTesting(false)}>
+        <TestEvent connectorID={conn.id} />
+      </Modal>
 
       {lock === 'other' && conn.lock && !conn.lock.mine && (
         <Banner kind="warn" title={t('cn.lockedBy', { name: conn.lock.name || conn.lock.username })}>

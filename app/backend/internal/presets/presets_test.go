@@ -2,6 +2,8 @@ package presets
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/flow"
@@ -34,5 +36,19 @@ func TestPresets(t *testing.T) {
 				t.Errorf("%s / %s: events=%+v failures=%+v err=%v", p.ID, s.Name, res.Events, res.Failures, err)
 			}
 		}
+	}
+}
+
+func TestZabbixMediaTypeMatchesDeploy(t *testing.T) {
+	b, err := os.ReadFile("../../../../deploy/zabbix/umbrella-mediatype.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != zabbixMediaType {
+		t.Error("presets/zabbix-mediatype.yaml differs from deploy/zabbix/umbrella-mediatype.yaml: copy it again")
+	}
+	got := ZabbixMediaType("https://umb.example.com/api/ingest/zabbix-2", "tok'en")
+	if !strings.Contains(got, "value: 'https://umb.example.com/api/ingest/zabbix-2'") || !strings.Contains(got, "value: 'tok''en'") {
+		t.Errorf("filled media type:\n%s", got)
 	}
 }

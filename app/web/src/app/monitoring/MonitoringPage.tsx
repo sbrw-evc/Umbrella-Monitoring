@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ExternalLink, Plus, RefreshCw, Search } from 'lucide-react'
+import { ExternalLink, Plus, RefreshCw, Search, Settings, PlugZap } from 'lucide-react'
 import { api } from '../../api'
 import { ErrorBanner } from '../../connections/ConnectionCard'
 import { mergeDicts } from '../../connections/connectionStrings'
@@ -11,6 +11,10 @@ import type { CI, CIList } from '../cis/types'
 import { CreateHostsDialog, type HostKey } from '../bulk/BulkDialogs'
 import { strings as bulkStrings } from '../bulk/strings'
 import { useSession } from '../session'
+import { CopyField, QuickConnectDialog, SourcesExplainer, TestEvent, useCanQuickConnect } from '../connectors/QuickConnect'
+import { sourcesStrings } from '../connectors/sourcesStrings'
+import { strings as connectorStrings } from '../connectors/strings'
+import { Link } from '../../router'
 import { strings } from './strings'
 import '../services/services.css'
 import '../connectors/connectors.css'
@@ -39,6 +43,9 @@ type Source = {
   unmatched: number
   running: boolean
   next_sync_at?: string
+  connector_id?: string
+  connector?: { id: string; name: string; slug: string; status: string; ingest_path: string; last_received?: string; received: number }
+  rules: number
 }
 type View = { sources: Source[]; defaults: { query: string; host_label: string } }
 type Ref = { id: string; name: string }
@@ -70,6 +77,7 @@ const MATCHES = ['matched', 'unmatched', 'ambiguous', 'excluded'] as const
 const ran = (at?: string) => !!at && !at.startsWith('0001-')
 const createStrings = mergeDicts(ciStrings, strings)
 const hostStrings = mergeDicts(strings, bulkStrings)
+const systemStrings = mergeDicts(connectorStrings, strings, sourcesStrings)
 const hostID = (h: { source_id: string; key: string }) => h.source_id + '/' + h.key
 // creatable: a host an item can be made of.
 const creatable = (h: Host) => !h.ci && h.match !== 'excluded'
@@ -83,20 +91,33 @@ function useDebounced<T>(value: T, ms: number) {
   return v
 }
 
+const query = () => new URLSearchParams(window.location.search)
+
 export function MonitoringPage() {
   const t = useT(strings)
+  const ts = useT(sourcesStrings)
   const { can } = useSession()
-  const [tab, setTab] = useState<'hosts' | 'sources'>('hosts')
+  const quick = useCanQuickConnect()
+  const [tab, setTab] = useState<'hosts' | 'sources'>(() => (query().get('system') || query().get('connect') ? 'sources' : 'hosts'))
   const [epoch, setEpoch] = useState(0)
   const view = useResource<View>('/api/monitoring', epoch)
   const [editing, setEditing] = useState<Source | 'new' | null>(null)
+  const [connecting, setConnecting] = useState(() => query().get('connect') === '1')
+  const [hostSource, setHostSource] = useState('')
+  const [hostEpoch, setHostEpoch] = useState(0)
   const reload = useCallback(() => setEpoch((e) => e + 1), [])
   const v = view.data
   useEffect(() => {
     if (v && v.sources.length === 0) setTab('sources')
   }, [v])
+  const showHosts = (id: string) => {
+    setHostSource(id)
+    setHostEpoch((n) => n + 1)
+    setTab('hosts')
+  }
   return (
     <div className="stack">
+      <SourcesExplainer />
       <div className="row rl-head">
         <Segmented
           label={t('mon.tab.hosts')}
@@ -107,16 +128,27 @@ export function MonitoringPage() {
             { value: 'sources', label: `${t('mon.tab.sources')} (${v?.sources.length ?? 0})` },
           ]}
         />
-        {can('monitoring:edit') && tab === 'sources' && (
-          <Button variant="primary" onClick={() => setEditing('new')}>
-            <Plus size={16} aria-hidden />
-            {t('mon.new')}
-          </Button>
+        {tab === 'sources' && (
+          <div className="row">
+            {quick && (
+              <Button onClick={() => setConnecting(true)}>
+                <PlugZap size={16} aria-hidden />
+                {ts('src.connect')}
+              </Button>
+            )}
+            {can('monitoring:edit') && (
+              <Button variant="primary" onClick={() => setEditing('new')}>
+                <Plus size={16} aria-hidden />
+                {t('mon.new')}
+              </Button>
+            )}
+          </div>
         )}
       </div>
       <ErrorBanner error={view.error} strings={strings} />
-      {v && tab === 'sources' && <SourcesTable v={v} onOpen={setEditing} onChanged={reload} />}
-      {v && tab === 'hosts' && <HostsTab sources={v.sources} epoch={epoch} onChanged={reload} />}
+      {v && tab === 'sources' && <SourcesTable v={v} onOpen={setEditing} onChanged={reload} onHosts={showHosts} />}
+      {v && tab === 'hosts' && <HostsTab key={hostEpoch} initialSource={hostSource} sources={v.sources} epoch={epoch} onChanged={reload} />}
+      <QuickConnectDialog open={connecting} onClose={() => setConnecting(false)} onDone={reload} />
       {v && <SourceEditor value={editing} defaults={v.defaults} onClose={() => setEditing(null)} onSaved={() => (setEditing(null), reload())} />}
     </div>
   )
@@ -128,12 +160,15 @@ function When({ at }: { at?: string }) {
   return <>{ran(at) ? formatDate(at, locale, timezone) : '—'}</>
 }
 
-function SourcesTable({ v, onOpen, onChanged }: { v: View; onOpen: (s: Source) => void; onChanged: () => void }) {
+function SourcesTable({ v, onOpen, onChanged, onHosts }: { v: View; onOpen: (s: Source) => void; onChanged: () => void; onHosts: (id: string) => void }) {
   const t = useT(strings)
-  const { can } = useSession()
   const syncer = useAction()
   const [busy, setBusy] = useState('')
   const [done, setDone] = useState('')
+  const focus = query().get('system') ?? ''
+  useEffect(() => {
+    if (focus) document.getElementById(`system-${focus}`)?.scrollIntoView({ block: 'start' })
+  }, [focus])
   const read = (s: Source) => {
     setBusy(s.id)
     setDone('')
@@ -152,76 +187,178 @@ function SourcesTable({ v, onOpen, onChanged }: { v: View; onOpen: (s: Source) =
     <>
       {done && <Banner kind="ok" title={done} />}
       <ErrorBanner error={syncer.error} strings={strings} />
-      <div className="card cn-table-wrap">
-        <table className="cn-table rl-table">
-          <thead>
-            <tr>
-              <th>{t('mon.col.name')}</th>
-              <th>{t('mon.col.url')}</th>
-              <th>{t('mon.col.hosts')}</th>
-              <th>{t('mon.col.sync')}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {v.sources.map((s) => (
-              <tr key={s.id}>
-                <td className="rl-name">
-                  {can('monitoring:edit') ? (
-                    <button type="button" className="cn-link cn-name" onClick={() => onOpen(s)}>
-                      {s.name}
-                    </button>
-                  ) : (
-                    <span className="cn-name">{s.name}</span>
-                  )}
-                  <div className="rl-sub">
-                    <span className={`pill mon-kind mon-kind-${s.kind}`}>{t(`mon.kind.${s.kind}`)}</span>
-                    {!s.enabled && <span className="pill pill-off">{t('mon.off')}</span>}
-                    {s.sync.version && <span className="muted"> {s.sync.version}</span>}
-                  </div>
-                </td>
-                <td className="mon-url">
-                  <code>{s.url}</code>
-                  {s.credential_name && <div className="muted rl-sub">{s.credential_name}</div>}
-                </td>
-                <td>
-                  <span className="cn-name">{s.hosts}</span>
-                  <div className="rl-sub">
-                    <span className="muted">{t('mon.col.matched')}: {s.matched}</span>
-                    <br />
-                    <span className={s.unmatched > 0 ? 'mon-warn' : 'muted'}>
-                      {t('mon.col.unmatched')}: {s.unmatched}
-                    </span>
-                  </div>
-                </td>
-                <td>
-                  {ran(s.sync.started_at) ? (
-                    <>
-                      <When at={s.sync.finished_at || s.sync.started_at} />
-                      {!s.sync.ok && (
-                        <div className="mon-error" title={s.sync.error}>
-                          <span className="pill pill-error">{t('mon.sync.failed')}</span> {s.sync.error}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <span className="muted">{t('mon.sync.never')}</span>
-                  )}
-                  <div className="muted rl-sub">{s.sync_minutes > 0 ? t('mon.sync.every', { n: s.sync_minutes }) : t('mon.sync.manual')}</div>
-                </td>
-                <td className="num mon-sync">
-                  {can('monitoring:sync') && (
-                    <Button busy={busy === s.id || s.running} onClick={() => read(s)}>
-                      <RefreshCw size={15} aria-hidden />
-                      {busy === s.id || s.running ? t('mon.sync.running') : t('mon.sync.now')}
-                    </Button>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {v.sources.map((s) => (
+        <SystemCard key={s.id} s={s} reading={busy === s.id || s.running} onRead={() => read(s)} onOpen={() => onOpen(s)} onChanged={onChanged} onHosts={() => onHosts(s.id)} />
+      ))}
+    </>
+  )
+}
+
+type SystemTab = 'alerts' | 'hosts' | 'metrics'
+
+// SystemCard is one monitoring system as one object: its alert intake, its hosts and, for
+// Prometheus, its use as a metric source of RED/USE rules.
+function SystemCard({
+  s,
+  reading,
+  onRead,
+  onOpen,
+  onChanged,
+  onHosts,
+}: {
+  s: Source
+  reading: boolean
+  onRead: () => void
+  onOpen: () => void
+  onChanged: () => void
+  onHosts: () => void
+}) {
+  const t = useT(systemStrings)
+  const { can } = useSession()
+  const [tab, setTab] = useState<SystemTab>(s.connector ? 'hosts' : 'alerts')
+  const tabs: { value: SystemTab; label: string }[] = [
+    { value: 'alerts', label: t('sys.tab.alerts') },
+    { value: 'hosts', label: `${t('sys.tab.hosts')} (${s.hosts})` },
+  ]
+  if (s.kind === 'prometheus') tabs.push({ value: 'metrics', label: `${t('sys.tab.metrics')} (${s.rules})` })
+  return (
+    <section className="card mon-system" id={`system-${s.id}`}>
+      <div className="mon-system-head">
+        <div>
+          <h2>{s.name}</h2>
+          <div className="rl-sub">
+            <span className={`pill mon-kind mon-kind-${s.kind}`}>{t(`mon.kind.${s.kind}`)}</span>
+            {!s.enabled && <span className="pill pill-off">{t('mon.off')}</span>}
+            {s.sync.version && <span className="muted"> {s.sync.version}</span>} <code className="muted">{s.url}</code>
+            {s.credential_name && <span className="muted"> · {s.credential_name}</span>}
+          </div>
+        </div>
+        <div className="row">
+          {can('monitoring:sync') && (
+            <Button busy={reading} onClick={onRead}>
+              <RefreshCw size={15} aria-hidden />
+              {reading ? t('mon.sync.running') : t('mon.sync.now')}
+            </Button>
+          )}
+          {can('monitoring:edit') && (
+            <Button variant="ghost" onClick={onOpen}>
+              <Settings size={15} aria-hidden />
+              {t('sys.settings')}
+            </Button>
+          )}
+        </div>
       </div>
+      <Segmented label={s.name} value={tab} onChange={setTab} options={tabs} />
+      <div className="mon-system-body">
+        {tab === 'alerts' && <SystemAlerts s={s} onChanged={onChanged} />}
+        {tab === 'hosts' && (
+          <>
+            <p>{t('sys.hosts.summary', { hosts: s.hosts, matched: s.matched, unmatched: s.unmatched })}</p>
+            <dl className="mon-kv">
+              <dt>{t('mon.col.sync')}</dt>
+              <dd>
+                {ran(s.sync.started_at) ? <When at={s.sync.finished_at || s.sync.started_at} /> : t('mon.sync.never')}
+                {' · '}
+                {s.sync_minutes > 0 ? t('mon.sync.every', { n: s.sync_minutes }) : t('mon.sync.manual')}
+                {ran(s.sync.started_at) && !s.sync.ok && (
+                  <div className="mon-error" title={s.sync.error}>
+                    <span className="pill pill-error">{t('mon.sync.failed')}</span> {s.sync.error}
+                  </div>
+                )}
+              </dd>
+            </dl>
+            <p className="muted">{t('sys.hosts.links')}</p>
+            <div className="row">
+              <Button onClick={onHosts}>{t('sys.hosts.open')}</Button>
+            </div>
+          </>
+        )}
+        {tab === 'metrics' && (
+          <>
+            <p>{t('sys.metrics.text')}</p>
+            <p className="muted">{t('sys.metrics.rules', { n: s.rules })}</p>
+            <div className="row">
+              <Link to="/rules">{t('sys.metrics.open')}</Link>
+            </div>
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
+type ConnectorChoice = { id: string; name: string; preset?: string }
+
+function SystemAlerts({ s, onChanged }: { s: Source; onChanged: () => void }) {
+  const t = useT(systemStrings)
+  const { locale } = useLocale()
+  const { can, timezone } = useSession()
+  const quick = useCanQuickConnect()
+  const editable = can('monitoring:edit')
+  const [connecting, setConnecting] = useState(false)
+  const list = useResource<{ connectors: ConnectorChoice[] }>(!s.connector && editable && can('connectors:view') ? '/api/connectors' : '', 0)
+  const action = useAction()
+  const link = (id: string) =>
+    void action.run(async () => {
+      await api('PUT', `/api/monitoring/sources/${s.id}/connector`, { connector_id: id })
+      onChanged()
+    })
+  const c = s.connector
+  if (!c) {
+    return (
+      <>
+        <p>{t(`sys.alerts.none.${s.kind}`)}</p>
+        <div className="row">
+          {quick && editable && (
+            <Button variant="primary" onClick={() => setConnecting(true)}>
+              <PlugZap size={15} aria-hidden />
+              {t('sys.alerts.connect')}
+            </Button>
+          )}
+          {editable && (list.data?.connectors.length ?? 0) > 0 && (
+            <label className="mon-source-filter">
+              <span className="muted">{t('sys.alerts.pick')}</span>
+              <Select value="" onChange={(e) => e.target.value && link(e.target.value)}>
+                <option value="">{t('sys.alerts.pick.none')}</option>
+                {list.data?.connectors.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.name}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          )}
+        </div>
+        <p className="muted">{t('sys.alerts.tokens')}</p>
+        <ErrorBanner error={action.error} strings={strings} />
+        <QuickConnectDialog key={s.id} open={connecting} onClose={() => setConnecting(false)} onDone={onChanged} monitoring={{ id: s.id, name: s.name, kind: s.kind }} />
+      </>
+    )
+  }
+  return (
+    <>
+      <dl className="mon-kv">
+        <dt>{t('sys.alerts.connector')}</dt>
+        <dd>
+          <Link to={`/connectors/${encodeURIComponent(c.id)}`}>{c.name}</Link> <span className="muted">({t(`cn.status.${c.status}`)})</span>
+        </dd>
+        <dt>{t('sys.alerts.last')}</dt>
+        <dd>
+          {c.last_received ? formatDate(c.last_received, locale, timezone) : t('sys.alerts.never')}
+          {c.received > 0 && <span className="muted"> · {t('sys.alerts.received', { n: c.received })}</span>}
+        </dd>
+      </dl>
+      <CopyField label={t('sys.alerts.url')} value={`${window.location.origin}${c.ingest_path}`} />
+      <p className="muted">{t('sys.alerts.tokens')}</p>
+      {c.status !== 'draft' && (can('connectors:edit') || editable) && <TestEvent connectorID={c.id} />}
+      {editable && (
+        <div className="row">
+          <Button variant="ghost" busy={action.busy} onClick={() => link('')}>
+            {t('sys.alerts.unlink')}
+          </Button>
+        </div>
+      )}
+      <ErrorBanner error={action.error} strings={strings} />
     </>
   )
 }
@@ -232,11 +369,11 @@ function StatePill({ state }: { state: string }) {
   return <span className={`pill pill-${tone}`}>{t(`mon.state.${state}`)}</span>
 }
 
-function HostsTab({ sources, epoch, onChanged }: { sources: Source[]; epoch: number; onChanged: () => void }) {
+function HostsTab({ sources, epoch, onChanged, initialSource = '' }: { sources: Source[]; epoch: number; onChanged: () => void; initialSource?: string }) {
   const t = useT(hostStrings)
   const { can } = useSession()
   const [match, setMatch] = useState('')
-  const [source, setSource] = useState('')
+  const [source, setSource] = useState(initialSource)
   const [q, setQ] = useState('')
   const dq = useDebounced(q, 250)
   const [own, setOwn] = useState(0)
@@ -578,14 +715,15 @@ function CreateDialog({ host, onClose, onSaved }: { host: Host | null; onClose: 
   )
 }
 
-type Draft = Omit<Source, 'id' | 'sync' | 'hosts' | 'matched' | 'unmatched' | 'running' | 'next_sync_at' | 'credential_name'> & {
+type Draft = Omit<Source, 'id' | 'sync' | 'hosts' | 'matched' | 'unmatched' | 'running' | 'next_sync_at' | 'credential_name' | 'connector' | 'rules'> & {
   credential_id: string
+  connector_id: string
   query: string
   host_label: string
 }
 
 function blank(kind: Kind = 'zabbix'): Draft {
-  return { name: '', kind, url: '', credential_id: '', skip_verify: false, enabled: true, sync_minutes: 60, query: '', host_label: '' }
+  return { name: '', kind, url: '', credential_id: '', connector_id: '', skip_verify: false, enabled: true, sync_minutes: 60, query: '', host_label: '' }
 }
 
 function SourceEditor({
@@ -615,6 +753,7 @@ function SourceEditor({
             kind: editing.kind,
             url: editing.url,
             credential_id: editing.credential_id ?? '',
+            connector_id: editing.connector_id ?? '',
             skip_verify: editing.skip_verify,
             enabled: editing.enabled,
             sync_minutes: editing.sync_minutes,

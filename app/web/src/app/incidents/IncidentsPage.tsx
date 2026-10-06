@@ -309,7 +309,8 @@ function Row({
       <td>{owner || <span className="muted">{t('inc.noroute')}</span>}</td>
       <td>
         <StatusPill status={a.status} />
-        {a.suppressed && <span className="pill pill-off inc-badge">{t('inc.badge.suppressed')}</span>}
+        {a.suppressed && <span className="pill pill-off inc-badge">{t(a.excluded ? 'inc.badge.excluded' : 'inc.badge.suppressed')}</span>}
+        {a.labels?.umbrella_test === 'true' && <span className="pill pill-off inc-badge">{t('inc.badge.test')}</span>}
         {a.fallback && a.status !== 'resolved' && <span className="pill pill-warn inc-badge">{t('inc.badge.fallback')}</span>}
       </td>
       {pd && (

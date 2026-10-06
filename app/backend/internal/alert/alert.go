@@ -192,6 +192,13 @@ type Alert struct {
 	FollowUp    string     `json:"follow_up,omitempty"`
 	FollowUpTry *time.Time `json:"follow_up_try,omitempty"`
 	RelatedID   string     `json:"related_id,omitempty"`
+
+	// EventCI is the name the first event gave the item; the item is found by it again when
+	// the hand-made links of monitoring hosts change.
+	EventCI string `json:"event_ci,omitempty"`
+	// Excluded: the host of the events is marked «Не является КЕ» on the monitoring systems
+	// page; the alert is suppressed (not sent anywhere) for that reason, not a window.
+	Excluded bool `json:"excluded,omitempty"`
 }
 
 // Notified is an address backup notification of the alert was sent to.

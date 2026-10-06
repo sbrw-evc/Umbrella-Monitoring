@@ -66,6 +66,7 @@ func (a *App) registerConnectors(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/credentials/{id}", a.authed(a.can("credentials:view", a.getCredential)))
 	mux.HandleFunc("PUT /api/credentials/{id}", a.authed(a.can("credentials:edit", a.updateCredential)))
 	mux.HandleFunc("DELETE /api/credentials/{id}", a.authed(a.can("credentials:edit", a.deleteCredential)))
+	a.registerSources(mux)
 }
 
 func connectorError(w http.ResponseWriter, err error) {
