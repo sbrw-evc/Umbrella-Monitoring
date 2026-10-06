@@ -54,7 +54,12 @@ func (a *App) netboxTest(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) netboxSync(w http.ResponseWriter, r *http.Request) {
 	// The synchronization finishes even if the browser stops waiting.
-	out, err := a.netbox.Sync(context.WithoutCancel(r.Context()), current(r).user.Username)
+	sync := a.netbox.Sync
+	// ?confirm=removal: the person saw the warning about missing items and removes them anyway.
+	if r.URL.Query().Get("confirm") == "removal" {
+		sync = a.netbox.SyncConfirmed
+	}
+	out, err := sync(context.WithoutCancel(r.Context()), current(r).user.Username)
 	respondNetBox(w, http.StatusOK, out, err)
 }
 

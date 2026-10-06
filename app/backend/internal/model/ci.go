@@ -113,6 +113,11 @@ type SyncStats struct {
 	ServiceBound     int    `json:"service_bound"`
 	ServiceUnbound   int    `json:"service_unbound"`
 	ServiceUnlinked  int    `json:"service_unlinked"`
+	// Held counts the linked items missing from an answer that looks incomplete; they were kept
+	// instead of being deleted or unlinked. HeldReason: empty (no objects at all) or share (most
+	// of the linked items are missing).
+	Held       int    `json:"held,omitempty"`
+	HeldReason string `json:"held_reason,omitempty"`
 }
 
 // SyncState is the last NetBox synchronization.
