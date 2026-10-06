@@ -20,6 +20,8 @@ var errAppChanged = errors.New("the tenant or the application changed: enter the
 const (
 	entraPendingTTL = 10 * time.Minute
 	entraPendingMax = 10000
+	// entraStartsPerMinute limits the sign-in starts from one client address.
+	entraStartsPerMinute = 60
 )
 
 type entraPending struct {
@@ -167,7 +169,14 @@ func (s *EntraService) Start(ctx context.Context) (string, string, error) {
 		return "", "", fmt.Errorf("%w: %v", ErrDirectoryUnavailable, err)
 	}
 	req := entra.NewRequest()
-	now := time.Now()
+	s.remember(req, time.Now())
+	return entra.AuthURL(cfg, m, req), req.State, nil
+}
+
+// remember keeps a started sign-in until its callback. Expired sign-ins are dropped; when the
+// table is full, the oldest started sign-in gives way, so a flood of starts never refuses a
+// new one (the flood itself is limited per address in the handler).
+func (s *EntraService) remember(req entra.Request, now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, p := range s.pending {
@@ -175,11 +184,17 @@ func (s *EntraService) Start(ctx context.Context) (string, string, error) {
 			delete(s.pending, k)
 		}
 	}
-	if len(s.pending) >= entraPendingMax {
-		return "", "", ErrTooManyAttempts
+	for len(s.pending) >= entraPendingMax {
+		var oldest string
+		var at time.Time
+		for k, p := range s.pending {
+			if oldest == "" || p.expiry.Before(at) {
+				oldest, at = k, p.expiry
+			}
+		}
+		delete(s.pending, oldest)
 	}
 	s.pending[req.State] = entraPending{req: req, expiry: now.Add(entraPendingTTL)}
-	return entra.AuthURL(cfg, m, req), req.State, nil
 }
 
 func (s *EntraService) take(state string) (entra.Request, bool) {

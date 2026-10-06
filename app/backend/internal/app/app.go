@@ -25,9 +25,12 @@ const (
 	CookieName = "umbrella_session"
 	CSRFHeader = "X-CSRF-Token"
 
-	maxFailures = 10
-	failWindow  = 15 * time.Minute
-	lockout     = 5 * time.Minute
+	// maxFailures wrong passwords for one account from one address lock that pair;
+	// maxLooseFailures lock the address (any accounts) or the account (any addresses).
+	maxFailures      = 10
+	maxLooseFailures = 50
+	failWindow       = 15 * time.Minute
+	lockout          = 5 * time.Minute
 )
 
 type Options struct {
@@ -36,8 +39,9 @@ type Options struct {
 	BuiltAt       string
 	SecureCookies bool
 	Web           http.Handler
-	// TrustedProxies are the reverse proxies whose forwarding headers are believed for TV
-	// wallboards; nil reads UMBRELLA_TRUSTED_PROXIES.
+	// TrustedProxies are the reverse proxies whose forwarding headers are believed for the
+	// client address (sign-in limits, audit, connector and TV wallboard networks); nil reads
+	// UMBRELLA_TRUSTED_PROXIES.
 	TrustedProxies TrustedProxies
 }
 
@@ -58,7 +62,8 @@ type App struct {
 	accounts   *UsersService
 	settings   *SettingsService
 	status     *StatusService
-	limiter    *Limiter
+	limiter    *loginGuard
+	entraRate  *Limiter // Microsoft sign-in starts per client address
 	policy     *PolicyService
 	access     *AccessService
 	directory  *DirectoryService
@@ -124,7 +129,8 @@ func New(opt Options, deps Deps) *App {
 		accounts:    NewUsersService(deps.Store, passwords, deps.Vault, deps.Sessions),
 		auth:        NewAuthService(deps.Store, passwords, deps.Vault, dir, users),
 		settings:    NewSettingsService(deps.Store),
-		limiter:     NewLimiter(maxFailures, failWindow, lockout),
+		limiter:     newLoginGuard(),
+		entraRate:   NewLimiter(entraStartsPerMinute, time.Minute, time.Minute),
 		policy:      NewPolicyService(deps.Store),
 		access:      NewAccessService(deps.Store),
 		directory:   NewDirectoryService(deps.Store, deps.Vault, dir, deps.Sessions),

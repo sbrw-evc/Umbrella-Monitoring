@@ -60,20 +60,20 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s := current(r)
-	keys := a.attemptKeys(s.user.Username, r)
-	if a.limiter.Locked(keys...) {
+	ip := a.clientIP(r)
+	if a.limiter.Locked(s.user.Username, ip) {
 		writeError(w, ErrTooManyAttempts)
 		return
 	}
 	err := a.users.ChangePassword(r.Context(), s.user.ID, in.Current, in.New)
 	if errors.Is(err, ErrWrongPassword) {
-		a.limiter.Fail(keys...)
+		a.limiter.Fail(s.user.Username, ip)
 	}
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	a.limiter.Reset(keys[0])
+	a.limiter.Reset(s.user.Username, ip)
 	a.deps.Sessions.DeleteUser(s.user.ID, s.ss.ID)
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -15,32 +15,28 @@ type loginInput struct {
 	Password string `json:"password"`
 }
 
-func (a *App) attemptKeys(username string, r *http.Request) []string {
-	return []string{"user:" + strings.ToLower(strings.TrimSpace(username)), "ip:" + clientIP(r)}
-}
-
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	var in loginInput
 	if !httpx.Decode(w, r, &in) {
 		return
 	}
-	keys := a.attemptKeys(in.Username, r)
-	if a.limiter.Locked(keys...) {
+	ip := a.clientIP(r)
+	if a.limiter.Locked(in.Username, ip) {
 		writeError(w, ErrTooManyAttempts)
 		return
 	}
 	u, err := a.auth.Authenticate(in.Username, in.Password)
 	if errors.Is(err, ErrInvalidCredentials) {
-		a.limiter.Fail(keys...)
-		a.auth.Failed(strings.TrimSpace(in.Username), clientIP(r))
+		a.limiter.Fail(in.Username, ip)
+		a.auth.Failed(strings.TrimSpace(in.Username), ip)
 	}
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	a.limiter.Reset(keys[0])
+	a.limiter.Reset(in.Username, ip)
 	ss := a.deps.Sessions.Create(u.ID)
-	u = a.auth.Signed(u.ID, clientIP(r))
+	u = a.auth.Signed(u.ID, ip)
 	a.setCookie(w, ss.ID, int(auth.MaxLifetime/time.Second))
 	httpx.JSON(w, http.StatusOK, a.view(u, ss.CSRF))
 }

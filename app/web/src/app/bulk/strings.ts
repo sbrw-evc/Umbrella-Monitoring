@@ -108,3 +108,18 @@ export const strings: Dict = {
     'err.too_many_hosts': 'Слишком много хостов за раз: не больше 500.',
   },
 }
+
+// requestStrings explain why a whole bulk request was refused. They are kept apart from the
+// per-item results, where the same codes mean a problem with one service.
+export const requestStrings: Dict = {
+  en: {
+    'err.too_many_cis': 'Too many configuration items at once: at most 1000.',
+    'err.unknown_ci': 'One of the configuration items no longer exists. Reload the page.',
+    'err.unknown_service': 'One of the services no longer exists. Reload the page.',
+  },
+  ru: {
+    'err.too_many_cis': 'Слишком много КЕ за раз: не больше 1000.',
+    'err.unknown_ci': 'Одной из КЕ больше нет. Обновите страницу.',
+    'err.unknown_service': 'Одного из сервисов больше нет. Обновите страницу.',
+  },
+}

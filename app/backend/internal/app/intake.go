@@ -119,7 +119,7 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hook := t.Webhook
-	ip := clientIP(r)
+	ip := a.clientIP(r)
 	if !hook.Allowed(ip) {
 		a.rejectIngest(w, t.ConnectorID, http.StatusForbidden, "network_not_allowed")
 		return
