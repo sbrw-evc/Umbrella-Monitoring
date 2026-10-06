@@ -7,6 +7,7 @@ import { useAction, useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
 import { Banner, Button, Input, Select } from '../../ui'
 import { useSession } from '../session'
+import { BulkConfirm } from './CatalogForms'
 import { IncidentDetail, PDPill, SeverityPill, StatusPill } from './IncidentDetail'
 import { ago } from './format'
 import { strings } from './strings'
@@ -40,6 +41,7 @@ export function IncidentsPage() {
   const [now, setNow] = useState(() => Date.now())
   const [checked, setChecked] = useState<Set<string>>(new Set())
   const [bulkNote, setBulkNote] = useState('')
+  const [confirming, setConfirming] = useState<'ack' | 'resolve' | null>(null)
   const q = useDebounced(filters.q, 250)
   const list = useResource<Page>(`/api/incidents${queryOf({ ...filters, q })}`, epoch)
   const refs = useResource<{ teams: TeamRef[] }>('/api/refs', 0)
@@ -123,10 +125,10 @@ export function IncidentsPage() {
             {actor && checked.size > 0 && (
               <>
                 <span className="muted">{t('inc.selected', { n: checked.size })}</span>
-                <Button busy={bulk.busy} onClick={() => runBulk('ack')}>
+                <Button busy={bulk.busy} onClick={() => setConfirming('ack')}>
                   {t('inc.ack')}
                 </Button>
-                <Button busy={bulk.busy} onClick={() => runBulk('resolve')}>
+                <Button busy={bulk.busy} onClick={() => setConfirming('resolve')}>
                   {t('inc.resolve')}
                 </Button>
               </>
@@ -201,6 +203,17 @@ export function IncidentsPage() {
         )}
       </AnimatePresence>
 
+      <BulkConfirm
+        action={confirming}
+        selected={alerts.filter((a) => checked.has(a.id))}
+        busy={bulk.busy}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (!confirming) return
+          setConfirming(null)
+          runBulk(confirming)
+        }}
+      />
       <IncidentDetail id={openID} actor={actor} onClose={() => setOpenID(null)} onChanged={reload} onOpen={setOpenID} />
     </div>
   )

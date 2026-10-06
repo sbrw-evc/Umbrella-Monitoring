@@ -243,3 +243,8 @@
   margin-left: 3px;
   vertical-align: -2px;
 }
+
+.inc-bulk-list {
+  margin: 0;
+  padding-left: 18px;
+}

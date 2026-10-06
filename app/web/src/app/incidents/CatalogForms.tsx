@@ -4,7 +4,7 @@ import { api } from '../../api'
 import { ErrorBanner } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
-import { Banner, Button, Field, Input, Select, Textarea } from '../../ui'
+import { Banner, Button, Field, Input, Modal, Select, Textarea } from '../../ui'
 import { mergeDicts } from '../../connections/connectionStrings'
 import { strings as ciStrings } from '../cis/strings'
 import { KINDS, type CIList } from '../cis/types'
@@ -200,5 +200,49 @@ export function ResolveConfirm({ a, busy, onCancel, onResolve }: { a: Incident; 
         </Button>
       </div>
     </div>
+  )
+}
+
+// BulkConfirm asks before acknowledging or resolving several incidents; for a resolve it says how
+// many of them still have firing sources.
+export function BulkConfirm({
+  action,
+  selected,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  action: 'ack' | 'resolve' | null
+  selected: Incident[]
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const t = useT(strings)
+  const hot = selected.filter((a) => firing(a) > 0).length
+  return (
+    <Modal
+      open={action !== null}
+      title={t(action === 'resolve' ? 'inc.bulk.resolve.title' : 'inc.bulk.ack.title', { n: selected.length })}
+      onClose={onCancel}
+      footer={
+        <>
+          <Button onClick={onCancel}>{t('inc.cancel')}</Button>
+          <Button variant="primary" busy={busy} onClick={onConfirm}>
+            {action === 'resolve' ? t('inc.resolve') : t('inc.ack')}
+          </Button>
+        </>
+      }
+    >
+      {action === 'resolve' && hot > 0 && <Banner kind="warn" title={t('inc.bulk.resolve.firing', { n: hot })} />}
+      <ul className="inc-bulk-list">
+        {selected.slice(0, 12).map((a) => (
+          <li key={a.id}>
+            <code>{a.id}</code> {a.title} <span className="muted">· {a.ci_name}</span>
+          </li>
+        ))}
+        {selected.length > 12 && <li className="muted">+{selected.length - 12}</li>}
+      </ul>
+    </Modal>
   )
 }
