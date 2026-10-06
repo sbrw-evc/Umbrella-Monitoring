@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +23,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/config"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/logbuf"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/setup"
@@ -40,6 +42,39 @@ func env(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// ingestConfig reads the intake settings; an unset or invalid value keeps the default.
+func ingestConfig() ingest.Config {
+	c := ingest.DefaultConfig()
+	num := func(key string, v *int) {
+		if s := env(key, ""); s != "" {
+			if n, err := strconv.Atoi(s); err == nil && n > 0 {
+				*v = n
+			} else {
+				slog.Warn("ignored: not a positive number", "env", key, "value", s)
+			}
+		}
+	}
+	dur := func(key string, v *time.Duration) {
+		if s := env(key, ""); s != "" {
+			if d, err := time.ParseDuration(s); err == nil && d > 0 {
+				*v = d
+			} else {
+				slog.Warn("ignored: not a positive duration", "env", key, "value", s)
+			}
+		}
+	}
+	num("UMBRELLA_INGEST_WORKERS", &c.Workers)
+	num("UMBRELLA_INGEST_BATCH_SIZE", &c.BatchSize)
+	num("UMBRELLA_INGEST_MAX_ATTEMPTS", &c.MaxAttempts)
+	dur("UMBRELLA_INGEST_PROCESS_TIMEOUT", &c.ProcessTimeout)
+	dur("UMBRELLA_INGEST_TEST_WAIT", &c.TestEventWait)
+	dur("UMBRELLA_INGEST_KEEP_REQUESTS", &c.Retention.Requests)
+	dur("UMBRELLA_INGEST_KEEP_FAILURES", &c.Retention.Failures)
+	dur("UMBRELLA_INGEST_KEEP_STATS", &c.Retention.Stats)
+	dur("UMBRELLA_INGEST_KEEP_IDEMPOTENCY", &c.Retention.Dedup)
+	return c
 }
 
 func fail(msg string, err error) {
@@ -205,7 +240,8 @@ func main() {
 		webDir = ""
 	}
 	webHandler := httpx.Web(webDir)
-	opts := app.Options{Version: version, Commit: commit, BuiltAt: builtAt, SecureCookies: env("UMBRELLA_SECURE_COOKIES", "false") == "true", Web: webHandler}
+	opts := app.Options{Version: version, Commit: commit, BuiltAt: builtAt, SecureCookies: env("UMBRELLA_SECURE_COOKIES", "false") == "true", Web: webHandler,
+		Ingest: ingestConfig()}
 	sessions := auth.NewSessions()
 	if err := sessions.Load(*dataDir); err != nil {
 		slog.Warn("sessions not restored", "err", err)

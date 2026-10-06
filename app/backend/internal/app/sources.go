@@ -35,7 +35,6 @@ const (
 	// TestEventTitle is the title of the incident a test event opens.
 	TestEventTitle = "Тестовое событие Umbrella"
 	testEventCI    = "umbrella-test"
-	testWait       = 15 * time.Second
 )
 
 var (
@@ -368,7 +367,7 @@ func (a *App) TestEvent(ctx context.Context, actor, id string, in TestEventInput
 	a.deps.Store.Write(func(d *store.Data) {
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "connector.test_event", Object: id, Detail: c.Name + ": request " + out.RequestID})
 	})
-	deadline := time.Now().Add(testWait)
+	deadline := time.Now().Add(a.opt.Ingest.TestEventWait)
 	for {
 		err := a.alerts.DB().QueryRow(ctx, "SELECT id FROM alerts WHERE doc->'labels'->>'umbrella_test_id' = $1 ORDER BY seq DESC LIMIT 1", nonce).
 			Scan(&out.IncidentID)
