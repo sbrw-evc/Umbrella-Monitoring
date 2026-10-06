@@ -68,7 +68,16 @@ export type NotifyView = {
   min_severity: string
   pd_enabled: boolean
   auto_delay_seconds: number
+  // Message templates replaced by the administrator, by name ("fallback.text"…); absent: built-in.
+  templates?: Record<string, string>
+  default_templates?: Record<string, string>
 }
+
+// A message of the sample incident rendered by /api/notifications/preview.
+export type NotifyPreview = { name: string; subject: string; text: string; html: string; error?: string }
+
+export const TEMPLATE_MESSAGES = ['fallback', 'followup', 'test'] as const
+export const TEMPLATE_PARTS = ['subject', 'text', 'html'] as const
 
 export type Ref = { id: string; name: string }
 export type Refs = { teams: Ref[]; services: Ref[] }
