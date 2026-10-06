@@ -18,7 +18,12 @@ export type RoutePreviewData = {
   via: 'service' | 'ci_owners' | 'none'
   pagerduty_route: { id: string; name: string; min_severity: string; no_key?: boolean } | null
   elsewhere?: { ci: Ref; service: Ref; team?: Ref }[]
+  // backup: null (or absent from an older server) while backup notification is off.
+  backup?: { targets: { channel: string; address: string }[]; delay_seconds: number; min_severity: string } | null
 }
+
+// At most this many backup addresses are listed; the rest are counted.
+const MAX_TARGETS = 6
 
 /** RoutePreview shows where an incident of a CI or a service would go now (GET /api/{kind}/{id}/route). */
 export function RoutePreview({ kind, id, version }: { kind: 'cis' | 'services'; id: string; version?: unknown }) {
@@ -82,6 +87,23 @@ function RouteRows({ data }: { data: RoutePreviewData }) {
       </span>
     )
   }
+  let backup: ReactNode = <span className="muted">{t('rt.backup.off')}</span>
+  if (data.backup) {
+    const b = data.backup
+    const shown = b.targets.slice(0, MAX_TARGETS).map((x) => (x.channel === 'telegram' ? `Telegram ${x.address}` : x.address))
+    const more = b.targets.length - shown.length
+    const delay = b.delay_seconds === 0 ? t('rt.backup.now') : b.delay_seconds % 60 === 0 ? t('rt.backup.min', { n: b.delay_seconds / 60 }) : t('rt.backup.sec', { n: b.delay_seconds })
+    backup = (
+      <span>
+        {b.targets.length > 0 ? shown.join(', ') : <span className="rt-warn">{t('rt.backup.nobody')}</span>}
+        {more > 0 && <span className="muted"> {t('rt.backup.more', { n: more })}</span>}
+        <span className="muted">
+          {' '}
+          · {delay} · {t('rt.pd.min', { sev: b.min_severity })}
+        </span>
+      </span>
+    )
+  }
   const rows: [ReactNode, ReactNode][] = [
     [
       t('rt.service'),
@@ -98,6 +120,7 @@ function RouteRows({ data }: { data: RoutePreviewData }) {
     [t('rt.team'), data.team ? data.team.name : <span className="muted">{t('rt.team.none')}</span>],
     [t('rt.people'), receives],
     [t('rt.pd'), pd],
+    [t('rt.backup'), backup],
   ]
   return (
     <>

@@ -166,7 +166,8 @@ type config struct {
 	msgs      messages
 }
 
-func (s *Service) config() config {
+// settings reads the settings of the config, without the secrets and the templates.
+func (s *Service) settings() config {
 	var c config
 	s.st.Read(func(d *store.Data) {
 		c.set = d.Settings.Alerting
@@ -175,6 +176,11 @@ func (s *Service) config() config {
 		c.set.Notify.Templates = maps.Clone(d.Settings.Alerting.Notify.Templates)
 		c.locale = d.Settings.DefaultLocale
 	})
+	return c
+}
+
+func (s *Service) config() config {
+	c := s.settings()
 	c.msgs = newMessages(c.locale, c.set.Notify.Templates)
 	c.secret, c.secretErr = map[string]string{}, map[string]error{}
 	for _, ch := range channels {
@@ -263,6 +269,25 @@ func (s *Service) targets(c config, a alert.Alert) []target {
 	}
 	return out
 }
+
+// Target is an address backup notification goes to.
+type Target struct {
+	Channel string `json:"channel"`
+	Address string `json:"address"`
+}
+
+// PreviewTargets are the addresses backup notification about an incident of the route would
+// go to now, by the same rules as delivery; none while every channel is off.
+func (s *Service) PreviewTargets(r alert.Route) []Target {
+	out := []Target{}
+	for _, t := range s.targets(s.settings(), alert.Alert{Route: r}) {
+		out = append(out, Target{Channel: t.channel, Address: t.address})
+	}
+	return out
+}
+
+// On tells whether any channel is turned on.
+func On(n model.Notify) bool { return len(enabled(n)) > 0 }
 
 // enabled are the channels turned on, in their order.
 func enabled(n model.Notify) []channel {
