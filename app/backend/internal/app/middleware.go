@@ -77,7 +77,13 @@ func (a *App) can(perm string, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-func clientIP(r *http.Request) string {
+// clientIP is the address of the client for security decisions and the audit: the peer of the
+// connection, or the forwarded address when the peer is a trusted reverse proxy
+// (UMBRELLA_TRUSTED_PROXIES).
+func (a *App) clientIP(r *http.Request) string {
+	if ip := a.proxies.ClientIP(r); ip.IsValid() {
+		return ip.String()
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

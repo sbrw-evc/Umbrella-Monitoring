@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"sync"
 	"time"
 )
@@ -64,4 +65,43 @@ func (l *Limiter) Reset(key string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.marks, key)
+}
+
+// loginGuard counts wrong passwords. The strict limit is per account and address, so one
+// attacker cannot guess a password quickly, while the wrong passwords of one person do not lock
+// out colleagues behind the same proxy or NAT address. Looser limits per address (password
+// spraying over many accounts) and per account (guessing from many addresses) stay.
+type loginGuard struct {
+	pair, addr, account *Limiter
+}
+
+func newLoginGuard() *loginGuard {
+	return &loginGuard{
+		pair:    NewLimiter(maxFailures, failWindow, lockout),
+		addr:    NewLimiter(maxLooseFailures, failWindow, lockout),
+		account: NewLimiter(maxLooseFailures, failWindow, lockout),
+	}
+}
+
+func loginAccount(username string) string { return strings.ToLower(strings.TrimSpace(username)) }
+
+func loginPair(username, ip string) string { return loginAccount(username) + "\x00" + ip }
+
+// Locked tells whether a sign-in of username from ip is refused now.
+func (g *loginGuard) Locked(username, ip string) bool {
+	return g.pair.Locked(loginPair(username, ip)) || g.addr.Locked(ip) || g.account.Locked(loginAccount(username))
+}
+
+// Fail counts a wrong password.
+func (g *loginGuard) Fail(username, ip string) {
+	g.pair.Fail(loginPair(username, ip))
+	g.addr.Fail(ip)
+	g.account.Fail(loginAccount(username))
+}
+
+// Reset forgets the wrong passwords of the account after a successful sign-in; the address
+// keeps its count, so signing in to an own account does not reset spraying.
+func (g *loginGuard) Reset(username, ip string) {
+	g.pair.Reset(loginPair(username, ip))
+	g.account.Reset(loginAccount(username))
 }

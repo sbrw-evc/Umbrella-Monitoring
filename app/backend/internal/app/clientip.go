@@ -9,7 +9,7 @@ import (
 )
 
 // TrustedProxies are the reverse proxies whose forwarding headers are believed when the
-// client address of a TV wallboard is checked.
+// client address is needed: TV wallboard and connector networks, sign-in limits, the audit.
 type TrustedProxies []netip.Prefix
 
 // ParseTrustedProxies reads a comma-separated list of CIDRs and addresses. Invalid entries are

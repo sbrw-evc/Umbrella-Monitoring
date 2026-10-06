@@ -60,6 +60,12 @@ func (a *App) saveEntra(w http.ResponseWriter, r *http.Request) {
 // entraStart sends the browser to the Microsoft sign-in page. The state also goes into a
 // cookie, so only the browser that started the sign-in can finish it.
 func (a *App) entraStart(w http.ResponseWriter, r *http.Request) {
+	ip := a.clientIP(r)
+	if a.entraRate.Locked(ip) {
+		a.signInFailed(w, r, "too_many_attempts")
+		return
+	}
+	a.entraRate.Fail(ip)
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	target, state, err := a.entra.Start(ctx)
@@ -100,11 +106,11 @@ func (a *App) entraCallback(w http.ResponseWriter, r *http.Request) {
 		a.signInFailed(w, r, "entra_state")
 		return
 	case errors.Is(err, errEntraNotAllowed):
-		a.auth.Failed("entra", clientIP(r))
+		a.auth.Failed("entra", a.clientIP(r))
 		a.signInFailed(w, r, "entra_not_allowed")
 		return
 	case errors.Is(err, ErrInvalidCredentials):
-		a.auth.Failed("entra", clientIP(r))
+		a.auth.Failed("entra", a.clientIP(r))
 		a.signInFailed(w, r, "entra_account")
 		return
 	case err != nil:
@@ -114,7 +120,7 @@ func (a *App) entraCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setEntraCookie(w, "", -1)
 	ss := a.deps.Sessions.Create(u.ID)
-	a.auth.Signed(u.ID, clientIP(r))
+	a.auth.Signed(u.ID, a.clientIP(r))
 	a.setCookie(w, ss.ID, int(auth.MaxLifetime/time.Second))
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
