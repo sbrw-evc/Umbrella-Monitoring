@@ -187,17 +187,20 @@ func (p *PGBackend) Load(ctx context.Context) ([][]byte, error) {
 }
 
 func (p *PGBackend) Save(ctx context.Context, data []byte) error {
-	return pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO umbrella_state (name, format, saved_at, data)
-			SELECT 'previous', format, saved_at, data FROM umbrella_state WHERE name = 'current'
-			ON CONFLICT (name) DO UPDATE SET format = EXCLUDED.format, saved_at = EXCLUDED.saved_at, data = EXCLUDED.data`); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx, `INSERT INTO umbrella_state (name, format, saved_at, data) VALUES ('current', $1, now(), $2)
-			ON CONFLICT (name) DO UPDATE SET format = EXCLUDED.format, saved_at = EXCLUDED.saved_at, data = EXCLUDED.data`,
-			snapshotFormat, data)
+	return pgx.BeginFunc(ctx, p.pool, func(tx pgx.Tx) error { return SaveIn(ctx, tx, data) })
+}
+
+// SaveIn writes the snapshot inside tx, keeping the one it replaces as 'previous'.
+func SaveIn(ctx context.Context, tx pgx.Tx, data []byte) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO umbrella_state (name, format, saved_at, data)
+		SELECT 'previous', format, saved_at, data FROM umbrella_state WHERE name = 'current'
+		ON CONFLICT (name) DO UPDATE SET format = EXCLUDED.format, saved_at = EXCLUDED.saved_at, data = EXCLUDED.data`); err != nil {
 		return err
-	})
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO umbrella_state (name, format, saved_at, data) VALUES ('current', $1, now(), $2)
+		ON CONFLICT (name) DO UPDATE SET format = EXCLUDED.format, saved_at = EXCLUDED.saved_at, data = EXCLUDED.data`,
+		snapshotFormat, data)
+	return err
 }
 
 type PGProbe struct {
