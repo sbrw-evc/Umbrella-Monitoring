@@ -284,6 +284,7 @@ func (a *App) process(ctx context.Context, r ingest.Request) (out ingest.Outcome
 		}
 		return out, fmt.Errorf("processing took longer than %s", processTimeout)
 	}
+	markTestEvents(r, res)
 	out.Result = res
 	return out, nil
 }

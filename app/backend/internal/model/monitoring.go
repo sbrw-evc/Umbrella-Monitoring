@@ -32,6 +32,9 @@ type MonitoringSource struct {
 	// Prometheus: the instant query that lists targets and the label that names the host.
 	Query     string `json:"query,omitempty"`
 	HostLabel string `json:"host_label,omitempty"`
+	// ConnectorID is the connector that receives the alerts of this system («Приём алертов»).
+	// A Prometheus system also serves RED and USE rules as a metric source (store.Data.MetricSource).
+	ConnectorID string `json:"connector_id,omitempty"`
 
 	Hosts []MonitoringHost `json:"-"`
 	// Links are hosts linked by hand: host key to configuration item ID, or HostNoCI.

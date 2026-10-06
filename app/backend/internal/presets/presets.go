@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/flow"
 )
@@ -66,4 +67,16 @@ func Get(id string) (Preset, bool) {
 		}
 	}
 	return Preset{}, false
+}
+
+//go:embed zabbix-mediatype.yaml
+var zabbixMediaType string
+
+// ZabbixMediaType is the Zabbix webhook media type (deploy/zabbix/umbrella-mediatype.yaml)
+// with the ingest address and the bearer token of a connector filled in, ready to import in
+// Zabbix.
+func ZabbixMediaType(url, token string) string {
+	quote := func(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
+	out := strings.Replace(zabbixMediaType, "value: '<umbrella ingest token>'", "value: "+quote(token), 1)
+	return strings.Replace(out, "value: 'http://umbrella:8080/api/ingest/zabbix'", "value: "+quote(url), 1)
 }

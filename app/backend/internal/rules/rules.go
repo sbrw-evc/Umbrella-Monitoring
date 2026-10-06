@@ -206,10 +206,7 @@ func Title(r model.Rule, ci string, v float64, labels map[string]string) string 
 func (e *Engine) source(id string) (model.MetricSource, *Auth, error) {
 	var src *model.MetricSource
 	e.st.Read(func(d *store.Data) {
-		if s := d.MetricSources[id]; s != nil {
-			cp := *s
-			src = &cp
-		}
+		src = d.MetricSource(id)
 	})
 	if src == nil {
 		return model.MetricSource{}, nil, ErrSourceNotFound
