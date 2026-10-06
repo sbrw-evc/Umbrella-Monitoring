@@ -21,6 +21,13 @@ type recorder struct {
 	mu       sync.Mutex
 	cmds     []alert.Command
 	fallback []alert.Alert
+	followUp []alert.Alert
+}
+
+func (r *recorder) FollowUp(a alert.Alert) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.followUp = append(r.followUp, a)
 }
 
 func (r *recorder) Send(c alert.Command) {
@@ -68,6 +75,7 @@ func catalog() *store.Store {
 			Status: model.ServiceActive, CIIDs: []string{"CI-1", "CI-2"}}
 		d.Services["S-2"] = &model.Service{ID: "S-2", Name: "Reports", OwnerTeamID: "T-3", Criticality: model.CriticalityLow,
 			Status: model.ServiceActive, CIIDs: []string{"CI-1"}}
+		d.Settings.Alerting.PagerDuty.Enabled = true
 	})
 	return st
 }
@@ -572,7 +580,7 @@ func TestFallbackSurvivesRestart(t *testing.T) {
 	if len(rec.fallback) != 1 || rec.fallback[0].ID != a.ID {
 		t.Fatalf("handed over again after the restart: %+v", rec.fallback)
 	}
-	if err := e2.FallbackDone(ctx, a.ID); err != nil {
+	if err := e2.FallbackDone(ctx, a.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	c.advance(2 * alert.DefaultFallbackRetry)

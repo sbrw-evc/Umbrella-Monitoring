@@ -144,6 +144,11 @@ func (m *Module) apply(ctx context.Context, in completeInput) (Result, error) {
 		d.Settings.LDAP = ldapCfg
 		d.Settings.SetupAt = now
 		d.Settings.SetupBy = admin.Username
+		// A new install wakes the on-call person in PagerDuty for errors and critical alerts only,
+		// the same threshold backup notification has; settings saved before stay as they are.
+		if pd := &d.Settings.Alerting.PagerDuty; pd.UpdatedAt == nil && pd.MinSeverity == "" {
+			pd.MinSeverity = "error"
+		}
 		d.EnsureSystemRoles(now)
 		u := d.UserByName(admin.Username)
 		if u == nil {

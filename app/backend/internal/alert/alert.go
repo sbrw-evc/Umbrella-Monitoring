@@ -5,6 +5,7 @@
 package alert
 
 import (
+	"errors"
 	"maps"
 	"slices"
 	"time"
@@ -21,10 +22,17 @@ const (
 	PDAcked    = "acked"
 	PDFailed   = "failed"
 	PDSkipped  = "skipped"
+	// PDOff: PagerDuty is turned off, so the alert is not sent there. It is not a failure: backup
+	// notification is the main channel then.
+	PDOff = "off"
 
 	// Backup notification states of an alert.
 	FallbackPending = "pending"
 	FallbackSent    = "sent"
+
+	// TestLabel marks the test events of a connector: their incidents go nowhere (neither to
+	// PagerDuty nor to backup notification).
+	TestLabel = "umbrella_test"
 
 	SourceFiring   = "firing"
 	SourceResolved = "resolved"
@@ -41,6 +49,9 @@ var severityRank = map[string]int{"critical": 4, "error": 3, "warning": 2, "info
 func SeverityRank(s string) int { return severityRank[s] }
 
 func Active(status string) bool { return status == StatusOpen || status == StatusAcknowledged }
+
+// IsTest reports whether the alert comes from a test event (label umbrella_test=true).
+func (a *Alert) IsTest() bool { return a.Labels[TestLabel] == "true" }
 
 // Source is one event of one connector that feeds the alert.
 type Source struct {
@@ -122,6 +133,8 @@ type PD struct {
 	Route       string     `json:"route,omitempty"`
 	RouteID     string     `json:"route_id,omitempty"`
 	Error       string     `json:"error,omitempty"`
+	// ErrorCode is the code of Error the interface translates (see DeliveryError).
+	ErrorCode   string     `json:"error_code,omitempty"`
 	Retry       string     `json:"retry,omitempty"`
 	AttemptAt   *time.Time `json:"attempt_at,omitempty"`
 	IncidentID  string     `json:"incident_id,omitempty"`
@@ -168,7 +181,24 @@ type Alert struct {
 	// survives a restart or a full queue. FallbackTry is when it was last handed over.
 	FallbackState string     `json:"fallback_state,omitempty"`
 	FallbackTry   *time.Time `json:"fallback_try,omitempty"`
-	RelatedID     string     `json:"related_id,omitempty"`
+	// Notified are the addresses backup notification reached; they get a follow-up when the
+	// alert is acknowledged or resolved.
+	Notified []Notified `json:"notified,omitempty"`
+	// FollowUp is the follow-up still to send to Notified: acknowledged or resolved. It is
+	// pending until the notifier reports it, like FallbackState; FollowUpTry is when it was
+	// last handed over.
+	FollowUp    string     `json:"follow_up,omitempty"`
+	FollowUpTry *time.Time `json:"follow_up_try,omitempty"`
+	RelatedID   string     `json:"related_id,omitempty"`
+}
+
+// Notified is an address backup notification of the alert was sent to.
+type Notified struct {
+	Channel string `json:"channel"`
+	Address string `json:"address"`
+	// Recipient is who the address belongs to (see notify.UserRecipient), for the time zone of
+	// the follow-up.
+	Recipient string `json:"recipient,omitempty"`
 }
 
 func (a *Alert) Clone() Alert {
@@ -182,6 +212,8 @@ func (a *Alert) Clone() Alert {
 	c.Route.Services = slices.Clone(a.Route.Services)
 	c.Route.People = slices.Clone(a.Route.People)
 	c.Route.Owners = slices.Clone(a.Route.Owners)
+	c.Notified = slices.Clone(a.Notified)
+	c.PD.OldIncidents = slices.Clone(a.PD.OldIncidents)
 	return c
 }
 
@@ -226,11 +258,48 @@ type Sender interface {
 	Send(cmd Command)
 }
 
-// Notifier sends backup notification for an alert PagerDuty did not take and reports the
-// attempt back with Engine.FallbackDone. Fallback may be called again for the same alert
-// while it is pending.
+// Notifier sends backup notification for an alert nobody has taken (PagerDuty is off or did
+// not take it) and reports the attempt back with Engine.FallbackDone. Fallback may be called
+// again for the same alert while it is pending. FollowUp tells the addresses that got backup
+// notification that the alert was acknowledged or resolved (Alert.FollowUp) and reports back
+// with Engine.FollowUpDone.
 type Notifier interface {
 	Fallback(a Alert)
+	FollowUp(a Alert)
+}
+
+// DeliveryError is a failed PagerDuty delivery with a code the interface translates: no_key,
+// key_unavailable, queue_full, breaker, unreachable, unavailable, rejected or below_threshold.
+// Detail is shown next to the translated code (the minimum severity, an HTTP status and the
+// answer of PagerDuty).
+type DeliveryError struct {
+	Code   string
+	Msg    string
+	Detail string
+	// Err is the sentinel the error matches with errors.Is.
+	Err error
+}
+
+func (e *DeliveryError) Error() string {
+	msg := e.Msg
+	if msg == "" && e.Err != nil {
+		msg = e.Err.Error()
+	}
+	if e.Detail != "" {
+		return msg + ": " + e.Detail
+	}
+	return msg
+}
+
+func (e *DeliveryError) Unwrap() error { return e.Err }
+
+// DeliveryCode is the code of a PagerDuty delivery error, "error" when it has none.
+func DeliveryCode(err error) (code, detail string) {
+	var d *DeliveryError
+	if errors.As(err, &d) {
+		return d.Code, d.Detail
+	}
+	return "error", err.Error()
 }
 
 // Incoming is an event handed to the engine.

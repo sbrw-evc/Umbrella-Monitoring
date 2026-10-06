@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/app"
@@ -69,21 +68,21 @@ func TestBackupNotificationRoundTrip(t *testing.T) {
 		t.Fatalf("telegram test: %v %+v", test, tg.Messages())
 	}
 
-	// PagerDuty is off: a critical incident goes to backup notification.
+	// PagerDuty is off: it is not used (not a failure), and a critical incident goes to backup
+	// notification at once, without waiting for PagerDuty.
 	f.ingest("hook", `{"id":"a1","title":"Disk full","host":"db-01","signal":"disk","severity":"critical","status":"firing"}`, auth)
 	var page struct {
 		Alerts []alert.Alert `json:"alerts"`
+		Counts alert.Counts  `json:"counts"`
 	}
 	waitFor(t, "the incident", func() bool {
 		f.admin.call(http.MethodGet, "/api/incidents", nil, &page)
-		return len(page.Alerts) == 1 && page.Alerts[0].PD.State == alert.PDFailed
+		return len(page.Alerts) == 1 && page.Alerts[0].PD.State == alert.PDOff
 	})
-	id := page.Alerts[0].ID
-	eng := f.h.app.AlertEngine()
-	eng.SetClock(func() time.Time { return time.Now().UTC().Add(5 * time.Minute) })
-	if err := eng.Tick(t.Context()); err != nil {
-		t.Fatal(err)
+	if page.Counts.PDEnabled || page.Counts.PDNotTaken != 0 || page.Alerts[0].PD.Error != "" {
+		t.Errorf("PagerDuty off is not a failure: %+v %+v", page.Counts, page.Alerts[0].PD)
 	}
+	id := page.Alerts[0].ID
 	waitFor(t, "backup notification", func() bool { return len(smtp.Mails()) == 3 && len(tg.Messages()) == 2 })
 	var detail struct {
 		Alert    alert.Alert   `json:"alert"`
@@ -101,6 +100,16 @@ func TestBackupNotificationRoundTrip(t *testing.T) {
 	})
 	if !detail.Alert.Fallback {
 		t.Errorf("fallback = %+v", detail.Alert)
+	}
+	for _, e := range detail.Timeline {
+		if e.Kind == alert.KindPagerDuty {
+			t.Errorf("nothing about PagerDuty on the timeline while it is off: %+v", e)
+		}
+	}
+	for _, m := range smtp.Mails()[1:] {
+		if strings.Contains(m.Body, "PagerDuty") {
+			t.Errorf("the message does not blame PagerDuty that is off: %s", m.Body)
+		}
 	}
 
 	// The link in the mail acknowledges the incident in the name of the person.
@@ -139,6 +148,16 @@ func TestBackupNotificationRoundTrip(t *testing.T) {
 	f.admin.call(http.MethodGet, "/api/incidents/"+id, nil, &detail)
 	if detail.Alert.Status != alert.StatusAcknowledged || detail.Alert.AckedBy != "admin" {
 		t.Fatalf("acknowledged: %+v", detail.Alert)
+	}
+	// Everybody the backup notification reached learns who took the incident.
+	waitFor(t, "the follow-up", func() bool { return len(smtp.Mails()) == 5 && len(tg.Messages()) == 3 })
+	for _, m := range smtp.Mails()[3:] {
+		if !strings.Contains(m.Body, id) || !strings.Contains(m.Body, "admin") || !strings.Contains(m.Body, f.h.srv.URL+"/incidents?id="+id) {
+			t.Errorf("follow-up: %s", m.Body)
+		}
+	}
+	if msg := tg.Messages()[2]; msg.ChatID != "4242" || !strings.Contains(msg.Text, "admin") {
+		t.Errorf("telegram follow-up: %+v", msg)
 	}
 	if code, page := get(http.MethodGet, link); code != http.StatusOK || strings.Contains(page, "<form") {
 		t.Fatalf("again: %d %s", code, page)

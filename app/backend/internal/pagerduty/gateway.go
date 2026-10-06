@@ -23,12 +23,14 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/textx"
 )
 
+// Delivery errors carry a code the interface translates (alert.DeliveryError). ErrDisabled is
+// not a failure: the alert is then "off".
 var (
-	ErrDisabled   = errors.New("PagerDuty is not enabled")
-	ErrNoKey      = errors.New("no Events API v2 integration key is set")
+	ErrDisabled   = alert.ErrPDOff
+	ErrNoKey      = &alert.DeliveryError{Code: "no_key", Msg: "no Events API v2 integration key is set"}
 	ErrNoAPIToken = errors.New("no PagerDuty REST API token is set")
-	ErrQueueFull  = errors.New("the PagerDuty queue is full")
-	ErrBreaker    = errors.New("the circuit breaker is open after a series of failures")
+	ErrQueueFull  = &alert.DeliveryError{Code: "queue_full", Msg: "the PagerDuty queue is full"}
+	ErrBreaker    = &alert.DeliveryError{Code: "breaker", Msg: "the circuit breaker is open after a series of failures"}
 )
 
 const (
@@ -137,7 +139,7 @@ func (g *Gateway) deliver(ctx context.Context, cmd alert.Command) {
 		return
 	}
 	if min := set.MinSeverity; cmd.Action == alert.PDTrigger && min != "" && alert.SeverityRank(cmd.Alert.Severity) < alert.SeverityRank(min) {
-		g.report(cmd, "", "", fmt.Errorf("%w %s", alert.ErrPDSkipped, min))
+		g.report(cmd, "", "", &alert.DeliveryError{Code: "below_threshold", Detail: min, Err: alert.ErrPDSkipped})
 		return
 	}
 	routeName, routeID, ref := deliveryRoute(set, cmd.Alert)
@@ -147,7 +149,7 @@ func (g *Gateway) deliver(ctx context.Context, cmd alert.Command) {
 	}
 	key, err := g.sec.Resolve(ref)
 	if err != nil {
-		g.report(cmd, routeName, routeID, fmt.Errorf("integration key: %w", err))
+		g.report(cmd, routeName, routeID, &alert.DeliveryError{Code: "key_unavailable", Msg: "integration key", Detail: err.Error(), Err: err})
 		return
 	}
 	ev := Build(all.PublicURL, all.Grafana.DashboardURL != "", key, cmd)
@@ -372,7 +374,7 @@ func (g *Gateway) post(ctx context.Context, url string, ev Event) error {
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return err
+		return &alert.DeliveryError{Code: "unreachable", Msg: "PagerDuty is not reachable", Detail: err.Error(), Err: err}
 	}
 	defer resp.Body.Close()
 	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
@@ -380,9 +382,11 @@ func (g *Gateway) post(ctx context.Context, url string, ev Event) error {
 	case resp.StatusCode/100 == 2:
 		return nil
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
-		return fmt.Errorf("Events API answered %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
+		return &alert.DeliveryError{Code: "unavailable", Msg: "Events API answered",
+			Detail: textx.Runes(strings.TrimSpace(fmt.Sprintf("%d %s", resp.StatusCode, msg)), 300)}
 	default:
-		return permanent{fmt.Errorf("Events API rejected the event (%d): %s", resp.StatusCode, eventsError(msg))}
+		return permanent{&alert.DeliveryError{Code: "rejected", Msg: "Events API rejected the event",
+			Detail: textx.Runes(strings.TrimSpace(fmt.Sprintf("%d %s", resp.StatusCode, eventsError(msg))), 300)}}
 	}
 }
 

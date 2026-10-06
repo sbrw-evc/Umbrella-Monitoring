@@ -314,6 +314,9 @@ func TestWizardEndToEnd(t *testing.T) {
 		if u := d.Users["USR-1"]; u == nil || u.PasswordRef != "openbao://umbrella/users/USR-1#password_hash" || u.Name != "Main Admin" || u.Title != "CTO" {
 			t.Fatalf("admin record = %+v", u)
 		}
+		if got := d.Settings.Alerting.PagerDuty.MinSeverity; got != "error" {
+			t.Errorf("a new install sends errors and critical alerts to PagerDuty, not everything: %q", got)
+		}
 	})
 	if v := bao.Get("umbrella/postgres"); v["password"] != pg.password {
 		t.Fatalf("postgres password in OpenBao = %v", v)

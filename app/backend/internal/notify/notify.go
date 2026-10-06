@@ -1,6 +1,7 @@
-// Package notify is backup notification: when PagerDuty has not taken an error or critical
-// incident in time, the people of its route get it by e-mail and from a Telegram bot, with a
-// link that acknowledges the incident.
+// Package notify is backup notification: when nobody has taken a severe enough incident
+// (PagerDuty is off, or did not take it in time), the people of its route get it by e-mail and
+// from a Telegram bot, with a link that acknowledges the incident. Once the incident is
+// acknowledged or resolved, the same addresses get a short follow-up.
 package notify
 
 import (
@@ -38,23 +39,41 @@ type Resolver interface {
 }
 
 // Results records what was sent on the timeline of the incident, and that backup notification
-// of the incident was attempted, so that it is not handed over again.
+// or a follow-up of the incident was attempted, so that it is not handed over again.
+// FallbackDue is asked right before sending: an incident taken meanwhile is not sent.
 type Results interface {
 	Note(ctx context.Context, id, kind, code string, args map[string]string) error
-	FallbackDone(ctx context.Context, id string) error
+	FallbackDue(ctx context.Context, id string) (bool, error)
+	FallbackDone(ctx context.Context, id string, sent []alert.Notified) error
+	FollowUpDone(ctx context.Context, id, event string) error
 }
 
 type nopResults struct{}
 
 func (nopResults) Note(context.Context, string, string, string, map[string]string) error { return nil }
-func (nopResults) FallbackDone(context.Context, string) error                            { return nil }
+func (nopResults) FallbackDue(context.Context, string) (bool, error)                     { return true, nil }
+func (nopResults) FallbackDone(context.Context, string, []alert.Notified) error          { return nil }
+func (nopResults) FollowUpDone(context.Context, string, string) error                    { return nil }
+
+// job is a queued notification: backup notification or the follow-up of an incident.
+type job struct {
+	a        alert.Alert
+	followUp bool
+}
+
+func (j job) key() string {
+	if j.followUp {
+		return "f:" + j.a.ID
+	}
+	return "n:" + j.a.ID
+}
 
 type Service struct {
 	st      *store.Store
 	sec     Resolver
 	client  *http.Client
 	results Results
-	queue   chan alert.Alert
+	queue   chan job
 
 	// queued: incidents in the queue or being delivered; the engine hands a pending incident
 	// over again until it is reported, and a second copy is not queued.
@@ -71,7 +90,7 @@ type Service struct {
 
 func New(st *store.Store, sec Resolver) *Service {
 	return &Service{st: st, sec: sec, client: &http.Client{Timeout: 15 * time.Second}, results: nopResults{},
-		queue: make(chan alert.Alert, queueSize), queued: map[string]bool{}, Retries: 3, Backoff: 2 * time.Second, now: func() time.Time { return time.Now().UTC() }}
+		queue: make(chan job, queueSize), queued: map[string]bool{}, Retries: 3, Backoff: 2 * time.Second, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (s *Service) SetResults(r Results) { s.results = r }
@@ -92,17 +111,24 @@ func (s *Service) Links() *Links {
 // Fallback queues backup notification for an incident. The engine keeps the incident pending
 // until Deliver reports it, and hands it over again later when the queue is full or the
 // process restarted in between.
-func (s *Service) Fallback(a alert.Alert) {
+func (s *Service) Fallback(a alert.Alert) { s.enqueue(job{a: a}) }
+
+// FollowUp queues the follow-up of an incident that was acknowledged or resolved
+// (a.FollowUp) to the addresses backup notification reached; like Fallback, the engine hands
+// it over again until DeliverFollowUp reports it.
+func (s *Service) FollowUp(a alert.Alert) { s.enqueue(job{a: a, followUp: true}) }
+
+func (s *Service) enqueue(j job) {
 	s.qmu.Lock()
 	defer s.qmu.Unlock()
-	if s.queued[a.ID] {
+	if s.queued[j.key()] {
 		return
 	}
 	select {
-	case s.queue <- a:
-		s.queued[a.ID] = true
+	case s.queue <- j:
+		s.queued[j.key()] = true
 	default:
-		slog.Warn("backup notification queue is full: it is retried later", "alert", a.ID)
+		slog.Warn("backup notification queue is full: it is retried later", "alert", j.a.ID)
 	}
 }
 
@@ -111,10 +137,14 @@ func (s *Service) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case a := <-s.queue:
-			s.Deliver(ctx, a)
+		case j := <-s.queue:
+			if j.followUp {
+				s.DeliverFollowUp(ctx, j.a)
+			} else {
+				s.Deliver(ctx, j.a)
+			}
 			s.qmu.Lock()
-			delete(s.queued, a.ID)
+			delete(s.queued, j.key())
 			s.qmu.Unlock()
 		}
 	}
@@ -231,16 +261,28 @@ func (s *Service) targets(c config, a alert.Alert) []target {
 }
 
 // Deliver sends backup notification for an incident, records the outcome on its timeline and
-// then reports the attempt. Delivery cut short by shutdown is not reported: the incident stays
-// pending and is sent after the restart.
+// then reports the attempt with the addresses reached. Delivery cut short by shutdown is not
+// reported: the incident stays pending and is sent after the restart. An incident acknowledged
+// or resolved since it was queued is not sent.
 func (s *Service) Deliver(ctx context.Context, a alert.Alert) {
+	due, err := s.results.FallbackDue(ctx, a.ID)
+	if err != nil {
+		if !errors.Is(err, alert.ErrNotFound) {
+			slog.Warn("backup notification not checked: it is retried later", "alert", a.ID, "err", err)
+		}
+		return
+	}
+	if !due {
+		return
+	}
 	c := s.config()
 	targets := s.targets(c, a)
+	var reached []alert.Notified
 	defer func() {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := s.results.FallbackDone(ctx, a.ID); err != nil && !errors.Is(err, alert.ErrNotFound) {
+		if err := s.results.FallbackDone(ctx, a.ID, reached); err != nil && !errors.Is(err, alert.ErrNotFound) {
 			slog.Warn("backup notification not marked as sent", "alert", a.ID, "err", err)
 		}
 	}()
@@ -250,13 +292,14 @@ func (s *Service) Deliver(ctx context.Context, a alert.Alert) {
 	}
 	sent := map[string][]string{}
 	for _, t := range targets {
-		err := s.send(ctx, c, a, t)
+		err := s.send(ctx, c, s.compose(c, a, t), t)
 		if err != nil {
 			slog.Warn("backup notification not sent", "alert", a.ID, "channel", t.channel, "to", t.address, "err", err)
 			s.note(ctx, a.ID, "notify_failed", map[string]string{"channel": t.channel, "to": t.address, "error": err.Error()})
 			continue
 		}
 		sent[t.channel] = append(sent[t.channel], t.address)
+		reached = append(reached, alert.Notified{Channel: t.channel, Address: t.address, Recipient: t.recipient})
 	}
 	for _, ch := range []string{ChannelEmail, ChannelTelegram} {
 		if len(sent[ch]) > 0 {
@@ -271,8 +314,7 @@ func (s *Service) note(ctx context.Context, id, code string, args map[string]str
 	}
 }
 
-func (s *Service) send(ctx context.Context, c config, a alert.Alert, t target) error {
-	m := s.compose(c, a, t)
+func (s *Service) send(ctx context.Context, c config, m composed, t target) error {
 	attempt := func() error {
 		switch t.channel {
 		case ChannelEmail:
@@ -322,6 +364,14 @@ var words = map[string]map[string]string{
 		"critical": "критично", "error": "ошибка", "warning": "предупреждение", "info": "инфо",
 		"pd_failed": "ошибка доставки", "pd_pending": "не ответил", "why": "Вы получили это письмо, потому что входите в команду, отвечающую за сервис, или отвечаете за КЕ.",
 		"test": "Проверка резервного оповещения Umbrella", "test_body": "Это проверочное сообщение. Если вы его видите, канал настроен.",
+		"head_new": "Новый инцидент — оповещение Umbrella", "pd_skipped": "не отправлялся (ниже порога важности)",
+		"err.no_key": "не задан ключ интеграции", "err.key_unavailable": "ключ интеграции недоступен", "err.queue_full": "очередь переполнена",
+		"err.breaker": "доставка приостановлена после серии ошибок", "err.unreachable": "PagerDuty недоступен",
+		"err.unavailable": "PagerDuty временно не отвечает", "err.rejected": "PagerDuty отклонил событие",
+		"fu.acknowledged": "Инцидент взят в работу", "fu.resolved": "Инцидент решён",
+		"fu.ack.by": "Взял(а): {who}, {at}", "fu.res.by": "Решил(а): {who}, {at}", "fu.res.auto": "Решён {at}: источники вернулись в норму",
+		"fu.why": "Вы получили резервное оповещение об этом инциденте; ничего делать не нужно.",
+		"fu.subj.acknowledged": "взят в работу", "fu.subj.resolved": "решён",
 	},
 	"en": {
 		"head": "PagerDuty did not take the incident — backup notification", "severity": "Severity", "ci": "CI", "signal": "Signal",
@@ -329,6 +379,14 @@ var words = map[string]map[string]string{
 		"critical": "critical", "error": "error", "warning": "warning", "info": "info",
 		"pd_failed": "delivery failed", "pd_pending": "no answer", "why": "You get this because you are in the team that owns the service or you are responsible for the CI.",
 		"test": "Umbrella backup notification test", "test_body": "This is a test message. If you see it, the channel is set up.",
+		"head_new": "New incident — Umbrella notification", "pd_skipped": "not sent (below the severity threshold)",
+		"err.no_key": "no integration key is set", "err.key_unavailable": "the integration key is not available", "err.queue_full": "the queue is full",
+		"err.breaker": "delivery is paused after a series of failures", "err.unreachable": "PagerDuty is not reachable",
+		"err.unavailable": "PagerDuty is not answering for now", "err.rejected": "PagerDuty rejected the event",
+		"fu.acknowledged": "The incident is being handled", "fu.resolved": "The incident is resolved",
+		"fu.ack.by": "Taken by {who}, {at}", "fu.res.by": "Resolved by {who}, {at}", "fu.res.auto": "Resolved {at}: the sources are back to normal",
+		"fu.why": "You got backup notification about this incident; nothing more is needed from you.",
+		"fu.subj.acknowledged": "being handled", "fu.subj.resolved": "resolved",
 	},
 }
 
@@ -358,14 +416,25 @@ func (s *Service) compose(c config, a alert.Alert, t target) composed {
 		lines = append(lines, line{w["team"], a.Route.Team.Name})
 	}
 	lines = append(lines, line{w["opened"], a.OpenedAt.In(t.tz).Format("02.01.2006 15:04 MST")})
-	pd := w["pd_pending"]
-	if a.PD.State == alert.PDFailed {
-		pd = w["pd_failed"]
-		if a.PD.Error != "" {
+	// PagerDuty is mentioned only when it was meant to take the incident.
+	head := w["head"]
+	switch a.PD.State {
+	case alert.PDOff:
+		head = w["head_new"]
+	case alert.PDSkipped:
+		head = w["head_new"]
+		lines = append(lines, line{w["pd"], w["pd_skipped"]})
+	case alert.PDFailed:
+		pd := w["pd_failed"]
+		if v, ok := w["err."+a.PD.ErrorCode]; ok {
+			pd += ": " + v
+		} else if a.PD.Error != "" {
 			pd += ": " + a.PD.Error
 		}
+		lines = append(lines, line{w["pd"], pd})
+	default:
+		lines = append(lines, line{w["pd"], w["pd_pending"]})
 	}
-	lines = append(lines, line{w["pd"], pd})
 	var open, ack, grafana string
 	if base != "" {
 		open = base + "/incidents?id=" + url.QueryEscape(a.ID)
@@ -378,8 +447,8 @@ func (s *Service) compose(c config, a alert.Alert, t target) composed {
 	}
 	title := a.ID + " · " + a.Title
 	var tb, hb strings.Builder
-	tb.WriteString(w["head"] + "\n\n" + title + "\n\n")
-	hb.WriteString("🚨 <b>" + html.EscapeString(w["head"]) + "</b>\n\n<b>" + html.EscapeString(title) + "</b>\n")
+	tb.WriteString(head + "\n\n" + title + "\n\n")
+	hb.WriteString("🚨 <b>" + html.EscapeString(head) + "</b>\n\n<b>" + html.EscapeString(title) + "</b>\n")
 	for _, l := range lines {
 		tb.WriteString(l.k + ": " + l.v + "\n")
 		hb.WriteString(html.EscapeString(l.k) + ": " + html.EscapeString(l.v) + "\n")
@@ -405,6 +474,100 @@ func (s *Service) compose(c config, a alert.Alert, t target) composed {
 	}
 	tb.WriteString("\n-- \n" + w["why"] + "\n")
 	return composed{subject: "[Umbrella] " + title + " (" + w[a.Severity] + ")", text: tb.String(), html: hb.String()}
+}
+
+// composeFollowUp is the short message telling that the incident was taken (who and when) or
+// resolved, with a link to it.
+func (s *Service) composeFollowUp(c config, a alert.Alert, tz *time.Location) composed {
+	w := lang(c.locale)
+	at := func(t *time.Time) string {
+		if t == nil {
+			return ""
+		}
+		return t.In(tz).Format("02.01.2006 15:04 MST")
+	}
+	fill := func(k, who, when string) string {
+		return strings.NewReplacer("{who}", who, "{at}", when).Replace(w[k])
+	}
+	var detail string
+	switch {
+	case a.FollowUp == alert.StatusAcknowledged:
+		detail = fill("fu.ack.by", a.AckedBy, at(a.AckedAt))
+	case a.ResolvedBy != "":
+		detail = fill("fu.res.by", a.ResolvedBy, at(a.ResolvedAt))
+	default:
+		detail = fill("fu.res.auto", "", at(a.ResolvedAt))
+	}
+	head := w["fu."+a.FollowUp]
+	title := a.ID + " · " + a.Title
+	open := ""
+	if base := strings.TrimRight(c.set.PublicURL, "/"); base != "" {
+		open = base + "/incidents?id=" + url.QueryEscape(a.ID)
+	}
+	icon := "✅"
+	if a.FollowUp == alert.StatusAcknowledged {
+		icon = "👀"
+	}
+	text := head + "\n\n" + title + "\n" + detail + "\n"
+	hb := icon + " <b>" + html.EscapeString(head) + "</b>\n\n<b>" + html.EscapeString(title) + "</b>\n" + html.EscapeString(detail) + "\n"
+	if open != "" {
+		text += "\n" + w["open"] + ": " + open + "\n"
+		hb += "\n" + `<a href="` + html.EscapeString(open) + `">` + html.EscapeString(w["open"]) + "</a>"
+	}
+	text += "\n-- \n" + w["fu.why"] + "\n"
+	return composed{subject: "[Umbrella] " + title + " — " + w["fu.subj."+a.FollowUp], text: text, html: hb}
+}
+
+// DeliverFollowUp tells the addresses backup notification reached that the incident was
+// acknowledged or resolved, records the outcome on its timeline and reports the attempt.
+// Addresses of a channel turned off since are skipped.
+func (s *Service) DeliverFollowUp(ctx context.Context, a alert.Alert) {
+	if a.FollowUp == "" {
+		return
+	}
+	c := s.config()
+	defer func() {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := s.results.FollowUpDone(ctx, a.ID, a.FollowUp); err != nil && !errors.Is(err, alert.ErrNotFound) {
+			slog.Warn("follow-up not marked as sent", "alert", a.ID, "err", err)
+		}
+	}()
+	tz := map[string]string{}
+	defTZ := ""
+	s.st.Read(func(d *store.Data) {
+		defTZ = d.Settings.DefaultTZ
+		for _, n := range a.Notified {
+			if kind, id, _ := strings.Cut(n.Recipient, ":"); kind == "u" {
+				if u := d.Users[id]; u != nil {
+					tz[n.Recipient] = u.Timezone
+				}
+			}
+		}
+	})
+	sent := map[string][]string{}
+	for _, n := range a.Notified {
+		if (n.Channel == ChannelEmail && !c.set.Notify.Email.Enabled) || (n.Channel == ChannelTelegram && !c.set.Notify.Telegram.Enabled) {
+			continue
+		}
+		loc := loadTZ(defTZ)
+		if tz[n.Recipient] != "" {
+			loc = loadTZ(tz[n.Recipient])
+		}
+		t := target{channel: n.Channel, address: n.Address, recipient: n.Recipient, tz: loc}
+		if err := s.send(ctx, c, s.composeFollowUp(c, a, loc), t); err != nil {
+			slog.Warn("follow-up not sent", "alert", a.ID, "channel", t.channel, "to", t.address, "err", err)
+			s.note(ctx, a.ID, "notify_followup_failed", map[string]string{"channel": t.channel, "to": t.address, "event": a.FollowUp, "error": err.Error()})
+			continue
+		}
+		sent[t.channel] = append(sent[t.channel], t.address)
+	}
+	for _, ch := range []string{ChannelEmail, ChannelTelegram} {
+		if len(sent[ch]) > 0 {
+			s.note(ctx, a.ID, "notify_followup", map[string]string{"channel": ch, "to": strings.Join(sent[ch], ", "), "event": a.FollowUp})
+		}
+	}
 }
 
 // TestEmail sends a test message with the saved settings.

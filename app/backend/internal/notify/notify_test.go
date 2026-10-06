@@ -30,17 +30,35 @@ type note struct {
 }
 
 type results struct {
-	mu    sync.Mutex
-	notes []note
-	done  []string
+	mu      sync.Mutex
+	notes   []note
+	done    []string
+	reached []alert.Notified
+	// taken: FallbackDue answers that the incident is no longer due.
+	taken     bool
+	followUps []string
 }
 
-func (r *results) FallbackDone(_ context.Context, id string) error {
+func (r *results) FallbackDue(context.Context, string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !r.taken, nil
+}
+
+func (r *results) FallbackDone(_ context.Context, id string, sent []alert.Notified) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// The attempt is reported after it is on the timeline.
 	r.notes = append(r.notes, note{"done:" + id, nil})
 	r.done = append(r.done, id)
+	r.reached = sent
+	return nil
+}
+
+func (r *results) FollowUpDone(_ context.Context, id, event string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.followUps = append(r.followUps, id+":"+event)
 	return nil
 }
 
