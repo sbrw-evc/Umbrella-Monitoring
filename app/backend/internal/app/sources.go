@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -36,7 +35,6 @@ const (
 	// TestEventTitle is the title of the incident a test event opens.
 	TestEventTitle = "Тестовое событие Umbrella"
 	testEventCI    = "umbrella-test"
-	testWait       = 15 * time.Second
 )
 
 var (
@@ -54,8 +52,20 @@ func init() {
 	)
 }
 
-// QuickPresets are the templates quick connect offers, with the default connector name.
-var QuickPresets = map[string]string{"zabbix": "Zabbix", "alertmanager": "Prometheus Alertmanager", "grafana": "Grafana", "webhook": "Webhook"}
+// Texts quick connect writes into what it creates, in the language of the installation.
+var (
+	quickCredentialName = flow.Text{EN: "Intake token: ", RU: "Токен приёма: "}
+	quickCredentialDesc = flow.Text{EN: "Created by quick connect of a source", RU: "Создан быстрым подключением источника"}
+	quickPublishComment = flow.Text{EN: "Quick connect", RU: "Быстрое подключение"}
+)
+
+// localize picks the text in the language of the installation: Russian unless it is English.
+func localize(t flow.Text, locale string) string {
+	if locale == model.LocaleEN && t.EN != "" || t.RU == "" {
+		return t.EN
+	}
+	return t.RU
+}
 
 type QuickConnectInput struct {
 	Preset string `json:"preset"`
@@ -66,13 +76,23 @@ type QuickConnectInput struct {
 }
 
 // QuickInstructions is what the source needs: the address, the header with the token and a
-// ready piece of configuration (Alertmanager receiver, Grafana contact point, curl).
+// ready piece of configuration (Alertmanager receiver, Grafana contact point, curl), all
+// rendered from the preset's quick connect templates.
 type QuickInstructions struct {
 	Preset      string `json:"preset"`
 	IngestURL   string `json:"ingest_url"`
 	AuthHeader  string `json:"auth_header"`
 	Snippet     string `json:"snippet,omitempty"`
 	SnippetKind string `json:"snippet_kind,omitempty"`
+	// SnippetFile is the file name to download the snippet as; empty means copy only.
+	SnippetFile string `json:"snippet_file,omitempty"`
+}
+
+// QuickAttachment is a file for the source to import (the Zabbix media type).
+type QuickAttachment struct {
+	Name    string `json:"name"`
+	Kind    string `json:"kind,omitempty"`
+	Content string `json:"content"`
 }
 
 type QuickConnectResult struct {
@@ -80,10 +100,12 @@ type QuickConnectResult struct {
 	CredentialID string        `json:"credential_id"`
 	IngestURL    string        `json:"ingest_url"`
 	// Token is shown once: only OpenBao keeps it.
-	Token         string            `json:"token"`
-	Instructions  QuickInstructions `json:"instructions"`
-	MediaTypeYAML string            `json:"mediatype_yaml,omitempty"`
-	MonitoringID  string            `json:"monitoring_id,omitempty"`
+	Token        string            `json:"token"`
+	Instructions QuickInstructions `json:"instructions"`
+	Attachment   *QuickAttachment  `json:"attachment,omitempty"`
+	// MediaTypeYAML is the attachment's content, kept for clients that predate Attachment.
+	MediaTypeYAML string `json:"mediatype_yaml,omitempty"`
+	MonitoringID  string `json:"monitoring_id,omitempty"`
 }
 
 // slugify makes an ingest path out of a name: ASCII letters and digits, the rest dashes.
@@ -141,11 +163,11 @@ func (a *App) baseURL(r *http.Request) string {
 // publishes it. Whatever was created is removed again when a later step fails.
 func (a *App) QuickConnect(ctx context.Context, actor model.User, base string, in QuickConnectInput) (QuickConnectResult, error) {
 	var out QuickConnectResult
-	def, ok := QuickPresets[in.Preset]
-	if !ok {
+	p, ok := presets.Get(in.Preset)
+	if !ok || p.Quick == nil {
 		return out, invalid("unknown_preset", nil)
 	}
-	p, _ := presets.Get(in.Preset)
+	locale := a.settings.Get().DefaultLocale
 	name := strings.Join(strings.Fields(in.Name), " ")
 	if in.MonitoringID != "" {
 		var sys string
@@ -162,11 +184,9 @@ func (a *App) QuickConnect(ctx context.Context, actor model.User, base string, i
 		}
 	}
 	if name == "" {
-		name = def
+		name = localize(p.Quick.Name, locale)
 	}
-	token := rand.Text() + rand.Text()
-	cred, err := a.creds.Create(ctx, actor.Username, CredentialInput{Name: "Токен приёма: " + name, Type: flow.CredBearer,
-		Description: "Создан быстрым подключением источника", Secrets: map[string]string{"token": token}})
+	cred, token, err := a.creds.GenerateBearer(ctx, actor.Username, localize(quickCredentialName, locale)+name, localize(quickCredentialDesc, locale))
 	if err != nil {
 		return out, err
 	}
@@ -189,7 +209,7 @@ func (a *App) QuickConnect(ctx context.Context, actor model.User, base string, i
 		var slug string
 		a.deps.Store.Read(func(d *store.Data) { slug = freeSlug(d, slugify(name, in.Preset)) })
 		view, err = a.connectors.Create(actor, ConnectorInput{Name: name, Slug: slug, Preset: in.Preset, Tags: p.Document.Tags,
-			Description: p.Description.RU}, &p.Document, mapping)
+			Description: localize(p.Description, locale)}, &p.Document, mapping)
 		if !errors.Is(err, ErrSlugTaken) {
 			break
 		}
@@ -198,7 +218,7 @@ func (a *App) QuickConnect(ctx context.Context, actor model.User, base string, i
 		cleanup("")
 		return out, err
 	}
-	view, err = a.connectors.Publish(actor, view.ID, PublishInput{Comment: "Быстрое подключение"})
+	view, err = a.connectors.Publish(actor, view.ID, PublishInput{Comment: localize(quickPublishComment, locale)})
 	if err != nil {
 		cleanup(view.ID)
 		return out, err
@@ -212,41 +232,36 @@ func (a *App) QuickConnect(ctx context.Context, actor model.User, base string, i
 	}
 	url := base + "/api/ingest/" + view.Slug
 	out.Connector, out.CredentialID, out.IngestURL, out.Token = view, cred.ID, url, token
-	out.Instructions = quickInstructions(in.Preset, url, token)
-	if in.Preset == "zabbix" {
-		out.MediaTypeYAML = presets.ZabbixMediaType(url, token)
+	if out.Instructions, out.Attachment, err = quickInstructions(p, url, token); err != nil {
+		// The templates are checked by the preset tests; the connector is ready all the same.
+		slog.Error("quick connect: instructions not rendered", "preset", p.ID, "err", err)
+	}
+	if out.Attachment != nil {
+		out.MediaTypeYAML = out.Attachment.Content
 	}
 	return out, nil
 }
 
-func quickInstructions(preset, url, token string) QuickInstructions {
-	q := QuickInstructions{Preset: preset, IngestURL: url, AuthHeader: "Authorization: Bearer " + token}
-	switch preset {
-	case "alertmanager":
-		q.SnippetKind = "yaml"
-		q.Snippet = fmt.Sprintf(`route:
-  receiver: umbrella
-receivers:
-  - name: umbrella
-    webhook_configs:
-      - url: %q
-        send_resolved: true
-        http_config:
-          authorization:
-            type: Bearer
-            credentials: %q
-`, url, token)
-	case "grafana":
-		q.SnippetKind = "text"
-		q.Snippet = fmt.Sprintf("Integration: Webhook\nURL: %s\nHTTP Method: POST\nAuthorization Header - Scheme: Bearer\nAuthorization Header - Credentials: %s\n", url, token)
-	case "webhook":
-		q.SnippetKind = "shell"
-		q.Snippet = fmt.Sprintf(`curl -X POST %q \
-  -H "Authorization: Bearer %s" -H "Content-Type: application/json" \
-  -d '{"id":"1","host":"db-01","signal":"disk","severity":"critical","status":"firing","title":"Disk is full"}'
-`, url, token)
+// quickInstructions renders the snippet and the attachment of the preset for the connector.
+func quickInstructions(p presets.Preset, url, token string) (QuickInstructions, *QuickAttachment, error) {
+	q := QuickInstructions{Preset: p.ID, IngestURL: url, AuthHeader: "Authorization: Bearer " + token}
+	vars := presets.Vars{URL: url, Token: token}
+	var att *QuickAttachment
+	if f := p.Quick.Snippet; f != nil {
+		text, err := f.Render(vars)
+		if err != nil {
+			return q, nil, err
+		}
+		q.Snippet, q.SnippetKind, q.SnippetFile = text, f.Kind, f.Name
 	}
-	return q
+	if f := p.Quick.Attachment; f != nil {
+		text, err := f.Render(vars)
+		if err != nil {
+			return q, nil, err
+		}
+		att = &QuickAttachment{Name: f.Name, Kind: f.Kind, Content: text}
+	}
+	return q, att, nil
 }
 
 type TestEventInput struct {
@@ -264,29 +279,20 @@ type TestEventResult struct {
 
 // testBody is a delivery in the format of the connector's template that names the item.
 func testBody(preset, nonce, ci string, sample []byte) []byte {
-	var v any
-	switch preset {
-	case "zabbix":
-		v = map[string]string{"event_id": "umbrella-test-" + nonce, "host": ci, "host_group": "Umbrella", "trigger": TestEventTitle,
-			"item_key": "umbrella.test", "severity": "2", "status": "1", "value": ""}
-	case "alertmanager", "grafana":
-		v = map[string]any{"receiver": "umbrella", "status": "firing", "alerts": []any{map[string]any{
-			"status": "firing", "fingerprint": "umbrella-test-" + nonce,
-			"labels":      map[string]string{"alertname": "UmbrellaTest", "instance": ci, "severity": "warning"},
-			"annotations": map[string]string{"summary": TestEventTitle},
-		}}}
-	case "webhook":
-		v = map[string]string{"id": "umbrella-test-" + nonce, "host": ci, "signal": "umbrella_test", "severity": "warning",
-			"status": "firing", "title": TestEventTitle}
-	default:
-		// A connector of its own format: its first sample, which it knows how to read.
-		if len(sample) > 0 {
-			return sample
+	if p, ok := presets.Get(preset); ok {
+		body, ok, err := p.Quick.RenderTestBody(presets.Vars{Nonce: nonce, CI: ci, Title: TestEventTitle})
+		if ok && err == nil {
+			return body
 		}
-		return []byte("{}")
+		if err != nil {
+			slog.Error("test event: body not rendered", "preset", preset, "err", err)
+		}
 	}
-	b, _ := json.Marshal(v)
-	return b
+	// A connector of its own format: its first sample, which it knows how to read.
+	if len(sample) > 0 {
+		return sample
+	}
+	return []byte("{}")
 }
 
 // markTestEvents turns what the connector made of a test request into one test event: the
@@ -361,7 +367,7 @@ func (a *App) TestEvent(ctx context.Context, actor, id string, in TestEventInput
 	a.deps.Store.Write(func(d *store.Data) {
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "connector.test_event", Object: id, Detail: c.Name + ": request " + out.RequestID})
 	})
-	deadline := time.Now().Add(testWait)
+	deadline := time.Now().Add(a.opt.Ingest.TestEventWait)
 	for {
 		err := a.alerts.DB().QueryRow(ctx, "SELECT id FROM alerts WHERE doc->'labels'->>'umbrella_test_id' = $1 ORDER BY seq DESC LIMIT 1", nonce).
 			Scan(&out.IncidentID)

@@ -5,6 +5,14 @@
     "en": "Grafana contact point of type webhook: one record per alert instance, value from valueString.",
     "ru": "Точка контакта Grafana типа webhook: запись на каждый экземпляр алерта, значение из valueString."
   },
+  "quick": {
+    "order": 3,
+    "name": {"en": "Grafana", "ru": "Grafana"},
+    "monitoring_kinds": ["prometheus"],
+    "steps": 2,
+    "snippet": {"kind": "text", "template": "Integration: Webhook\nURL: {{.URL}}\nHTTP Method: POST\nAuthorization Header - Scheme: Bearer\nAuthorization Header - Credentials: {{.Token}}\n"},
+    "test_body": "{\"alerts\":[{\"annotations\":{\"summary\":{{json .Title}}},\"fingerprint\":\"umbrella-test-{{.Nonce}}\",\"labels\":{\"alertname\":\"UmbrellaTest\",\"instance\":{{json .CI}},\"severity\":\"warning\"},\"status\":\"firing\"}],\"receiver\":\"umbrella\",\"status\":\"firing\"}"
+  },
   "document": {
     "format": "umbrella.connector",
     "format_version": 1,

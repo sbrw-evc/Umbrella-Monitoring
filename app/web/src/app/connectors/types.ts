@@ -120,6 +120,9 @@ export type Preset = {
   tags: string[]
   credentials: Slot[]
   samples: number
+  // quick is set for the presets quick connect offers: its order, the default connector name,
+  // the monitoring system kinds it is the alert intake for and how many steps the source needs.
+  quick?: { order: number; name: Text; monitoring_kinds: string[]; steps: number }
 }
 
 export type Slot = { slot: string; node: string; param: string; types: string[]; name?: string }
@@ -283,13 +286,9 @@ export type Credential = {
   updated_by: string
 }
 
-// The plain fields and the secret fields of every credential type, as the server expects them.
-export const CREDENTIAL_KINDS: Record<CredentialType, { fields: string[]; secrets: string[] }> = {
-  bearer: { fields: [], secrets: ['token'] },
-  basic: { fields: ['username'], secrets: ['password'] },
-  header: { fields: ['header'], secrets: ['value'] },
-  hmac: { fields: [], secrets: ['secret'] },
-}
+// CredentialKind: the plain fields and the secret fields of a credential type, as the server
+// describes them at /api/credentials/kinds.
+export type CredentialKind = { type: CredentialType; fields: string[]; secrets: string[] }
 
 export const CATEGORIES: Category[] = ['trigger', 'parse', 'transform', 'route', 'output', 'config']
 

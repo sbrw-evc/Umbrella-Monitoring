@@ -62,6 +62,7 @@ func (a *App) registerConnectors(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/connectors/{id}/stats", a.authed(a.can(view, a.connectorStats)))
 
 	mux.HandleFunc("GET /api/credentials", a.authed(a.can("credentials:view", a.listCredentials)))
+	mux.HandleFunc("GET /api/credentials/kinds", a.authed(a.can("credentials:view", a.listCredentialKinds)))
 	mux.HandleFunc("POST /api/credentials", a.authed(a.can("credentials:edit", a.createCredential)))
 	mux.HandleFunc("GET /api/credentials/{id}", a.authed(a.can("credentials:view", a.getCredential)))
 	mux.HandleFunc("PUT /api/credentials/{id}", a.authed(a.can("credentials:edit", a.updateCredential)))
@@ -213,13 +214,15 @@ type presetView struct {
 	Tags        []string              `json:"tags"`
 	Credentials []flow.CredentialSlot `json:"credentials"`
 	Samples     int                   `json:"samples"`
+	// Quick is set for the presets quick connect offers.
+	Quick *presets.QuickView `json:"quick,omitempty"`
 }
 
 func (a *App) listPresets(w http.ResponseWriter, r *http.Request) {
 	out := []presetView{}
 	for _, p := range presets.All() {
 		out = append(out, presetView{ID: p.ID, Title: p.Title, Description: p.Description, Name: p.Document.Name, Tags: p.Document.Tags,
-			Credentials: p.Document.Credentials, Samples: len(p.Document.Samples)})
+			Credentials: p.Document.Credentials, Samples: len(p.Document.Samples), Quick: p.Quick.View()})
 	}
 	httpx.JSON(w, http.StatusOK, out)
 }

@@ -127,6 +127,15 @@ API чек-листа: `GET /api/onboarding` (любой вошедший пол
 | `UMBRELLA_SETUP_TOKEN` | код установки для мастера вместо случайного | — |
 | `UMBRELLA_SECURE_COOKIES` | cookie с флагом Secure (за TLS-прокси) | `false` |
 | `UMBRELLA_TRUSTED_PROXIES` | обратные прокси (CIDR или IP через запятую), чьим `X-Forwarded-For` / `X-Real-IP` верить при определении адреса клиента (разрешённые сети коннекторов и ТВ-панелей, ограничение попыток входа, журнал аудита, архив запросов); пусто — адрес берётся только из соединения | — |
+| `UMBRELLA_INGEST_WORKERS` | сколько обработчиков разбирают очередь приёма коннекторов | `2` |
+| `UMBRELLA_INGEST_BATCH_SIZE` | сколько запросов обработчик берёт из очереди за одну транзакцию | `50` |
+| `UMBRELLA_INGEST_MAX_ATTEMPTS` | сколько раз пробовать запрос, который не удалось сохранить по временной причине | `3` |
+| `UMBRELLA_INGEST_PROCESS_TIMEOUT` | предельное время обработки одного запроса коннектором | `30s` |
+| `UMBRELLA_INGEST_TEST_WAIT` | сколько тестовое событие ждёт появления инцидента, прежде чем ответить | `15s` |
+| `UMBRELLA_INGEST_KEEP_REQUESTS` | срок хранения архива запросов коннекторов (секции удаляются целыми сутками) | `168h` |
+| `UMBRELLA_INGEST_KEEP_FAILURES` | срок хранения ошибок обработки | `720h` |
+| `UMBRELLA_INGEST_KEEP_STATS` | срок хранения статистики коннекторов | `720h` |
+| `UMBRELLA_INGEST_KEEP_IDEMPOTENCY` | срок хранения ключей `Idempotency-Key` | `24h` |
 
 Подключения к OpenBao и PostgreSQL задаются мастером и страницами «Настройки → OpenBao» и «Настройки → PostgreSQL», а PagerDuty, почта, Telegram, Grafana, NetBox, системы мониторинга, LDAP / AD и Entra ID — в интерфейсе или через API, а не переменными окружения.
 

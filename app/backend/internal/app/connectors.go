@@ -16,6 +16,7 @@ import (
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/flow"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/presets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
@@ -322,22 +323,9 @@ func slugTaken(d *store.Data, slug, except string) bool {
 	return false
 }
 
-// StarterGraph is a new connector's draft: webhook → JSON → event mapping → event.
-func StarterGraph() flow.Graph {
-	return flow.Graph{
-		Nodes: []flow.Node{
-			{ID: "webhook", Type: "trigger.webhook", TypeVersion: 1, Params: map[string]any{}, Position: flow.Position{X: 0, Y: 80}},
-			{ID: "parse", Type: "parse.json", TypeVersion: 1, Params: map[string]any{}, Position: flow.Position{X: 260, Y: 80}},
-			{ID: "map", Type: "map.event", TypeVersion: 1, Params: map[string]any{"title": "${title}", "ci": "${host}"}, Position: flow.Position{X: 520, Y: 80}},
-			{ID: "event", Type: "out.event", TypeVersion: 1, Params: map[string]any{}, Position: flow.Position{X: 780, Y: 80}},
-		},
-		Edges: []flow.Edge{
-			{ID: "e1", Source: "webhook", SourceOutput: flow.OutMain, Target: "parse"},
-			{ID: "e2", Source: "parse", SourceOutput: flow.OutMain, Target: "map"},
-			{ID: "e3", Source: "map", SourceOutput: flow.OutMain, Target: "event"},
-		},
-	}
-}
+// StarterGraph is a new connector's draft: webhook → JSON → event mapping → event, the
+// starter graph of the presets.
+func StarterGraph() flow.Graph { return presets.StarterGraph() }
 
 // Create makes a connector from a document (a preset or an import) or from the starter graph.
 func (s *ConnectorsService) Create(actor model.User, in ConnectorInput, doc *flow.Document, mapping map[string]string) (ConnectorView, error) {

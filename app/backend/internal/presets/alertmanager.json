@@ -5,6 +5,14 @@
     "en": "Alertmanager webhook receiver: one record per alert, severity from the severity label, cluster from the common labels.",
     "ru": "Приёмник webhook Alertmanager: запись на каждый алерт, severity из метки severity, кластер из общих меток."
   },
+  "quick": {
+    "order": 2,
+    "name": {"en": "Prometheus Alertmanager", "ru": "Prometheus Alertmanager"},
+    "monitoring_kinds": ["prometheus"],
+    "steps": 2,
+    "snippet": {"kind": "yaml", "name": "alertmanager-umbrella.yml", "template_file": "alertmanager-receiver.yml.tmpl"},
+    "test_body": "{\"alerts\":[{\"annotations\":{\"summary\":{{json .Title}}},\"fingerprint\":\"umbrella-test-{{.Nonce}}\",\"labels\":{\"alertname\":\"UmbrellaTest\",\"instance\":{{json .CI}},\"severity\":\"warning\"},\"status\":\"firing\"}],\"receiver\":\"umbrella\",\"status\":\"firing\"}"
+  },
   "document": {
     "format": "umbrella.connector",
     "format_version": 1,
