@@ -76,6 +76,8 @@ POST /api/ingest/{slug}
 
 Шаблоны: Prometheus Alertmanager, Grafana Alerting, Zabbix (webhook), универсальный webhook — со встроенными образцами.
 
+Шаблон — файл `backend/internal/presets/*.json` в формате выгрузки коннектора. Необязательный объект `quick` делает его доступным быстрому подключению: порядок в диалоге (`order`), название коннектора по умолчанию (`name`, en/ru), виды систем мониторинга (`monitoring_kinds`), число шагов настройки источника (`steps`, их текст — в строках интерфейса `src.steps.<id>.<n>`), фрагмент настройки (`snippet`) и файл для импорта (`attachment`) — шаблоны Go `text/template` с `{{.URL}}` и `{{.Token}}` (функции `quote`, `yaml`, `json`) — и тело тестового события (`test_body`, с `{{.Nonce}}`, `{{.CI}}`, `{{.Title}}`). Шаблон с `starter` задаёт граф нового коннектора без шаблона.
+
 Разрешения страницы `connectors`: `view`, `edit` (черновики, образцы, тесты), `publish` (публикация, остановка, повторная обработка), `payload` (тела запросов, образцы, ошибочные записи).
 
 ## API
@@ -87,6 +89,7 @@ POST /api/ingest/{slug}
 | `POST /api/connectors/quick` | быстрое подключение: токен, коннектор из шаблона, публикация |
 | `POST /api/connectors/{id}/test-event` | тестовое событие через опубликованную версию |
 | `GET /api/connectors/node-types`, `/presets`, `/credentials` | реестр узлов, шаблоны, выбор учётных данных |
+| `GET /api/credentials/kinds` | типы учётных данных с их полями и секретами |
 | `POST /api/connectors/preview` | предпросмотр шаблона, CEL или пути |
 | `POST /api/connectors/import/check`, `/import` | разбор выгрузки и импорт |
 | `GET`, `PUT`, `DELETE /api/connectors/{id}` | коннектор |
