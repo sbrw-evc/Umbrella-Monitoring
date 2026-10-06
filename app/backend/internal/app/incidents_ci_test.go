@@ -127,6 +127,7 @@ func TestIncidentCreateAndBindCI(t *testing.T) {
 		t.Errorf("bound = %v", created.Bound)
 	}
 
+	f.expect(duty, http.MethodPut, "/api/cis/CI-902/aliases", map[string]any{"aliases": []string{"db-01.old"}}, http.StatusForbidden, nil)
 	// A name taken by another item cannot become an alias.
 	f.expect(f.admin, http.MethodPut, "/api/cis/CI-902/aliases", map[string]any{"aliases": []string{"WEB-01"}}, http.StatusConflict, nil)
 
