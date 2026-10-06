@@ -75,6 +75,9 @@ const own: Dict = {
     'usr.delete.title': 'Delete {name}?',
     'usr.delete.text': 'The account {login} and its password are removed permanently and its sessions end.',
     'usr.delete.ldap': 'A directory account is created again if the person signs in with LDAP / AD.',
+    'usr.delete.netbox':
+      'This account was made for a NetBox contact. The next NetBox synchronization creates it again while the contact is responsible for items and «Create accounts for contacts» is on (NetBox settings). Turn that off or remove the contact in NetBox.',
+    'usr.delete.netbox.off': 'This account was made for a NetBox contact. NetBox does not create accounts now, so it will not come back.',
     'usr.delete.entra': 'An Entra ID account is created again if the person signs in with Microsoft.',
     'usr.delete.confirm': 'Delete user',
     'usr.back': 'Back',
@@ -166,6 +169,9 @@ const own: Dict = {
     'usr.delete.title': 'Удалить {name}?',
     'usr.delete.text': 'Учётная запись {login} и её пароль будут удалены навсегда, сеансы завершатся.',
     'usr.delete.ldap': 'Учётная запись каталога появится снова, если человек войдёт через LDAP / AD.',
+    'usr.delete.netbox':
+      'Эта учётная запись создана для контакта NetBox. Следующая синхронизация NetBox создаст её снова, пока контакт отвечает за объекты и включено «Создавать учётные записи для контактов» (настройки NetBox). Выключите это или уберите контакт в NetBox.',
+    'usr.delete.netbox.off': 'Эта учётная запись создана для контакта NetBox. Сейчас NetBox не создаёт учётные записи, поэтому она не вернётся.',
     'usr.delete.entra': 'Учётная запись Entra ID появится снова, если человек войдёт через Microsoft.',
     'usr.delete.confirm': 'Удалить пользователя',
     'usr.back': 'Назад',

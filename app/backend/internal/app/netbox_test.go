@@ -73,7 +73,7 @@ func newNetBoxFixture(t *testing.T) netboxFixture {
 func (f netboxFixture) connect(extra map[string]any) {
 	f.h.t.Helper()
 	cfg := map[string]any{"enabled": true, "url": f.nb.URL + "/", "sync_minutes": 60, "import_devices": true, "import_vms": true,
-		"import_services": true, "sync_contacts": true, "sync_directory": true}
+		"import_services": true, "sync_contacts": true, "sync_directory": true, "create_users": true}
 	for k, v := range extra {
 		cfg[k] = v
 	}

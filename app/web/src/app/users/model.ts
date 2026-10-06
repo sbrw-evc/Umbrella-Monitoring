@@ -10,6 +10,8 @@ export type ManagedUser = User & {
   disabled: boolean
   created_at: string
   password_changed_at?: string
+  /** A NetBox contact account that the next NetBox synchronization creates again. */
+  netbox_recreates?: boolean
 }
 
 export type RoleRef = { id: string; name: string; system: boolean }

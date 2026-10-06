@@ -133,7 +133,10 @@ type Settings struct {
 	// NetBox when no group mapping gives one. Empty or unknown: the system role "user".
 	NewUserRole string `json:"new_user_role"`
 	// PresetRolesSeeded: the preset roles were created once and are not created again.
-	PresetRolesSeeded bool      `json:"-"`
-	SetupAt           time.Time `json:"setup_at"`
-	SetupBy           string    `json:"setup_by"`
+	PresetRolesSeeded bool `json:"-"`
+	// NetBoxUsersDecided: NetBox settings saved before «create accounts for contacts» existed were
+	// given it on (their behaviour), later ones choose it.
+	NetBoxUsersDecided bool      `json:"-"`
+	SetupAt            time.Time `json:"setup_at"`
+	SetupBy            string    `json:"setup_by"`
 }

@@ -188,3 +188,58 @@ func TestNoAccessBannerNamesAdministrators(t *testing.T) {
 		t.Fatal("administrators get no banner")
 	}
 }
+
+// Accounts for NetBox contacts: off for new settings (contacts link to existing accounts by
+// e-mail only), on for settings saved before the switch existed; created accounts get the role
+// for new users.
+func TestNetBoxContactAccountsSwitch(t *testing.T) {
+	f := newNetBoxFixture(t)
+	f.h.st.Write(func(d *store.Data) { d.EnsurePresetRoles(model.LocaleEN, time.Now()) })
+	f.connect(map[string]any{"create_users": false})
+	view := f.sync()
+	if s := view.Sync.Stats; s.UsersCreated != 0 || s.UsersSkipped != 1 || s.UsersLinked != 1 || view.Users != 0 {
+		t.Fatalf("switch off = %+v (users %d)", s, view.Users)
+	}
+	if len(f.byName("srv-db-01").Owners) != 1 {
+		t.Fatal("the contact with an account is still a responsible person")
+	}
+	f.connect(map[string]any{"create_users": true})
+	if s := f.sync().Sync.Stats; s.UsersCreated != 1 {
+		t.Fatalf("switch on = %+v", s)
+	}
+	if u := f.h.named("ivan@example.org"); u.Source != model.SourceNetBox || u.Role != model.RoleViewer {
+		t.Fatalf("contact account = %+v", u)
+	}
+}
+
+func TestNetBoxContactAccountsKeptForExistingSettings(t *testing.T) {
+	_, vault := secretstest.New(t)
+	st := store.New()
+	st.Write(func(d *store.Data) { d.Settings.NetBox.URL, d.Settings.NetBox.SyncContacts = "https://netbox.example.org", true })
+	if err := app.Migrate(context.Background(), st, vault); err != nil {
+		t.Fatal(err)
+	}
+	st.Read(func(d *store.Data) {
+		if !d.Settings.NetBox.CreateUsers {
+			t.Fatal("an existing NetBox connection keeps creating accounts")
+		}
+	})
+	st.Write(func(d *store.Data) { d.Settings.NetBox.CreateUsers = false })
+	if err := app.Migrate(context.Background(), st, vault); err != nil {
+		t.Fatal(err)
+	}
+	st.Read(func(d *store.Data) {
+		if d.Settings.NetBox.CreateUsers {
+			t.Fatal("a choice made later is not overridden")
+		}
+	})
+	fresh := store.New()
+	if err := app.Migrate(context.Background(), fresh, vault); err != nil {
+		t.Fatal(err)
+	}
+	fresh.Read(func(d *store.Data) {
+		if d.Settings.NetBox.CreateUsers || !d.Settings.NetBoxUsersDecided {
+			t.Fatal("a new installation starts with the switch off")
+		}
+	})
+}

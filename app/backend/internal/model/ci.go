@@ -97,15 +97,17 @@ func (c *ConfigItem) Imported() bool { return c.Source == SourceNetBox }
 
 // SyncStats counts what one NetBox synchronization changed.
 type SyncStats struct {
-	Objects          int    `json:"objects"`
-	Created          int    `json:"created"`
-	Updated          int    `json:"updated"`
-	Deleted          int    `json:"deleted"`
-	Unlinked         int    `json:"unlinked"`
-	Contacts         int    `json:"contacts"`
-	UsersCreated     int    `json:"users_created"`
-	UsersUpdated     int    `json:"users_updated"`
-	UsersLinked      int    `json:"users_linked"`
+	Objects      int `json:"objects"`
+	Created      int `json:"created"`
+	Updated      int `json:"updated"`
+	Deleted      int `json:"deleted"`
+	Unlinked     int `json:"unlinked"`
+	Contacts     int `json:"contacts"`
+	UsersCreated int `json:"users_created"`
+	UsersUpdated int `json:"users_updated"`
+	UsersLinked  int `json:"users_linked"`
+	// UsersSkipped: contacts without an account that were not created (CreateUsers is off).
+	UsersSkipped     int    `json:"users_skipped"`
 	DirectoryChecked bool   `json:"directory_checked"`
 	DirectoryMatched int    `json:"directory_matched"`
 	DirectoryMissing int    `json:"directory_missing"`

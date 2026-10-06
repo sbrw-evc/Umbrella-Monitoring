@@ -212,6 +212,7 @@ func (s *NetBoxService) Save(ctx context.Context, actor string, in NetBoxRequest
 	}
 	s.st.Write(func(d *store.Data) {
 		d.Settings.NetBox = cfg
+		d.Settings.NetBoxUsersDecided = true
 		note := ""
 		if strings.TrimSpace(in.Token) != "" {
 			note = ", token replaced"
@@ -399,7 +400,7 @@ func applyInventory(d *store.Data, cfg netbox.Config, inv netbox.Inventory, now 
 	stats := model.SyncStats{Objects: len(inv.Objects)}
 	users := map[int]string{}
 	if cfg.SyncContacts {
-		users = syncContacts(d, inv, now, &stats)
+		users = syncContacts(d, cfg, inv, now, &stats)
 	}
 	owners := map[string][]model.CIOwner{}
 	for _, a := range inv.Assignments {
@@ -505,7 +506,7 @@ func normalOwners(in []model.CIOwner) []model.CIOwner {
 // syncContacts finds or creates a user account for every contact assigned to an object and
 // returns the account of each contact. Accounts made for contacts follow the contact; accounts
 // found by e-mail keep their own source and data.
-func syncContacts(d *store.Data, inv netbox.Inventory, now time.Time, stats *model.SyncStats) map[int]string {
+func syncContacts(d *store.Data, cfg netbox.Config, inv netbox.Inventory, now time.Time, stats *model.SyncStats) map[int]string {
 	assigned := map[int]bool{}
 	for _, a := range inv.Assignments {
 		assigned[a.ContactID] = true
@@ -527,6 +528,10 @@ func syncContacts(d *store.Data, inv netbox.Inventory, now time.Time, stats *mod
 			if u = userByEmail(d, email); u != nil {
 				stats.UsersLinked++
 			}
+		}
+		if u == nil && !cfg.CreateUsers {
+			stats.UsersSkipped++
+			continue
 		}
 		if u == nil {
 			u = &model.User{ID: d.NextID("USR"), Username: contactUsername(d, c.ID, email), Source: model.SourceNetBox,

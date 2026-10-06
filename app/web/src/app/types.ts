@@ -12,7 +12,7 @@ export type User = ProfileFields & {
   id: string
   username: string
   name: string
-  source: 'local' | 'ldap' | 'entra'
+  source: 'local' | 'ldap' | 'entra' | 'netbox'
   role: string
   role_name?: string
   permissions?: string[]
