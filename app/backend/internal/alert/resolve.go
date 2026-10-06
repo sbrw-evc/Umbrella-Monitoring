@@ -122,19 +122,23 @@ func firstNonEmpty(v ...string) string {
 // suppressed, and one whose mark was taken off is sent on. An alert is not moved onto an item
 // another active alert of the same signal already has.
 func (e *Engine) Reresolve(ctx context.Context) error {
-	rows, err := e.db.Query(ctx, "SELECT id FROM alerts WHERE status <> 'resolved' ORDER BY seq")
+	rows, err := e.db.Query(ctx, "SELECT doc FROM alerts WHERE status <> 'resolved' ORDER BY seq")
 	if err != nil {
 		return err
 	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	docs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (*Alert, error) { return scanAlert(row) })
 	if err != nil {
 		return err
-	}
-	if len(ids) == 0 {
-		return nil
 	}
 	w := e.world()
 	now := e.now()
+	// Only the alerts whose item or exclusion would change are locked and written.
+	var ids []string
+	for _, a := range docs {
+		if a != nil && w.resolutionChanged(a) {
+			ids = append(ids, a.ID)
+		}
+	}
 	for _, id := range ids {
 		var cmd *Command
 		err := pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
@@ -161,6 +165,16 @@ func (e *Engine) Reresolve(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// resolutionChanged: the item or the exclusion of the alert is not what its events resolve to now.
+func (w *world) resolutionChanged(a *Alert) bool {
+	ci, excluded := w.resolveCI(firstNonEmpty(a.EventCI, a.CIName), a.Labels)
+	id := ""
+	if ci != nil {
+		id = ci.ID
+	}
+	return id != a.CIID || excluded != a.Excluded
 }
 
 func (e *Engine) reresolve(ctx context.Context, tx pgx.Tx, c *change, w *world, now time.Time) (*Command, error) {
