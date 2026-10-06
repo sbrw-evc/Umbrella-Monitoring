@@ -54,6 +54,8 @@ export type Incident = {
   acked_at?: string
   suppressed: boolean
   maintenance_id?: string
+  // excluded: the host is marked «Не является КЕ» on the monitoring systems page.
+  excluded?: boolean
   route: Route
   pd: PD
   fallback: boolean

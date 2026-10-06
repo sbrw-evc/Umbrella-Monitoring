@@ -278,7 +278,7 @@ function SystemCard({
             <p>{t('sys.metrics.text')}</p>
             <p className="muted">{t('sys.metrics.rules', { n: s.rules })}</p>
             <div className="row">
-              <Link to={`/rules?source=${encodeURIComponent(s.id)}`}>{t('sys.metrics.open')}</Link>
+              <Link to="/rules">{t('sys.metrics.open')}</Link>
             </div>
           </>
         )}

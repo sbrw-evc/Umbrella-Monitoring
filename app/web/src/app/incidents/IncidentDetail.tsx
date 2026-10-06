@@ -171,7 +171,8 @@ function Main({ a, onOpen }: { a: Incident; onOpen: (id: string) => void }) {
   if (a.pd.route) rows.push([t('inc.field.pdroute'), a.pd.route])
   if (a.pd.error) rows.push([t('inc.field.pderror'), <span key="e" className="inc-warn">{a.pd.error}</span>])
   if (a.fallback) rows.push([t('inc.field.fallback'), at(a.fallback_at)])
-  if (a.suppressed) rows.push([t('inc.field.maintenance'), a.maintenance_id ?? ''])
+  if (a.excluded) rows.push([t('inc.field.excluded'), t('inc.excluded.text')])
+  else if (a.suppressed) rows.push([t('inc.field.maintenance'), a.maintenance_id ?? ''])
   if (a.related_id)
     rows.push([
       t('inc.field.related'),
