@@ -83,7 +83,28 @@ export type Page = { alerts: Incident[]; counts: Counts; more: boolean }
 
 export type Entry = { id: number; at: string; kind: string; code: string; args?: Record<string, string>; author?: string }
 
-export type Detail = { alert: Incident; timeline: Entry[]; grafana_url?: string; connectors: Record<string, string> }
+export type CardCI = { id: string; name: string; kind: string; imported: boolean; netbox_url?: string; aliases: string[] }
+
+export type CardService = { id: string; name: string; links: { title: string; url: string }[] }
+
+export type CardMaintenance = { id: string; title: string; start: string; end: string }
+
+export type Detail = {
+  alert: Incident
+  timeline: Entry[]
+  grafana_url?: string
+  connectors: Record<string, string>
+  // What the catalog has on the item, the services and the maintenance window of the incident.
+  ci?: CardCI
+  services?: CardService[]
+  maintenance?: CardMaintenance
+}
+
+// firing counts the sources of an incident that still fire: resolving it by hand while they do
+// opens it again when the next event comes within the reopen window.
+export function firing(a: Incident) {
+  return Object.values(a.sources).filter((s) => s.status === 'firing').length
+}
 
 export type Flag = '' | 'pd' | 'fallback' | 'suppressed'
 

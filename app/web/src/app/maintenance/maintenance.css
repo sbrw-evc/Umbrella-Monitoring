@@ -190,3 +190,8 @@
 .mw-tag button:hover {
   color: var(--text);
 }
+
+/* The window an incident card links to. */
+.mw-table tr.mw-shown td {
+  background: var(--accent-soft);
+}

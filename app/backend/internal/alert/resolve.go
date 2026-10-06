@@ -187,6 +187,10 @@ func (e *Engine) reresolve(ctx context.Context, tx pgx.Tx, c *change, w *world, 
 		if err != nil {
 			return nil, err
 		}
+		if other != nil && other.ID != a.ID && ci != nil {
+			// The item already has an alert of this signal: this one joins it.
+			return e.mergeInto(ctx, tx, c, other, ci.Name, "", now)
+		}
 		if other == nil || other.ID == a.ID {
 			a.DedupKey = key
 			if a.EventCI == "" {

@@ -33,7 +33,7 @@ func EventKeys(v string) []string {
 }
 
 // CIKeys are the names a configuration item is known by: its name, the short host name, its
-// IP addresses and the DNS name the domain controller has for it. Events and the hosts of
+// IP addresses, its aliases and the DNS name the domain controller has for it. Events and the hosts of
 // monitoring systems are matched against them with EventKeys.
 func CIKeys(ci *model.ConfigItem) []string {
 	keys := []string{ci.Name}
@@ -43,6 +43,7 @@ func CIKeys(ci *model.ConfigItem) []string {
 		}
 	}
 	keys = append(keys, ci.IPs...)
+	keys = append(keys, ci.Aliases...)
 	if ci.Directory != nil && ci.Directory.DNSName != "" {
 		keys = append(keys, ci.Directory.DNSName)
 	}

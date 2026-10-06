@@ -197,3 +197,35 @@ func TestTestEventNotSentAndExpires(t *testing.T) {
 		t.Errorf("nothing to PagerDuty: %+v", cmds)
 	}
 }
+
+// A host linked to an item that already has an alert of the same signal joins that alert
+// instead of waiting outside the catalog forever: two active alerts cannot share a key.
+func TestLinkMergesIntoExistingAlert(t *testing.T) {
+	ctx := context.Background()
+	e, st, _, _ := setup(t)
+	monitored(st, map[string]string{})
+	if err := e.Ingest(ctx, []alert.Incoming{ev("CON-1", "k1", "app-01", "cpu", "error", "firing")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Ingest(ctx, []alert.Incoming{ev("CON-2", "k2", "zbx-app", "cpu", "critical", "firing")}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(active(t, e)); n != 2 {
+		t.Fatalf("two alerts before linking, got %d", n)
+	}
+	setLink(st, "10103", "CI-2")
+	if err := e.Reresolve(ctx); err != nil {
+		t.Fatal(err)
+	}
+	a := one(t, e)
+	if a.CIID != "CI-2" || len(a.Sources) != 2 || a.Severity != "critical" {
+		t.Fatalf("the alert of the item took the other one over: %+v", a)
+	}
+	// Nothing is left to move: a second pass changes nothing.
+	if err := e.Reresolve(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if b := one(t, e); b.ID != a.ID {
+		t.Fatalf("stable after a second pass: %+v", b)
+	}
+}

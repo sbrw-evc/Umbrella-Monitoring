@@ -969,6 +969,107 @@ func (e *Engine) Reroute(ctx context.Context) error {
 	return nil
 }
 
+// mergeInto folds an alert into another active alert of the same item and signal: the sources
+// move there and the alert is resolved. Two active alerts may not share a dedup key, so an
+// alert that waited for its item (or moves to another item) joins the alert the item has.
+func (e *Engine) mergeInto(ctx context.Context, tx pgx.Tx, c *change, other *Alert, ciName, actor string, now time.Time) (*Command, error) {
+	a := c.a
+	oc := &change{a: other}
+	for k, src := range a.Sources {
+		if _, ok := other.Sources[k]; !ok {
+			other.Sources[k] = src
+		}
+	}
+	other.Count += a.Count
+	if a.FirstSeen.Before(other.FirstSeen) {
+		other.FirstSeen = a.FirstSeen
+	}
+	if a.LastSeen.After(other.LastSeen) {
+		other.LastSeen = a.LastSeen
+	}
+	other.Severity = firingSeverity(other, other.Severity)
+	oc.log(now, KindRoute, "merged_from", map[string]string{"alert": a.ID, "ci": ciName}, actor)
+	if err := oc.save(ctx, tx); err != nil {
+		return nil, err
+	}
+	c.log(now, KindRoute, "merged_into", map[string]string{"alert": other.ID, "ci": ciName}, actor)
+	e.resolve(c, now, "merged", actor)
+	return e.pdCmd(a, PDResolve, now), nil
+}
+
+// BindUnknown binds the active alerts whose item was not in the catalog to the item their
+// event names now resolve to (an item was created, or got the name as an alias), routes them
+// and returns the IDs of the alerts bound. An alert whose item and signal already have another
+// active alert is merged into it: its sources move there and it is resolved.
+func (e *Engine) BindUnknown(ctx context.Context, actor string) ([]string, error) {
+	w := e.world()
+	now := e.now()
+	bound := []string{}
+	var cmds []Command
+	err := pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(lockKey)); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, "SELECT id FROM alerts WHERE status <> 'resolved' AND ci_id = '' ORDER BY seq")
+		if err != nil {
+			return err
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			a, err := lockByID(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if a == nil || !Active(a.Status) || a.CIID != "" {
+				continue
+			}
+			name := firstNonEmpty(a.EventCI, a.CIName)
+			ci, excluded := w.resolveCI(name, a.Labels)
+			if ci == nil || excluded {
+				continue
+			}
+			key := dedupKey(ci, name, a.Signal)
+			other, err := activeByKey(ctx, tx, key)
+			if err != nil {
+				return err
+			}
+			c := &change{a: a}
+			if other != nil {
+				cmd, err := e.mergeInto(ctx, tx, c, other, ci.Name, actor, now)
+				if err != nil {
+					return err
+				}
+				if cmd != nil {
+					cmds = append(cmds, *cmd)
+				}
+			} else {
+				a.DedupKey = key
+				e.bind(c, w, ci, now)
+				if a.RelatedID == "" {
+					if err := e.link(ctx, tx, c, now); err != nil {
+						return err
+					}
+				}
+			}
+			if err := c.save(ctx, tx); err != nil {
+				return err
+			}
+			bound = append(bound, a.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range cmds {
+		e.pd.Send(c)
+	}
+	return bound, nil
+}
+
 func sameRoute(a, b Route) bool {
 	if a.Via != b.Via || len(a.Services) != len(b.Services) || len(a.People) != len(b.People) || len(a.Owners) != len(b.Owners) {
 		return false
@@ -1095,8 +1196,8 @@ func (e *Engine) Get(ctx context.Context, id string) (Alert, []Entry, error) {
 	return get(ctx, e.db, id)
 }
 
-// Run ticks every 15 seconds until ctx ends. When the catalog changed, the active alerts are
-// routed again.
+// Run ticks every 15 seconds until ctx ends. When the catalog changed, the alerts that waited
+// for an item are bound to it and the active alerts are routed again.
 func (e *Engine) Run(ctx context.Context) {
 	t := time.NewTicker(15 * time.Second)
 	defer t.Stop()

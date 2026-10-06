@@ -255,6 +255,68 @@ func TestUnknownItemIsBoundLater(t *testing.T) {
 	}
 }
 
+func TestBindUnknownNow(t *testing.T) {
+	ctx := context.Background()
+	e, st, rec, _ := setup(t)
+	e.Ingest(ctx, []alert.Incoming{
+		ev("CON-1", "a", "edge-07:9100", "ping", "critical", "firing"),
+		ev("CON-1", "b", "edge-07:9100", "disk", "warning", "firing"),
+		ev("CON-1", "c", "other-host", "ping", "critical", "firing"),
+	})
+	rec.take()
+	if bound, err := e.BindUnknown(ctx, "admin"); err != nil || len(bound) != 0 {
+		t.Fatalf("nothing to bind yet: %v %v", bound, err)
+	}
+
+	// The event name becomes an alias of an item already in a service: both alerts of the name
+	// are bound and routed at once, without waiting for another event.
+	st.Write(func(d *store.Data) { d.ConfigItems["CI-2"].Aliases = []string{"edge-07:9100"} })
+	bound, err := e.BindUnknown(ctx, "admin")
+	if err != nil || len(bound) != 2 {
+		t.Fatalf("bound = %v, %v", bound, err)
+	}
+	p, _ := e.List(ctx, alert.Filter{Status: "active", CIID: "CI-2"})
+	if len(p.Alerts) != 2 || p.Alerts[0].Route.Team == nil || p.Alerts[0].Route.Team.ID != "T-2" || p.Alerts[0].CIName != "app-01" {
+		t.Fatalf("bound alerts = %+v", p.Alerts)
+	}
+	_, entries, _ := e.Get(ctx, p.Alerts[0].ID)
+	codes := map[string]int{}
+	for _, en := range entries {
+		codes[en.Code]++
+	}
+	if codes["ci_bound"] != 1 || codes["routed"] != 1 {
+		t.Errorf("timeline = %v", codes)
+	}
+
+	// Later events under the alias fold into the same alert.
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "edge-07:9100", "ping", "critical", "firing")})
+	if p2, _ := e.List(ctx, alert.Filter{Status: "active", CIID: "CI-2"}); len(p2.Alerts) != 2 {
+		t.Errorf("future events match the alias: %+v", p2.Alerts)
+	}
+	if list := active(t, e); len(list) != 3 {
+		t.Errorf("no new alert: %d", len(list))
+	}
+
+	// An alert of a name that turns out to be an item that already has an alert of the signal
+	// is merged into it.
+	e.Ingest(ctx, []alert.Incoming{ev("CON-2", "x", "lonely", "ping", "error", "firing")})
+	rec.take()
+	st.Write(func(d *store.Data) { d.ConfigItems["CI-3"].Aliases = []string{"other-host"} })
+	if bound, err = e.BindUnknown(ctx, ""); err != nil || len(bound) != 1 {
+		t.Fatalf("merge = %v %v", bound, err)
+	}
+	p, _ = e.List(ctx, alert.Filter{Status: "active", CIID: "CI-3"})
+	if len(p.Alerts) != 1 || len(p.Alerts[0].Sources) != 2 || p.Alerts[0].Severity != "critical" {
+		t.Fatalf("merged = %+v", p.Alerts)
+	}
+	if list := active(t, e); len(list) != 3 {
+		t.Errorf("the merged alert is resolved: %d", len(list))
+	}
+	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDResolve {
+		t.Errorf("the merged alert is resolved in PagerDuty: %+v", cmds)
+	}
+}
+
 func TestActionsAndPagerDuty(t *testing.T) {
 	ctx := context.Background()
 	e, _, rec, c := setup(t)
