@@ -52,10 +52,16 @@ type RulesView struct {
 	Sources   []SourceView `json:"sources"`
 	Templates []model.Rule `json:"templates"`
 	Ops       []string     `json:"ops"`
+	// Defaults, Limits, Severities and Methods describe the form of a rule.
+	Defaults   rules.Defaults   `json:"defaults"`
+	Limits     rules.Limits     `json:"limits"`
+	Severities []model.Severity `json:"severities"`
+	Methods    []string         `json:"methods"`
 }
 
 func (s *RulesService) View() RulesView {
-	out := RulesView{Rules: []RuleView{}, Sources: []SourceView{}, Templates: rules.Templates(), Ops: rules.Ops}
+	out := RulesView{Rules: []RuleView{}, Sources: []SourceView{}, Templates: rules.Templates(), Ops: rules.Ops,
+		Defaults: rules.RuleDefaults, Limits: rules.RuleLimits, Severities: model.Severities, Methods: model.RuleMethods}
 	s.st.Read(func(d *store.Data) {
 		count := map[string]int{}
 		for _, r := range d.Rules {
