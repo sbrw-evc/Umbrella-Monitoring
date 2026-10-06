@@ -764,6 +764,16 @@ code {
   color: var(--info);
 }
 
+.page-crash .banner-body p {
+  margin: 0 0 8px;
+}
+
+.page-crash-message {
+  display: block;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
 .rows {
   margin: 0;
   display: grid;
