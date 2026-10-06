@@ -223,19 +223,18 @@ func (s *RolesService) AddMembers(actor model.User, id string, userIDs []string)
 }
 
 func checkRoleMove(d *store.Data, actor model.User, target string, users []*model.User) error {
-	isAdmin := func(u *model.User) bool { return d.RoleOf(u).ID == model.RoleAdmin }
 	leaving := map[string]bool{}
 	for _, u := range users {
-		if isAdmin(u) == (target == model.RoleAdmin) {
+		if d.IsAdmin(u) == (target == model.RoleAdmin) {
 			continue
 		}
-		if !isAdmin(&actor) {
+		if !d.IsAdmin(&actor) {
 			return ErrAdminOnly
 		}
 		if u.ID == actor.ID {
 			return ErrOwnAdmin
 		}
-		if isAdmin(u) {
+		if d.IsAdmin(u) {
 			leaving[u.ID] = true
 		}
 	}

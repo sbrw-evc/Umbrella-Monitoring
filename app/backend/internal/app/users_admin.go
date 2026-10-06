@@ -492,8 +492,7 @@ func (s *UsersService) mutate(actor Actor, id, action string, fn func(d *store.D
 }
 
 func guardUserChange(d *store.Data, actor Actor, before, after *model.User) error {
-	isAdmin := func(u *model.User) bool { return u != nil && d.RoleOf(u).ID == model.RoleAdmin }
-	if (isAdmin(before) || isAdmin(after)) && !isAdmin(&actor.User) {
+	if (d.IsAdmin(before) || d.IsAdmin(after)) && !d.IsAdmin(&actor.User) {
 		return ErrAdminOnly
 	}
 	if before == nil {
@@ -501,7 +500,7 @@ func guardUserChange(d *store.Data, actor Actor, before, after *model.User) erro
 	}
 	active, local := adminCounts(d, map[string]bool{before.ID: true}, after)
 	switch {
-	case active == 0 && isAdmin(before) && !before.Disabled:
+	case active == 0 && d.IsAdmin(before) && !before.Disabled:
 		return ErrLastAdmin
 	case local == 0 && localAdmins(d) > 0:
 		return ErrNoLocalAdmin
@@ -511,7 +510,7 @@ func guardUserChange(d *store.Data, actor Actor, before, after *model.User) erro
 
 func adminCounts(d *store.Data, skip map[string]bool, extra ...*model.User) (active, local int) {
 	count := func(u *model.User) {
-		if u == nil || u.Disabled || d.RoleOf(u).ID != model.RoleAdmin {
+		if u == nil || u.Disabled || !d.IsAdmin(u) {
 			return
 		}
 		active++

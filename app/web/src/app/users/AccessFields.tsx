@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { useT } from '../../i18n'
 import { Field, Select } from '../../ui'
+import { ADMIN } from '../roles/permissions'
 import { MultiPicker } from '../services/Pickers'
 import { useSession } from '../session'
 import { roleLabel } from '../types'
@@ -29,7 +30,7 @@ export function RoleSelect({
     <Select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
       {allLabel !== undefined && <option value="">{allLabel}</option>}
       {refs.roles.map((r) => (
-        <option key={r.id} value={r.id} disabled={allLabel === undefined && r.id === 'admin' && !adminOf(user) && value !== r.id}>
+        <option key={r.id} value={r.id} disabled={allLabel === undefined && r.id === ADMIN && !adminOf(user) && value !== r.id}>
           {roleLabel(t, r.id, r.name)}
         </option>
       ))}

@@ -35,7 +35,7 @@ var everything = viewScope{all: true}
 // scopeOf: administrators and users with ScopeAll see everything; ScopeTeams gives the services
 // the user's teams own or support; ScopeServices the chosen services.
 func scopeOf(d *store.Data, u *model.User) viewScope {
-	if u == nil || d.RoleOf(u).ID == model.RoleAdmin {
+	if u == nil || d.IsAdmin(u) {
 		return everything
 	}
 	switch u.ScopeMode {

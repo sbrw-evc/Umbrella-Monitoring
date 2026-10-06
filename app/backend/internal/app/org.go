@@ -2,13 +2,11 @@ package app
 
 import (
 	"errors"
-	"net/http"
 	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
@@ -27,11 +25,7 @@ var (
 	errOrgUnknownUser = errors.New("unknown user")
 )
 
-type orgStatus = struct {
-	err    error
-	status int
-	code   string
-}
+type orgStatus = errStatus
 
 type OrgMember struct {
 	ID            string   `json:"id"`
@@ -107,14 +101,6 @@ func usernames(us []*model.User) string {
 	}
 	slices.Sort(names)
 	return strings.Join(names, ", ")
-}
-
-func orgRespond[T any](w http.ResponseWriter, status int, v T, err error) {
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	httpx.JSON(w, status, v)
 }
 
 // teamList is a user's teams for JSON: never null.

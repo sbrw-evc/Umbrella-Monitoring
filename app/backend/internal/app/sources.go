@@ -421,10 +421,10 @@ func (a *App) quickConnect(w http.ResponseWriter, r *http.Request) {
 	out, err := a.QuickConnect(r.Context(), u, a.baseURL(r), in)
 	if err != nil {
 		if errors.Is(err, ErrSecretsDown) {
-			credentialError(w, err)
+			writeError(w, err)
 			return
 		}
-		connectorError(w, err)
+		writeError(w, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
