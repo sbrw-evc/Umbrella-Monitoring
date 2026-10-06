@@ -536,3 +536,51 @@ func TestStaleWebhookAfterReopen(t *testing.T) {
 		t.Fatalf("the current incident applies: %+v", got)
 	}
 }
+
+// Backup notification is pending until the notifier reports the attempt: when the process
+// stops before that (or the queue was full), a later tick, also of a new process, hands it
+// over again.
+func TestFallbackSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	e, st, lost, c := setup(t)
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "app-01", "errors", "critical", "firing")})
+	a := active(t, e)[0]
+	e.PDResult(ctx, a.ID, alert.PDTrigger, "default", "", errors.New("Events API answered 503"))
+	c.advance(alert.DefaultFallbackAfter)
+	e.Tick(ctx)
+	if len(lost.fallback) != 1 {
+		t.Fatalf("backup notification is due: %+v", lost.fallback)
+	}
+	got, _, _ := e.Get(ctx, a.ID)
+	if !got.Fallback || got.FallbackState != alert.FallbackPending {
+		t.Fatalf("pending until the notifier reports: %+v", got)
+	}
+
+	// The process stops before the notifier sent anything; a new one starts on the same database.
+	e2 := alert.New(e.DB(), st)
+	rec := &recorder{}
+	e2.SetSender(rec)
+	e2.SetNotifier(rec)
+	e2.SetClock(c.now)
+	c.advance(time.Minute)
+	e2.Tick(ctx)
+	if len(rec.fallback) != 0 {
+		t.Fatalf("not handed over again too soon: %+v", rec.fallback)
+	}
+	c.advance(alert.DefaultFallbackRetry)
+	e2.Tick(ctx)
+	if len(rec.fallback) != 1 || rec.fallback[0].ID != a.ID {
+		t.Fatalf("handed over again after the restart: %+v", rec.fallback)
+	}
+	if err := e2.FallbackDone(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	c.advance(2 * alert.DefaultFallbackRetry)
+	e2.Tick(ctx)
+	if len(rec.fallback) != 1 {
+		t.Fatalf("sent once it is reported: %+v", rec.fallback)
+	}
+	if got, _, _ := e2.Get(ctx, a.ID); got.FallbackState != alert.FallbackSent || !got.Fallback {
+		t.Fatalf("state = %+v", got)
+	}
+}

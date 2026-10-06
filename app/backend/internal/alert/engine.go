@@ -23,6 +23,9 @@ const (
 	DefaultWindow        = 10 * time.Minute
 	DefaultFallbackAfter = 2 * time.Minute
 	DefaultRetryEvery    = time.Minute
+	// DefaultFallbackRetry: a backup notification not reported as attempted this long after it
+	// was handed to the notifier (a restart, a full queue) is handed over again.
+	DefaultFallbackRetry = 5 * time.Minute
 	// Retention: resolved alerts older than this are deleted with their timelines.
 	Retention = 90 * 24 * time.Hour
 	tickBatch = 1000
@@ -47,6 +50,7 @@ type Engine struct {
 	// FallbackAfter: an error or critical alert PagerDuty has not taken this long after it
 	// opened goes to backup notification.
 	FallbackAfter time.Duration
+	FallbackRetry time.Duration
 	RetryEvery    time.Duration
 
 	mu        sync.Mutex
@@ -65,7 +69,7 @@ func (nopNotifier) Fallback(Alert) {}
 
 func New(db *pgxpool.Pool, st *store.Store) *Engine {
 	return &Engine{db: db, st: st, pd: nopSender{}, notify: nopNotifier{}, now: func() time.Time { return time.Now().UTC() },
-		Window: DefaultWindow, FallbackAfter: DefaultFallbackAfter, RetryEvery: DefaultRetryEvery}
+		Window: DefaultWindow, FallbackAfter: DefaultFallbackAfter, FallbackRetry: DefaultFallbackRetry, RetryEvery: DefaultRetryEvery}
 }
 
 func (e *Engine) SetSender(s Sender)            { e.pd = s }
@@ -670,8 +674,15 @@ func (e *Engine) Tick(ctx context.Context) error {
 				if !a.Fallback && !a.Suppressed && SeverityRank(a.Severity) >= SeverityRank("error") &&
 					(a.PD.State == PDPending || a.PD.State == PDFailed) && now.Sub(a.OpenedAt) >= e.FallbackAfter {
 					t := now
-					a.Fallback, a.FallbackAt = true, &t
+					a.Fallback, a.FallbackAt, a.FallbackState = true, &t, FallbackPending
 					c.log(now, KindFallback, "fallback", map[string]string{"after": e.FallbackAfter.String(), "people": fmt.Sprint(len(a.Route.Recipients()))}, "")
+				}
+				// The pending state is saved with the hand-over, so a notification lost with the
+				// process or dropped by a full queue goes out on a later tick.
+				if a.FallbackState == FallbackPending && !a.Suppressed && (a.FallbackTry == nil || now.Sub(*a.FallbackTry) >= e.FallbackRetry) {
+					t := now
+					a.FallbackTry = &t
+					c.dirty = true
 					cp := a.Clone()
 					notify = &cp
 				}
@@ -795,6 +806,25 @@ func sameRoute(a, b Route) bool {
 		}
 	}
 	return true
+}
+
+// FallbackDone records that backup notification of an alert was attempted; the notifier calls it
+// once the outcome is on the timeline.
+func (e *Engine) FallbackDone(ctx context.Context, id string) error {
+	return pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
+		a, err := lockByID(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if a == nil {
+			return ErrNotFound
+		}
+		if a.FallbackState != FallbackPending {
+			return nil
+		}
+		a.FallbackState = FallbackSent
+		return save(ctx, tx, a, nil)
+	})
 }
 
 // Note adds a line to the timeline of an alert, for what happened outside the engine (backup

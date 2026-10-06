@@ -22,6 +22,10 @@ const (
 	PDFailed   = "failed"
 	PDSkipped  = "skipped"
 
+	// Backup notification states of an alert.
+	FallbackPending = "pending"
+	FallbackSent    = "sent"
+
 	SourceFiring   = "firing"
 	SourceResolved = "resolved"
 
@@ -159,6 +163,11 @@ type Alert struct {
 	PD            PD         `json:"pd"`
 	Fallback      bool       `json:"fallback"`
 	FallbackAt    *time.Time `json:"fallback_at,omitempty"`
+	// FallbackState is pending from the moment backup notification is due until the notifier
+	// reports it was attempted (sent); Tick hands a pending one to the notifier again, so it
+	// survives a restart or a full queue. FallbackTry is when it was last handed over.
+	FallbackState string     `json:"fallback_state,omitempty"`
+	FallbackTry   *time.Time `json:"fallback_try,omitempty"`
 	RelatedID     string     `json:"related_id,omitempty"`
 }
 
@@ -217,7 +226,9 @@ type Sender interface {
 	Send(cmd Command)
 }
 
-// Notifier sends backup notification for an alert PagerDuty did not take.
+// Notifier sends backup notification for an alert PagerDuty did not take and reports the
+// attempt back with Engine.FallbackDone. Fallback may be called again for the same alert
+// while it is pending.
 type Notifier interface {
 	Fallback(a Alert)
 }
