@@ -14,6 +14,8 @@ export type Role = {
   permissions: string[]
   system: boolean
   all_permissions: boolean
+  /** Accounts created by a directory or NetBox without a mapped role get this role. */
+  new_users: boolean
   member_count: number
   members: Member[]
 }

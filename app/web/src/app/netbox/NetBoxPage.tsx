@@ -21,6 +21,7 @@ type NetBoxConfig = {
   import_vms: boolean
   import_services: boolean
   sync_contacts: boolean
+  create_users: boolean
   sync_directory: boolean
   site_id: number
   device_role_id: number
@@ -44,6 +45,7 @@ type SyncState = {
     users_created: number
     users_updated: number
     users_linked: number
+    users_skipped?: number
     directory_checked: boolean
     directory_matched: number
     directory_missing: number
@@ -207,6 +209,14 @@ export function NetBoxPage() {
                     <Switch checked={draft.import_services} onChange={(v) => set({ import_services: v })} label={t('nb.import.services')} />
                   </div>
                   <Switch checked={draft.sync_contacts} onChange={(v) => set({ sync_contacts: v })} label={t('nb.contacts')} hint={t('nb.contacts.hint')} />
+                  {draft.sync_contacts && (
+                    <Switch
+                      checked={draft.create_users}
+                      onChange={(v) => set({ create_users: v })}
+                      label={t('nb.createUsers')}
+                      hint={t(draft.create_users ? 'nb.createUsers.on' : 'nb.createUsers.off')}
+                    />
+                  )}
                   <Switch
                     checked={draft.sync_directory}
                     onChange={(v) => set({ sync_directory: v })}
@@ -283,7 +293,8 @@ function SyncCard({ view, onSynced }: { view: NetBoxView; onSynced: (v: NetBoxVi
           t('nb.sync.objects'),
           t('nb.sync.objects.value', { objects: s.objects, created: s.created, updated: s.updated, deleted: s.deleted, unlinked: s.unlinked }),
         ],
-        [t('nb.sync.users'), t('nb.sync.users.value', { contacts: s.contacts, created: s.users_created, updated: s.users_updated, linked: s.users_linked })],
+        [t('nb.sync.users'), t('nb.sync.users.value', { contacts: s.contacts, created: s.users_created, updated: s.users_updated, linked: s.users_linked }) +
+          (s.users_skipped ? t('nb.sync.users.skipped', { n: s.users_skipped }) : '')],
         [
           t('nb.sync.directory'),
           s.directory_error ? (

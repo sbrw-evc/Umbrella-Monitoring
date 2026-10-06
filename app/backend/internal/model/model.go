@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"net/mail"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -16,6 +17,10 @@ const (
 	SourceLocal = "local"
 	SourceLDAP  = "ldap"
 	SourceEntra = "entra"
+
+	ScopeAll      = "all"
+	ScopeTeams    = "teams"
+	ScopeServices = "services"
 
 	RoleAdmin = "admin"
 	RoleUser  = "user"
@@ -98,15 +103,24 @@ type User struct {
 	Source       string     `json:"source"`
 	Timezone     string     `json:"timezone"`
 	Role         string     `json:"role"`
-	TeamID       string     `json:"team_id"`
-	// MappedRole and MappedTeam are the values a group mapping last gave the user. When the
-	// mapping stops matching, a value still equal to them is withdrawn; a value changed by hand
-	// since then is kept.
-	MappedRole string `json:"mapped_role,omitempty"`
-	MappedTeam string `json:"mapped_team,omitempty"`
-	// ServiceIDs are the business services whose incidents the user sees; empty means all.
-	// Administrators always see every incident.
+	// TeamIDs are the teams the user is a member of; a person may be in several teams.
+	TeamIDs []string `json:"team_ids"`
+	// TeamID and MappedTeam are the single team of older versions, kept only so that their
+	// snapshots decode; the store moves them into TeamIDs and MappedTeams on load.
+	TeamID     string `json:"-"`
+	MappedTeam string `json:"-"`
+	// MappedRole and MappedTeams are what a group mapping last gave the user. When the mapping
+	// stops giving them, a role still equal to MappedRole and the teams of MappedTeams are
+	// withdrawn; a role changed by hand since then is kept.
+	MappedRole  string   `json:"mapped_role,omitempty"`
+	MappedTeams []string `json:"mapped_teams,omitempty"`
+	// ScopeMode is what the user sees and may act on: every service (ScopeAll), the services
+	// their teams own or support (ScopeTeams), or the chosen ServiceIDs (ScopeServices).
+	// Administrators are never limited.
+	ScopeMode  string   `json:"scope_mode"`
 	ServiceIDs []string `json:"service_ids,omitempty"`
+	// MappedScope is the scope mode a group mapping last gave the user.
+	MappedScope string `json:"mapped_scope,omitempty"`
 	// Telegram is the chat ID backup notification sends to.
 	Telegram           string     `json:"telegram"`
 	MustChangePassword bool       `json:"must_change_password"`
@@ -129,6 +143,50 @@ type Settings struct {
 	NetBox        netbox.Config    `json:"netbox"`
 	Groups        GroupMappings    `json:"groups"`
 	Alerting      Alerting         `json:"alerting"`
-	SetupAt       time.Time        `json:"setup_at"`
-	SetupBy       string           `json:"setup_by"`
+	// NewUserRole is the role of accounts created by a directory sign-in or synchronization or by
+	// NetBox when no group mapping gives one. Empty or unknown: the system role "user".
+	NewUserRole string `json:"new_user_role"`
+	// PresetRolesSeeded: the preset roles were created once and are not created again.
+	PresetRolesSeeded bool `json:"-"`
+	// NetBoxUsersDecided: NetBox settings saved before «create accounts for contacts» existed were
+	// given it on (their behaviour), later ones choose it.
+	NetBoxUsersDecided bool      `json:"-"`
+	SetupAt            time.Time `json:"setup_at"`
+	SetupBy            string    `json:"setup_by"`
+}
+
+// InTeam reports whether the user is a member of the team.
+func (u *User) InTeam(id string) bool { return id != "" && slices.Contains(u.TeamIDs, id) }
+
+// MigrateTeams moves the single team of older versions into the team list.
+func (u *User) MigrateTeams() bool {
+	changed := false
+	if u.TeamID != "" {
+		if !slices.Contains(u.TeamIDs, u.TeamID) {
+			u.TeamIDs = append(u.TeamIDs, u.TeamID)
+			slices.Sort(u.TeamIDs)
+		}
+		u.TeamID, changed = "", true
+	}
+	if u.MappedTeam != "" {
+		if !slices.Contains(u.MappedTeams, u.MappedTeam) {
+			u.MappedTeams = append(u.MappedTeams, u.MappedTeam)
+		}
+		u.MappedTeam, changed = "", true
+	}
+	return changed
+}
+
+func ValidScope(v string) bool { return v == ScopeAll || v == ScopeTeams || v == ScopeServices }
+
+// MigrateScope sets the scope mode of users from versions where a service list was the only scope.
+func (u *User) MigrateScope() bool {
+	if u.ScopeMode != "" {
+		return false
+	}
+	u.ScopeMode = ScopeAll
+	if len(u.ServiceIDs) > 0 {
+		u.ScopeMode = ScopeServices
+	}
+	return true
 }

@@ -160,6 +160,7 @@ func (m *Module) apply(ctx context.Context, in completeInput) (Result, error) {
 			pd.MinSeverity = "error"
 		}
 		d.EnsureSystemRoles(now)
+		d.EnsurePresetRoles(in.Locale, now)
 		u := d.UserByName(admin.Username)
 		if u == nil {
 			u = &model.User{ID: d.NextID("USR"), CreatedAt: now}

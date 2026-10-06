@@ -1070,11 +1070,16 @@ func (e *Engine) BindUnknown(ctx context.Context, actor string) ([]string, error
 	return bound, nil
 }
 
+func sameRef(a, b *Ref) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+
 func sameRoute(a, b Route) bool {
 	if a.Via != b.Via || len(a.Services) != len(b.Services) || len(a.People) != len(b.People) || len(a.Owners) != len(b.Owners) {
 		return false
 	}
-	if (a.Team == nil) != (b.Team == nil) || (a.Team != nil && *a.Team != *b.Team) {
+	if !sameRef(a.Team, b.Team) || !sameRef(a.Service, b.Service) {
+		return false
+	}
+	if (a.Channel == nil) != (b.Channel == nil) || (a.Channel != nil && *a.Channel != *b.Channel) {
 		return false
 	}
 	for i := range a.Services {

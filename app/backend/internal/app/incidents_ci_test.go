@@ -52,7 +52,7 @@ func TestIncidentCreateAndBindCI(t *testing.T) {
 		d.Services["S-2"] = &model.Service{ID: "S-2", Name: "Billing", OwnerTeamID: "T-1", Status: model.ServiceActive}
 	})
 	lead := f.h.addLocal("lead", "Lead-pass-2026-x", model.RoleUser, time.Now())
-	f.h.st.Write(func(d *store.Data) { d.Users[lead].TeamID = "T-1" })
+	f.h.st.Write(func(d *store.Data) { d.Users[lead].TeamIDs = []string{"T-1"} })
 	f.h.addRole("duty", "incidents:view", "incidents:ack")
 	f.h.addRole("catalog", "incidents:view", "cis:edit")
 	f.h.addLocal("duty", "Duty-pass-2026-x", "duty", time.Now())

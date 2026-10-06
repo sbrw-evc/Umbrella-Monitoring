@@ -86,7 +86,7 @@ function EditorForm({ ci, tags, onClose, onSaved }: Props) {
       <Field label={t('ci.field.description')}>
         {(id) => <Textarea id={id} value={draft.description} maxLength={4000} rows={3} onChange={(e) => set({ description: e.target.value })} />}
       </Field>
-      <Field label={t('ci.field.owners')}>
+      <Field label={t('ci.field.owners')} hint={t('ci.field.owners.hint')}>
         {(id) => (
           <MultiPicker
             id={id}

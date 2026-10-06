@@ -312,7 +312,7 @@ func TestWallboardIncidents(t *testing.T) {
 	seedCatalog(f.h.st)
 	userID := f.h.addLocal("dba", "Dba-pass-2026-x", model.RoleUser, time.Now())
 	f.h.st.Write(func(d *store.Data) {
-		d.Users[userID].TeamID = "T-1"
+		d.Users[userID].TeamIDs = []string{"T-1"}
 		d.Users[userID].Profile.Email = "dba@example.com"
 	})
 	hook := f.webhookConnector()

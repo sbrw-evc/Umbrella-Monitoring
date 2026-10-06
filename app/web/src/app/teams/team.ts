@@ -6,6 +6,8 @@ export type Team = {
   description: string
   parent_id: string
   lead_id: string
+  email: string
+  telegram: string
   depth: number
   child_count: number
   member_count: number
@@ -13,12 +15,12 @@ export type Team = {
   lead: Member | null
 }
 
-export type TeamDraft = { name: string; description: string; parent_id: string; lead_id: string }
+export type TeamDraft = { name: string; description: string; parent_id: string; lead_id: string; email: string; telegram: string }
 
 export const MAX_DEPTH = 8
 
 export function teamDraft(t?: Team, parent = ''): TeamDraft {
-  return { name: t?.name ?? '', description: t?.description ?? '', parent_id: t?.parent_id ?? parent, lead_id: t?.lead_id ?? '' }
+  return { name: t?.name ?? '', description: t?.description ?? '', parent_id: t?.parent_id ?? parent, lead_id: t?.lead_id ?? '', email: t?.email ?? '', telegram: t?.telegram ?? '' }
 }
 
 export function teamChanges(t: Team, d: TeamDraft): Partial<TeamDraft> {
@@ -27,5 +29,7 @@ export function teamChanges(t: Team, d: TeamDraft): Partial<TeamDraft> {
   if (d.description.trim() !== t.description) out.description = d.description
   if (d.parent_id !== t.parent_id) out.parent_id = d.parent_id
   if (d.lead_id !== t.lead_id) out.lead_id = d.lead_id
+  if (d.email.trim() !== (t.email ?? '')) out.email = d.email.trim()
+  if (d.telegram.trim() !== (t.telegram ?? '')) out.telegram = d.telegram.trim()
   return out
 }

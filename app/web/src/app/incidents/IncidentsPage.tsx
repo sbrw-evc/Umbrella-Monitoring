@@ -35,7 +35,7 @@ export function IncidentsPage() {
   const t = useT(strings)
   const { can, user } = useSession()
   const actor = can('incidents:ack')
-  const scoped = user.role !== 'admin' && (user.service_ids?.length ?? 0) > 0
+  const scoped = user.role !== 'admin' && (user.scope_mode === 'teams' || user.scope_mode === 'services' || (!user.scope_mode && (user.service_ids?.length ?? 0) > 0))
   const [filters, setFilters] = useState<Filters>(() => filtersFromURL(window.location.search))
   const [openID, setOpenID] = useState<string | null>(() => new URLSearchParams(window.location.search).get('id'))
   const [epoch, setEpoch] = useState(0)

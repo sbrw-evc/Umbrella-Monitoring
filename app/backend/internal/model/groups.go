@@ -12,6 +12,8 @@ type GroupMapping struct {
 	Label  string `json:"label"`
 	RoleID string `json:"role_id"`
 	TeamID string `json:"team_id"`
+	// Scope is the scope mode members get (ScopeAll or ScopeTeams); empty leaves it alone.
+	Scope string `json:"scope,omitempty"`
 }
 
 const (

@@ -32,7 +32,12 @@ export const strings: Dict = {
     'nb.import.services': 'Services',
     'nb.contacts': 'Responsible people',
     'nb.contacts.hint':
-      'Contacts assigned to objects become their responsible people. An account with the same e-mail is used; otherwise an account is created and updated when the contact changes in NetBox. Such a person keeps the account when signing in through LDAP / AD or Entra ID.',
+      'Contacts assigned to objects become «Responsible for the CI»: they get an incident only when the item has no service with an owning team. The account with the same e-mail is used.',
+    'nb.createUsers': 'Create accounts for contacts',
+    'nb.createUsers.on':
+      'A contact without an account gets one (source NetBox, the role for new users), updated when the contact changes. The person keeps it when signing in through LDAP / AD or Entra ID. A deleted account comes back at the next synchronization.',
+    'nb.createUsers.off': 'Contacts without an account are skipped until the person signs in through LDAP / AD or Entra ID or gets a local account with the same e-mail.',
+    'nb.sync.users.skipped': ', {n} without an account skipped',
     'nb.directory': 'Match with the domain controller',
     'nb.directory.hint': 'Devices and virtual machines are matched with computer objects of Active Directory by name: DNS name, operating system, last logon, disabled accounts.',
     'nb.directory.none': 'Connect LDAP / AD of the Active Directory type in the settings to use this.',
@@ -116,7 +121,12 @@ export const strings: Dict = {
     'nb.import.services': 'Сервисы',
     'nb.contacts': 'Ответственные',
     'nb.contacts.hint':
-      'Контакты, назначенные объектам, становятся ответственными за КЕ. Если есть учётная запись с той же почтой, используется она; иначе учётная запись создаётся и обновляется при изменении контакта в NetBox. При входе через LDAP / AD или Entra ID человек получает эту же учётную запись.',
+      'Контакты, назначенные объектам, становятся «Ответственными за КЕ»: они получают инцидент, только если у КЕ нет сервиса с командой-владельцем. Используется учётная запись с той же почтой.',
+    'nb.createUsers': 'Создавать учётные записи для контактов',
+    'nb.createUsers.on':
+      'Контакт без учётной записи получает её (источник NetBox, роль для новых пользователей), она обновляется при изменении контакта. При входе через LDAP / AD или Entra ID человек получает эту же запись. Удалённая запись вернётся при следующей синхронизации.',
+    'nb.createUsers.off': 'Контакты без учётной записи пропускаются, пока человек не войдёт через LDAP / AD или Entra ID или не получит локальную запись с той же почтой.',
+    'nb.sync.users.skipped': ', без учётной записи пропущено {n}',
     'nb.directory': 'Сверка с контроллером домена',
     'nb.directory.hint':
       'Устройства и виртуальные машины сопоставляются с объектами компьютеров Active Directory по имени: DNS-имя, операционная система, последний вход, отключённые учётные записи.',

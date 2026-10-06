@@ -20,7 +20,7 @@ func TestIncidentsFromWebhook(t *testing.T) {
 		d.Services["S-1"] = &model.Service{ID: "S-1", Name: "Billing", OwnerTeamID: "T-1", Status: model.ServiceActive, CIIDs: []string{"CI-1"}}
 	})
 	userID := f.h.addLocal("dba", "Dba-pass-2026-x", model.RoleUser, time.Now())
-	f.h.st.Write(func(d *store.Data) { d.Users[userID].TeamID = "T-1" })
+	f.h.st.Write(func(d *store.Data) { d.Users[userID].TeamIDs = []string{"T-1"} })
 	cred := f.credential(flow.CredBearer, nil, map[string]string{"token": "tkn-1"})
 	var c app.ConnectorView
 	f.expect(f.admin, http.MethodPost, "/api/connectors", map[string]any{"name": "Webhook", "slug": "hook", "preset": "webhook",

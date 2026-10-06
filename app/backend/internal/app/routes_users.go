@@ -11,9 +11,13 @@ import (
 type managedUserView struct {
 	userView
 	DisplayName string `json:"display_name"`
-	TeamName    string `json:"team_name,omitempty"`
+	// Teams names the teams of the user.
+	Teams []userServiceRef `json:"teams"`
 	// Services are the business services of the incident scope; Missing marks one deleted since.
 	Services []userServiceRef `json:"services"`
+	// NetBoxRecreates: a NetBox contact account that the next NetBox synchronization creates
+	// again if it is deleted.
+	NetBoxRecreates bool `json:"netbox_recreates,omitempty"`
 }
 
 type userServiceRef struct {
@@ -40,7 +44,10 @@ func actorOf(r *http.Request) Actor {
 
 func (a *App) managedViews(users []model.User) []managedUserView {
 	teams, services := map[string]string{}, map[string]string{}
+	recreates := false
 	a.deps.Store.Read(func(d *store.Data) {
+		nb := d.Settings.NetBox
+		recreates = nb.Enabled && nb.SyncContacts && nb.CreateUsers
 		for id, t := range d.Teams {
 			teams[id] = t.Name
 		}
@@ -51,13 +58,19 @@ func (a *App) managedViews(users []model.User) []managedUserView {
 	out := make([]managedUserView, 0, len(users))
 	for _, u := range users {
 		v := a.view(u, "")
-		v.Permissions = nil
+		v.Permissions, v.Admins = nil, nil
+		teamRefs := make([]userServiceRef, 0, len(u.TeamIDs))
+		for _, id := range u.TeamIDs {
+			name, ok := teams[id]
+			teamRefs = append(teamRefs, userServiceRef{ID: id, Name: userOr(name, id), Missing: !ok})
+		}
 		refs := make([]userServiceRef, 0, len(u.ServiceIDs))
 		for _, id := range u.ServiceIDs {
 			name, ok := services[id]
 			refs = append(refs, userServiceRef{ID: id, Name: userOr(name, id), Missing: !ok})
 		}
-		out = append(out, managedUserView{userView: v, DisplayName: u.Profile.DisplayName(u.Username), TeamName: teams[u.TeamID], Services: refs})
+		out = append(out, managedUserView{userView: v, DisplayName: u.Profile.DisplayName(u.Username), Teams: teamRefs, Services: refs,
+			NetBoxRecreates: recreates && u.Source == model.SourceNetBox})
 	}
 	return out
 }

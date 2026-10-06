@@ -24,6 +24,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/config"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory/directorytest"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets/secretstest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/setup"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
@@ -478,7 +479,8 @@ func TestWizardEndToEnd(t *testing.T) {
 	}
 	e.newClient()
 	code, boris := e.login("boris", "boris-pass-1")
-	if code != 200 || boris["role"] != "user" {
+	// A new directory user gets the role for new users: the viewer preset made by the wizard.
+	if code != 200 || boris["role"] != model.RoleViewer || boris["role_name"] != "Наблюдатель" {
 		t.Fatalf("ldap user = %d %v", code, boris)
 	}
 	if code := e.call(http.MethodGet, "/api/system", nil, nil, nil); code != 403 {

@@ -5,6 +5,7 @@ import { ErrorBanner } from '../../connections/ConnectionCard'
 import { useAction } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Banner, Button, formatDate, Modal, Rows } from '../../ui'
+import { RoutePreview } from '../routing/RoutePreview'
 import { Chips } from '../services/Badges'
 import { useSession } from '../session'
 import { Aliases } from './Aliases'
@@ -127,6 +128,7 @@ function Body({ ci, editable, onChanged }: { ci: CI; editable: boolean; onChange
       {ci.description && <p className="svc-description">{ci.description}</p>}
       {!ci.editable && <Banner kind="info" title={t('ci.imported')} />}
       <Rows rows={rows} />
+      <RoutePreview kind="cis" id={ci.id} version={ci.updated_at} />
     </>
   )
 }

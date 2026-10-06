@@ -1392,6 +1392,19 @@ code {
   box-shadow: var(--focus);
 }
 
+.profile-noaccess {
+  margin-bottom: 16px;
+}
+
+.profile-noaccess p {
+  margin: 0 0 6px;
+}
+
+.profile-admins {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .profile-head {
   display: flex;
   align-items: center;

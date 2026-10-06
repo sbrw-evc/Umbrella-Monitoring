@@ -87,7 +87,7 @@ func TestOnboardingStepsFollowState(t *testing.T) {
 	f.h.st.Write(func(d *store.Data) {
 		d.Teams["T-1"] = &model.Team{ID: "T-1", Name: "DBA"}
 		d.Users[srcID].Disabled = true
-		d.Users[srcID].TeamID = "T-1"
+		d.Users[srcID].TeamIDs = []string{"T-1"}
 	})
 	if _, s := f.onboarding(f.admin); s[app.StepTeam].Done {
 		t.Fatal("a team with only a disabled member is not staffed")

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/access"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 )
 
@@ -102,6 +103,13 @@ func (d *Data) init() {
 			src.NormalizeHosts()
 		}
 	}
+	// Older snapshots have one team per user.
+	for _, u := range d.Users {
+		if u != nil {
+			u.MigrateTeams()
+			u.MigrateScope()
+		}
+	}
 	if d.NetBoxContacts == nil {
 		d.NetBoxContacts = map[int]string{}
 	}
@@ -164,6 +172,43 @@ func (d *Data) EnsureSystemRoles(now time.Time) bool {
 		}
 	}
 	return added
+}
+
+// EnsurePresetRoles creates the preset roles once. A preset whose name is already taken by
+// another role is skipped. The role for new users becomes the viewer preset unless it is set.
+func (d *Data) EnsurePresetRoles(locale string, now time.Time) bool {
+	if d.Settings.PresetRolesSeeded {
+		return false
+	}
+	d.Settings.PresetRolesSeeded = true
+	taken := func(name string) bool {
+		for _, r := range d.Roles {
+			if strings.EqualFold(r.Name, name) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, r := range model.PresetRoles(locale, now) {
+		if d.Roles[r.ID] != nil || taken(r.Name) {
+			continue
+		}
+		r.Permissions = access.Normalize(r.Permissions)
+		d.Roles[r.ID] = r
+	}
+	if d.Settings.NewUserRole == "" && d.Roles[model.RoleViewer] != nil {
+		d.Settings.NewUserRole = model.RoleViewer
+	}
+	return true
+}
+
+// NewUserRole is the role given to an account a directory or NetBox creates without a mapped
+// role: the configured one while it exists and is not the administrator role, otherwise "user".
+func (d *Data) NewUserRole() string {
+	if id := d.Settings.NewUserRole; id != "" && id != model.RoleAdmin && d.Roles[id] != nil {
+		return id
+	}
+	return model.RoleUser
 }
 
 func (d *Data) RoleOf(u *model.User) *model.Role {

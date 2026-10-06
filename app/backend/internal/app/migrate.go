@@ -24,6 +24,19 @@ func Migrate(ctx context.Context, st *store.Store, vault credentials.Vault) erro
 			d.AddAudit(store.AuditEntry{Actor: "system", Action: "roles.seeded", Detail: "system roles created"})
 			changed = true
 		}
+		if d.EnsurePresetRoles(d.Settings.DefaultLocale, now) {
+			d.AddAudit(store.AuditEntry{Actor: "system", Action: "roles.seeded", Detail: "preset roles created, new users get " + d.NewUserRole()})
+			changed = true
+		}
+		if !d.Settings.NetBoxUsersDecided {
+			// NetBox configured before the setting existed kept creating accounts for contacts.
+			if d.Settings.NetBox.URL != "" {
+				d.Settings.NetBox.CreateUsers = true
+				d.AddAudit(store.AuditEntry{Actor: "system", Action: "settings.netbox", Detail: "accounts for contacts: on (kept)"})
+			}
+			d.Settings.NetBoxUsersDecided = true
+			changed = true
+		}
 		for _, u := range d.Users {
 			if d.Roles[u.Role] == nil {
 				u.Role = model.RoleUser
