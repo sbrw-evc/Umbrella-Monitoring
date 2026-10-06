@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/flow"
@@ -73,8 +74,8 @@ func New(pool *pgxpool.Pool) *Queue {
 // Enqueue stores a request durably. With an idempotency key, a request seen before is not
 // stored again and dup is true.
 func (q *Queue) Enqueue(ctx context.Context, r Request, idemKey string) (id int64, dup bool, err error) {
-	h, _ := json.Marshal(nonNil(r.Headers))
-	qs, _ := json.Marshal(nonNil(r.Query))
+	h, _ := json.Marshal(cleanMap(nonNil(r.Headers)))
+	qs, _ := json.Marshal(cleanMap(nonNil(r.Query)))
 	err = pgx.BeginFunc(ctx, q.pool, func(tx pgx.Tx) error {
 		if idemKey != "" {
 			tag, err := tx.Exec(ctx, "INSERT INTO ingest_idempotency (connector_id, key) VALUES ($1, $2) ON CONFLICT DO NOTHING", r.ConnectorID, idemKey)
@@ -192,7 +193,28 @@ type statDelta struct {
 	latencyMax                                              int
 }
 
+func (s *statDelta) add(o statDelta) {
+	s.received += o.received
+	s.filtered += o.filtered
+	s.skipped += o.skipped
+	s.failed += o.failed
+	s.events += o.events
+	s.duplicates += o.duplicates
+	s.latency += o.latency
+	s.latencyMax = max(s.latencyMax, o.latencyMax)
+}
+
+const (
+	// maxAttempts bounds the retries of a request whose storing or folding failed for a
+	// reason that may pass (a lock timeout, the alert tables not ready yet).
+	maxAttempts = 3
+)
+
 // Drain claims one batch of pending requests and processes it. It returns how many it took.
+//
+// Isolation: every request runs in a savepoint of its own. A request that cannot be stored or
+// folded is rolled back alone and retried up to maxAttempts times, or at once marked failed
+// with a failure record when the error is about its data; the rest of the batch goes on.
 func (q *Queue) Drain(ctx context.Context, process Processor) (int, error) {
 	n := 0
 	var after []func()
@@ -219,7 +241,7 @@ func (q *Queue) Drain(ctx context.Context, process Processor) (int, error) {
 				st = &statDelta{}
 				stats[r.ConnectorID] = st
 			}
-			f, err := q.handle(ctx, tx, r, process, st)
+			f, err := q.handleIsolated(ctx, tx, r, process, st)
 			if err != nil {
 				return err
 			}
@@ -241,14 +263,84 @@ func (q *Queue) Drain(ctx context.Context, process Processor) (int, error) {
 		}
 		return nil
 	})
-	if err == nil {
-		for _, f := range after {
-			f()
-		}
+	if err != nil {
+		// Nothing was taken: the batch is rolled back and Run must not spin on it.
+		return 0, err
 	}
-	return n, err
+	for _, f := range after {
+		f()
+	}
+	return n, nil
 }
 
+// sinkError is a failure to fold the events of a request into alerts.
+type sinkError struct{ err error }
+
+func (e *sinkError) Error() string { return "events not folded into alerts: " + e.err.Error() }
+func (e *sinkError) Unwrap() error { return e.err }
+
+// permanent reports an error that a retry cannot fix: the data of the request is rejected.
+func permanent(err error) bool {
+	var pe *pgconn.PgError
+	if !errors.As(err, &pe) {
+		return false
+	}
+	switch pe.Code[:2] {
+	case "22", "23", "42", "54": // data exception, integrity, syntax or access, program limit
+		return true
+	}
+	return false
+}
+
+// handleIsolated processes one request in a savepoint. When it fails, only its own writes are
+// undone and the request is left for a retry or marked failed; the batch goes on.
+func (q *Queue) handleIsolated(ctx context.Context, tx pgx.Tx, r Request, process Processor, st *statDelta) (func(), error) {
+	var after func()
+	var own statDelta
+	err := pgx.BeginFunc(ctx, tx, func(sp pgx.Tx) error {
+		own = statDelta{}
+		var err error
+		after, err = q.handle(ctx, sp, r, process, &own)
+		return err
+	})
+	if err == nil {
+		st.add(own)
+		return after, nil
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	st.received++
+	st.failed++
+	return nil, q.fail(ctx, tx, r, err)
+}
+
+// fail records why a request could not be stored or folded. A request is never left done
+// with its events or alerts missing: it stays pending for another attempt or becomes failed
+// with a failure record, which Reprocess can put back into the queue.
+func (q *Queue) fail(ctx context.Context, tx pgx.Tx, r Request, cause error) error {
+	msg := clip(cleanText(cause.Error()), 2000)
+	if r.Attempts+1 < maxAttempts && !permanent(cause) {
+		slog.Warn("ingest request will be retried", "connector", r.ConnectorID, "request", r.ID, "attempt", r.Attempts+1, "err", cause)
+		_, err := tx.Exec(ctx, "UPDATE ingest_requests SET attempts = attempts + 1, error = $3 WHERE id = $1 AND received_at = $2",
+			r.ID, r.ReceivedAt, msg)
+		return err
+	}
+	slog.Error("ingest request failed", "connector", r.ConnectorID, "request", r.ID, "attempts", r.Attempts+1, "err", cause)
+	node := ""
+	var se *sinkError
+	if errors.As(cause, &se) {
+		node = "alerts"
+	}
+	raw, note := rawBody(r.Body)
+	if _, err := tx.Exec(ctx, `INSERT INTO ingest_failures (connector_id, version, node_id, error, request_id, request_at, item, raw)
+		VALUES ($1, $2, $3, $4, $5, $6, 0, $7)`, r.ConnectorID, r.Version, node, msg+note, r.ID, r.ReceivedAt, clip(raw, 4000)); err != nil {
+		return err
+	}
+	return finish(ctx, tx, r, StatusFailed, 0, clip(msg+note, 2000))
+}
+
+// handle stores what a request produced and folds its events into alerts.
 func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Processor, st *statDelta) (func(), error) {
 	st.received++
 	out, perr := process(ctx, r)
@@ -264,9 +356,11 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 		if perr != nil {
 			msg = perr.Error()
 		}
+		raw, note := rawBody(r.Body)
+		msg = clip(cleanText(msg), 2000) + note
 		st.failed++
 		if _, err := tx.Exec(ctx, `INSERT INTO ingest_failures (connector_id, version, node_id, error, request_id, request_at, item, raw)
-			VALUES ($1, $2, '', $3, $4, $5, 0, $6)`, r.ConnectorID, version, msg, r.ID, r.ReceivedAt, clip(string(r.Body), 4000)); err != nil {
+			VALUES ($1, $2, '', $3, $4, $5, 0, $6)`, r.ConnectorID, version, msg, r.ID, r.ReceivedAt, clip(raw, 4000)); err != nil {
 			return nil, err
 		}
 		return nil, finish(ctx, tx, r, StatusFailed, 0, msg)
@@ -275,7 +369,10 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 	st.filtered += res.Filtered
 	st.skipped += res.Skipped
 	inserted := 0
-	for _, e := range res.Events {
+	var apply []flow.Event
+	for i := range res.Events {
+		e := &res.Events[i]
+		cleanEvent(&e.Event)
 		labels, _ := json.Marshal(e.Event.Labels)
 		// changed: the first delivery of the alert or a change of its status or severity. The
 		// rest are duplicates (prev is read before the upsert, in the same snapshot).
@@ -299,12 +396,16 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 		} else {
 			st.duplicates++
 		}
+		apply = append(apply, e.Event)
 	}
 	st.events += inserted
-	for _, f := range res.Failures {
+	note := bodyNote(r.Body)
+	for i := range res.Failures {
+		f := &res.Failures[i]
+		cleanFailure(f)
 		data, _ := json.Marshal(f.Data)
 		if _, err := tx.Exec(ctx, `INSERT INTO ingest_failures (connector_id, version, node_id, error, request_id, request_at, item, data, raw)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, r.ConnectorID, version, f.Node, clip(f.Error, 2000), r.ID, r.ReceivedAt, f.Lineage.Item, data, f.Raw); err != nil {
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`, r.ConnectorID, version, f.Node, clip(f.Error, 2000)+note, r.ID, r.ReceivedAt, f.Lineage.Item, data, f.Raw); err != nil {
 			return nil, err
 		}
 	}
@@ -317,38 +418,30 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 	status, msg := StatusDone, ""
 	if len(res.Failures) > 0 {
 		status = StatusFailed
-		msg = fmt.Sprintf("%d of the records failed; first: %s", len(res.Failures), clip(res.Failures[0].Error, 500))
+		msg = fmt.Sprintf("%d of the records failed; first: %s", len(res.Failures), clip(res.Failures[0].Error, 500)) + note
 	}
 	if _, err := tx.Exec(ctx, "UPDATE ingest_requests SET version = $3 WHERE id = $1 AND received_at = $2", r.ID, r.ReceivedAt, version); err != nil {
 		return nil, err
 	}
-	after := q.deliver(ctx, tx, r, res)
+	after, err := q.deliver(ctx, tx, r, apply)
+	if err != nil {
+		return nil, err
+	}
 	return after, finish(ctx, tx, r, status, len(res.Events), msg)
 }
 
-// deliver hands the events to the sink in a savepoint: an alert that cannot be folded does not
-// hold back the events, it is logged instead.
-func (q *Queue) deliver(ctx context.Context, tx pgx.Tx, r Request, res *flow.Result) func() {
-	if q.sink == nil || len(res.Events) == 0 {
-		return nil
+// deliver hands the events to the sink in the request's own savepoint. When folding fails the
+// request's events are rolled back with it, so the request is retried or marked failed as a
+// whole (see fail) and an alert is never lost behind a request marked done.
+func (q *Queue) deliver(ctx context.Context, tx pgx.Tx, r Request, events []flow.Event) (func(), error) {
+	if q.sink == nil || len(events) == 0 {
+		return nil, nil
 	}
-	events := make([]flow.Event, 0, len(res.Events))
-	for _, e := range res.Events {
-		events = append(events, e.Event)
-	}
-	var after func()
-	err := pgx.BeginFunc(ctx, tx, func(sp pgx.Tx) error {
-		var err error
-		after, err = q.sink(ctx, sp, r.ConnectorID, events)
-		return err
-	})
+	after, err := q.sink(ctx, tx, r.ConnectorID, events)
 	if err != nil {
-		if ctx.Err() == nil {
-			slog.Error("events not folded into alerts", "connector", r.ConnectorID, "request", r.ID, "err", err)
-		}
-		return nil
+		return nil, &sinkError{err}
 	}
-	return after
+	return after, nil
 }
 
 func finish(ctx context.Context, tx pgx.Tx, r Request, status string, events int, msg string) error {
