@@ -21,6 +21,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/textx"
 )
 
 const (
@@ -82,9 +83,7 @@ func flatten(h map[string][]string, drop map[string]bool) map[string]string {
 			continue
 		}
 		v := strings.Join(vs, ", ")
-		if len(v) > maxHeaderValue {
-			v = v[:maxHeaderValue]
-		}
+		v = textx.Bytes(v, maxHeaderValue)
 		out[lk] = v
 	}
 	return out
@@ -181,9 +180,7 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := strings.TrimSpace(r.Header.Get(IdempotencyHdr))
-	if len(key) > maxIdempotency {
-		key = key[:maxIdempotency]
-	}
+	key = textx.Bytes(key, maxIdempotency)
 	id, dup, err := a.queue.Enqueue(r.Context(), ingest.Request{ConnectorID: t.ConnectorID, Version: t.Version, RemoteIP: ip,
 		Method: r.Method, Headers: headers, Query: query, Body: body}, key)
 	if err != nil {

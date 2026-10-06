@@ -3,9 +3,11 @@ package alert_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -378,7 +380,30 @@ func TestRedUseLink(t *testing.T) {
 	if len(p.Alerts) != 1 || p.Alerts[0].RelatedID == "" {
 		t.Fatalf("red linked to use: %+v", p.Alerts)
 	}
-	if p.Counts.Active != 2 || p.Counts.BySeverity["error"] != 1 || p.Counts.PDNotTaken != 2 {
-		t.Errorf("counts = %+v", p.Counts)
+	if p.Counts.Active != 1 || p.Counts.BySeverity["error"] != 1 || p.Counts.PDNotTaken != 1 {
+		t.Errorf("counts follow the method filter = %+v", p.Counts)
+	}
+	if p, _ = e.List(ctx, alert.Filter{Status: "active"}); p.Counts.Active != 2 || p.Counts.PDNotTaken != 2 {
+		t.Errorf("counts without filters = %+v", p.Counts)
+	}
+}
+
+func TestLongCommentKeepsCharacters(t *testing.T) {
+	ctx := context.Background()
+	e, _, _, _ := setup(t)
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "c", "db-01", "disk", "error", "firing")})
+	a := active(t, e)[0]
+	// 4001 two-byte letters: a byte cut at 4000 would land inside the 2000th one.
+	text := "ж" + strings.Repeat("ы", 4000)
+	if _, err := e.Act(ctx, a.ID, "comment", "eng", text); err != nil {
+		t.Fatal(err)
+	}
+	_, entries, err := e.Get(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := entries[len(entries)-1].Args["text"]
+	if !utf8.ValidString(got) || utf8.RuneCountInString(got) != 4000 || got != text[:len(text)-len("ы")] {
+		t.Errorf("comment kept %d characters, valid UTF-8 %v", utf8.RuneCountInString(got), utf8.ValidString(got))
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/textx"
 )
 
 const (
@@ -105,9 +107,7 @@ func EventFromData(d map[string]any) (Event, error) {
 		return e, fmt.Errorf("method %q is not red, use or other", e.Method)
 	}
 	for _, f := range []*string{&e.Title, &e.CI, &e.Signal, &e.ExternalID, &e.Value} {
-		if len(*f) > maxEventField {
-			*f = (*f)[:maxEventField]
-		}
+		*f = textx.Runes(*f, maxEventField)
 	}
 	e.Labels = labelsOf(d["labels"])
 	return e, nil
