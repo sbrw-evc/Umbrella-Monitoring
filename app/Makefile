@@ -29,4 +29,4 @@ openbao-dev:
 	docker run -d --rm --name umbrella-openbao-dev -p 127.0.0.1:8200:8200 -e BAO_DEV_ROOT_TOKEN_ID=dev-root openbao/openbao:2.7.1 server -dev -dev-listen-address=0.0.0.0:8200
 	sleep 2
 	docker exec -e BAO_ADDR=http://127.0.0.1:8200 -e BAO_TOKEN=dev-root umbrella-openbao-dev bao secrets enable -path=umbrella -version=2 kv
-	@echo 'export UMBRELLA_OPENBAO_ADDR=http://127.0.0.1:8200 UMBRELLA_OPENBAO_TOKEN=dev-root'
+	@echo 'OpenBao dev is up. In the setup wizard enter: address http://127.0.0.1:8200, token dev-root, KV v2 mount umbrella.'

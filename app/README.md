@@ -73,7 +73,7 @@ make build
 make run                         # http://localhost:8080, данные в backend/data
 ```
 
-Адрес OpenBao (`http://127.0.0.1:8200`, токен `dev-root`) и подключение к PostgreSQL вводятся в мастере настройки; переменные окружения, которые печатает `make openbao-dev`, приложение не читает.
+Адрес OpenBao (`http://127.0.0.1:8200`, токен `dev-root`, хранилище `umbrella`) и подключение к PostgreSQL вводятся в мастере настройки — `make openbao-dev` напоминает эти значения в конце.
 
 Режим разработки с горячей перезагрузкой: `make dev-api` и `make dev-web` (интерфейс на :5173). Проверки: `make test` (`go vet`, `go test`, проверка типов интерфейса; тесты с PostgreSQL запускаются, если задана `UMBRELLA_TEST_POSTGRES`). Образ: `make image` (версия из `git describe`, коммит и дата сборки видны на странице «Состояние системы»). Запуск образа с томом данных: [deploy/umbrella](../deploy/umbrella).
 
@@ -89,7 +89,7 @@ make run                         # http://localhost:8080, данные в backen
 | `UMBRELLA_STARTUP_WAIT` | сколько при старте ждать OpenBao и PostgreSQL | `2m` |
 | `UMBRELLA_SETUP_TOKEN` | код установки для мастера вместо случайного | — |
 | `UMBRELLA_SECURE_COOKIES` | cookie с флагом Secure (за TLS-прокси) | `false` |
-| `UMBRELLA_TRUSTED_PROXIES` | обратные прокси (CIDR или IP через запятую), чьим `X-Forwarded-For` / `X-Real-IP` верить при проверке адреса ТВ-панели; пусто — адрес берётся только из соединения | — |
+| `UMBRELLA_TRUSTED_PROXIES` | обратные прокси (CIDR или IP через запятую), чьим `X-Forwarded-For` / `X-Real-IP` верить при определении адреса клиента (разрешённые сети коннекторов и ТВ-панелей, ограничение попыток входа, журнал аудита, архив запросов); пусто — адрес берётся только из соединения | — |
 
 Подключения к OpenBao и PostgreSQL задаются мастером и страницами «Настройки → OpenBao» и «Настройки → PostgreSQL», а PagerDuty, почта, Telegram, Grafana, NetBox, системы мониторинга, LDAP / AD и Entra ID — в интерфейсе или через API, а не переменными окружения.
 
