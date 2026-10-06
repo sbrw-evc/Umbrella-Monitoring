@@ -52,6 +52,21 @@ type Quick struct {
 	testBody *template.Template
 }
 
+// QuickView is what the web app needs to offer a quick preset; the templates stay here.
+type QuickView struct {
+	Order           int       `json:"order"`
+	Name            flow.Text `json:"name"`
+	MonitoringKinds []string  `json:"monitoring_kinds"`
+	Steps           int       `json:"steps"`
+}
+
+func (q *Quick) View() *QuickView {
+	if q == nil {
+		return nil
+	}
+	return &QuickView{Order: q.Order, Name: q.Name, MonitoringKinds: append([]string{}, q.MonitoringKinds...), Steps: q.Steps}
+}
+
 // File is a template rendered for a connected source.
 type File struct {
 	// Kind: yaml, text or shell.

@@ -120,6 +120,9 @@ export type Preset = {
   tags: string[]
   credentials: Slot[]
   samples: number
+  // quick is set for the presets quick connect offers: its order, the default connector name,
+  // the monitoring system kinds it is the alert intake for and how many steps the source needs.
+  quick?: { order: number; name: Text; monitoring_kinds: string[]; steps: number }
 }
 
 export type Slot = { slot: string; node: string; param: string; types: string[]; name?: string }

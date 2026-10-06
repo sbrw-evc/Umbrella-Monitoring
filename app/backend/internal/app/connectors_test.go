@@ -161,6 +161,11 @@ func TestConnectorLifecycle(t *testing.T) {
 	if len(presets) != 4 {
 		t.Fatalf("presets = %v", presets)
 	}
+	for _, p := range presets {
+		if q, _ := p["quick"].(map[string]any); q == nil || q["steps"] == nil || q["name"] == nil {
+			t.Errorf("the web app builds quick connect from the presets: %v", p)
+		}
+	}
 	var c app.ConnectorView
 	f.expect(f.admin, http.MethodPost, "/api/connectors", map[string]any{"name": "Prod Alertmanager", "slug": "am-prod", "preset": "alertmanager",
 		"credentials": map[string]string{"webhook.credential": cred.ID}}, http.StatusCreated, &c)
