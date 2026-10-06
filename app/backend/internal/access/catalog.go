@@ -127,17 +127,22 @@ func Pages() []Page { return slices.Clone(pages) }
 
 func Perm(page, feature string) string { return page + ":" + feature }
 
-func All() []string {
+// all and valid are computed once from pages: the catalog never changes at run time.
+var all, valid = func() ([]string, map[string]bool) {
 	var out []string
+	set := map[string]bool{}
 	for _, p := range pages {
 		for _, f := range p.Features {
 			out = append(out, Perm(p.ID, f.ID))
+			set[Perm(p.ID, f.ID)] = true
 		}
 	}
-	return out
-}
+	return out, set
+}()
 
-func Valid(perm string) bool { return slices.Contains(All(), perm) }
+func All() []string { return slices.Clone(all) }
+
+func Valid(perm string) bool { return valid[perm] }
 
 func Normalize(perms []string) []string {
 	set := map[string]bool{}
@@ -151,7 +156,7 @@ func Normalize(perms []string) []string {
 		set[Perm(page, View)] = true
 	}
 	out := make([]string, 0, len(set))
-	for _, p := range All() {
+	for _, p := range all {
 		if set[p] {
 			out = append(out, p)
 		}
@@ -173,7 +178,7 @@ func (s Set) Has(perm string) bool { return s[perm] }
 
 func (s Set) List() []string {
 	out := []string{}
-	for _, p := range All() {
+	for _, p := range all {
 		if s[p] {
 			out = append(out, p)
 		}

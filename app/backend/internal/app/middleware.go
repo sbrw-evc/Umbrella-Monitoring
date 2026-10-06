@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/access"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
@@ -67,7 +68,12 @@ func (a *App) authed(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// can guards next with perm. An unknown permission is a programming error: it panics when the
+// route is registered, so a typo never ships as a route nobody can open.
 func (a *App) can(perm string, next http.HandlerFunc) http.HandlerFunc {
+	if !access.Valid(perm) {
+		panic("unknown permission " + perm)
+	}
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !a.access.Permissions(current(r).user).Has(perm) {
 			writeError(w, forbidden)
