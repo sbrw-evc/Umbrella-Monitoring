@@ -792,6 +792,9 @@ func sameRoute(a, b Route) bool {
 	if !sameRef(a.Team, b.Team) || !sameRef(a.Service, b.Service) {
 		return false
 	}
+	if (a.Channel == nil) != (b.Channel == nil) || (a.Channel != nil && *a.Channel != *b.Channel) {
+		return false
+	}
 	for i := range a.Services {
 		if a.Services[i] != b.Services[i] {
 			return false

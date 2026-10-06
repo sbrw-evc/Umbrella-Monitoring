@@ -18,6 +18,7 @@ type RoutePreview struct {
 	Service  *alert.Ref     `json:"service,omitempty"`
 	Team     *alert.Ref     `json:"team,omitempty"`
 	People   []alert.Person `json:"people"`
+	Channel  *alert.Channel `json:"channel,omitempty"`
 	Owners   []alert.Person `json:"owners"`
 	Via      string         `json:"via"`
 	// PagerDuty is null when PagerDuty is off.
@@ -35,7 +36,7 @@ type PreviewPD struct {
 }
 
 func (a *App) previewOf(r alert.Route) RoutePreview {
-	out := RoutePreview{Services: r.Services, Service: r.Service, Team: r.Team, People: r.People, Owners: r.Owners, Via: r.Via}
+	out := RoutePreview{Services: r.Services, Service: r.Service, Team: r.Team, People: r.People, Channel: r.Channel, Owners: r.Owners, Via: r.Via}
 	var p *PreviewPD
 	a.deps.Store.Read(func(d *store.Data) {
 		set := d.Settings.Alerting.PagerDuty

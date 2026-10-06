@@ -79,3 +79,28 @@ func TestMemberOfTwoTeamsGetsBoth(t *testing.T) {
 		t.Fatalf("U-5 got %v, want the incidents of both teams", got)
 	}
 }
+
+// A team with a channel: the route keeps the lead and the channel instead of every member; a
+// channel without a lead still takes the incident instead of going up to the parent team.
+func TestTeamChannelRoute(t *testing.T) {
+	ctx := context.Background()
+	e, st, _, c := setup(t)
+	st.Write(func(d *store.Data) {
+		d.Teams["T-2"].Email = "sre-duty@example.com"
+		d.Teams["T-3"].Telegram = "-100500"
+	})
+	if err := e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "db-01.example.com", "cpu", "critical", "firing")}); err != nil {
+		t.Fatal(err)
+	}
+	r := active(t, e)[0].Route
+	if r.Channel == nil || r.Channel.Email != "sre-duty@example.com" || len(r.People) != 1 || r.People[0].UserID != "U-1" || r.Via != alert.ViaService {
+		t.Fatalf("route = %+v", r)
+	}
+	if len(r.Recipients()) != 1 {
+		t.Fatalf("recipients = %+v", r.Recipients())
+	}
+	p, _, _ := alert.PreviewService(st, "S-2", c.now())
+	if p.Channel == nil || p.Channel.Telegram != "-100500" || len(p.People) != 0 || p.Via != alert.ViaService {
+		t.Fatalf("empty team with a channel = %+v", p)
+	}
+}

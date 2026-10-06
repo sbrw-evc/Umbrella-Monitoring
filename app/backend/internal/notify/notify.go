@@ -181,7 +181,7 @@ func loadTZ(name string) *time.Location {
 }
 
 // targets: the people of the route (the team, or the owners of the item when the team has
-// nobody) with their contacts, then the extra addresses; each address once.
+// nobody) with their contacts, the team channel, then the extra addresses; each address once.
 func (s *Service) targets(c config, a alert.Alert) []target {
 	n := c.set.Notify
 	var out []target
@@ -215,6 +215,14 @@ func (s *Service) targets(c config, a alert.Alert) []target {
 		}
 		if n.Telegram.Enabled && ValidChat(p.Telegram) {
 			add(target{channel: ChannelTelegram, address: p.Telegram, recipient: UserRecipient(p.UserID), tz: loc})
+		}
+	}
+	if ch := a.Route.Channel; ch != nil {
+		if n.Email.Enabled && ValidEmail(ch.Email) {
+			add(target{channel: ChannelEmail, address: ch.Email, recipient: EmailRecipient(ch.Email), tz: def})
+		}
+		if n.Telegram.Enabled && ValidChat(ch.Telegram) {
+			add(target{channel: ChannelTelegram, address: ch.Telegram, recipient: TelegramRecipient(ch.Telegram), tz: def})
 		}
 	}
 	if n.Email.Enabled {

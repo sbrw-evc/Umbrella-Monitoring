@@ -80,6 +80,14 @@ export function TeamFields({
           </Select>
         )}
       </Field>
+      <Field label={t('teams.email')} optional={t('teams.optional')} hint={t('teams.channel.hint')}>
+        {(id) => (
+          <Input id={id} type="email" value={draft.email} maxLength={200} disabled={disabled} onChange={(e) => onChange({ ...draft, email: e.target.value })} />
+        )}
+      </Field>
+      <Field label={t('teams.telegram')} optional={t('teams.optional')} hint={t('teams.telegram.hint')}>
+        {(id) => <Input id={id} value={draft.telegram} maxLength={64} disabled={disabled} onChange={(e) => onChange({ ...draft, telegram: e.target.value })} />}
+      </Field>
       <Field label={t('teams.description')} optional={t('teams.optional')}>
         {(id) => (
           <Textarea id={id} value={draft.description} rows={2} disabled={disabled} onChange={(e) => onChange({ ...draft, description: e.target.value })} />

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
@@ -36,6 +37,8 @@ type TeamInput struct {
 	Description *string `json:"description"`
 	ParentID    *string `json:"parent_id"`
 	LeadID      *string `json:"lead_id"`
+	Email       *string `json:"email"`
+	Telegram    *string `json:"telegram"`
 }
 
 type TeamView struct {
@@ -241,6 +244,20 @@ func applyTeamText(t *model.Team, in TeamInput) error {
 		}
 		t.Description = desc
 	}
+	if in.Email != nil {
+		e := strings.TrimSpace(*in.Email)
+		if e != "" && !notify.ValidEmail(e) {
+			return invalid("invalid_email", nil)
+		}
+		t.Email = e
+	}
+	if in.Telegram != nil {
+		c := strings.TrimSpace(*in.Telegram)
+		if c != "" && !notify.ValidChat(c) {
+			return invalid("invalid_telegram", nil)
+		}
+		t.Telegram = c
+	}
 	return nil
 }
 
@@ -381,6 +398,9 @@ func diffTeam(d *store.Data, cur, next *model.Team) string {
 	}
 	if cur.ParentID != next.ParentID {
 		parts = append(parts, fmt.Sprintf("parent %q -> %q", teamPath(d, cur.ParentID), teamPath(d, next.ParentID)))
+	}
+	if cur.Email != next.Email || cur.Telegram != next.Telegram {
+		parts = append(parts, fmt.Sprintf("channel %q %q -> %q %q", cur.Email, cur.Telegram, next.Email, next.Telegram))
 	}
 	if cur.LeadID != next.LeadID {
 		parts = append(parts, fmt.Sprintf("lead %q -> %q", leadName(d, cur.LeadID), leadName(d, next.LeadID)))

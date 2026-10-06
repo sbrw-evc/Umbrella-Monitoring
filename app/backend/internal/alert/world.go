@@ -200,12 +200,17 @@ func (w *world) routeServices(svcs []model.Service, owners []Person, now time.Ti
 		r.Service = &Ref{ID: s.ID, Name: s.Name}
 		r.Team = &Ref{ID: t.ID, Name: t.Name}
 		seen := map[string]bool{}
-		for cur, depth := t, 0; depth < 16 && len(r.People) == 0; depth++ {
+		for cur, depth := t, 0; depth < 16 && len(r.People) == 0 && r.Channel == nil; depth++ {
 			if seen[cur.ID] {
 				break
 			}
 			seen[cur.ID] = true
 			r.People = w.teamPeople(cur)
+			if cur.Email != "" || cur.Telegram != "" {
+				// A team with its own channel: the channel and the lead, not every member.
+				r.Channel = &Channel{Email: cur.Email, Telegram: cur.Telegram}
+				r.People = slices.DeleteFunc(r.People, func(p Person) bool { return p.Role != "lead" })
+			}
 			p, ok := w.teams[cur.ParentID]
 			if !ok {
 				break
@@ -215,7 +220,7 @@ func (w *world) routeServices(svcs []model.Service, owners []Person, now time.Ti
 		break
 	}
 	switch {
-	case len(r.People) > 0:
+	case len(r.People) > 0 || r.Channel != nil:
 		r.Via = ViaService
 	case len(r.Owners) > 0:
 		r.Via = ViaCIOwners

@@ -413,8 +413,18 @@ type TVPayload struct {
 	More          bool         `json:"more"`
 }
 
-func boardFilter(w *model.Wallboard) alert.BoardFilter {
-	return alert.BoardFilter{CIIDs: w.CIIDs, ServiceIDs: w.ServiceIDs, TeamIDs: w.TeamIDs, Severities: w.Severities, Methods: w.Methods,
+// boardFilter: a team target matches the incidents routed to the team and the incidents of every
+// service the team owns or supports.
+func boardFilter(d *store.Data, w *model.Wallboard) alert.BoardFilter {
+	services := slices.Clone(w.ServiceIDs)
+	if len(w.TeamIDs) > 0 {
+		for _, id := range teamServiceIDs(d, w.TeamIDs) {
+			if !slices.Contains(services, id) {
+				services = append(services, id)
+			}
+		}
+	}
+	return alert.BoardFilter{CIIDs: w.CIIDs, ServiceIDs: services, TeamIDs: w.TeamIDs, Severities: w.Severities, Methods: w.Methods,
 		ShowAcknowledged: w.ShowAcknowledged, ShowSuppressed: w.ShowSuppressed, ResolvedMinutes: w.ResolvedMinutes,
 		Oldest: w.Sort == model.WallboardSortOldest}
 }
@@ -447,7 +457,9 @@ func (a *App) wallboardPayload(ctx context.Context, w *model.Wallboard) (TVPaylo
 	if a.alerts == nil || !a.ingestReady() {
 		return out, nil
 	}
-	page, err := a.alerts.Board(ctx, boardFilter(w))
+	var f alert.BoardFilter
+	a.deps.Store.Read(func(d *store.Data) { f = boardFilter(d, w) })
+	page, err := a.alerts.Board(ctx, f)
 	if err != nil {
 		return out, err
 	}
@@ -636,4 +648,20 @@ func (a *App) tvAsset(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(body)
+}
+
+// teamServiceIDs are the services the teams own or support, sorted.
+func teamServiceIDs(d *store.Data, teamIDs []string) []string {
+	in := map[string]bool{}
+	for _, id := range teamIDs {
+		in[id] = true
+	}
+	var out []string
+	for _, s := range d.Services {
+		if s.Involves(in) {
+			out = append(out, s.ID)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
