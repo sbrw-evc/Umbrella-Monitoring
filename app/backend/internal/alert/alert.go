@@ -111,8 +111,12 @@ func (a *Alert) InScope(scope []string) bool {
 type PD struct {
 	State string `json:"state"`
 	// Key is the dedup_key of the Events API: umb-<alert id>.
-	Key         string     `json:"key"`
+	Key string `json:"key"`
+	// Route names the PagerDuty route of the last delivery. RouteID is the route the accepted
+	// trigger went by: acknowledge, resolve and severity updates go to that PagerDuty service
+	// even after the alert is routed to another team. It is cleared when the alert reopens.
 	Route       string     `json:"route,omitempty"`
+	RouteID     string     `json:"route_id,omitempty"`
 	Error       string     `json:"error,omitempty"`
 	Retry       string     `json:"retry,omitempty"`
 	AttemptAt   *time.Time `json:"attempt_at,omitempty"`

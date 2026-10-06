@@ -25,9 +25,10 @@ func (s secrets) Resolve(ref string) (string, error) {
 }
 
 type result struct {
-	action alert.Action
-	route  string
-	err    error
+	action  alert.Action
+	route   string
+	routeID string
+	err     error
 }
 
 type results struct {
@@ -35,10 +36,10 @@ type results struct {
 	got []result
 }
 
-func (r *results) PDResult(_ context.Context, _ string, action alert.Action, route string, err error) {
+func (r *results) PDResult(_ context.Context, _ string, action alert.Action, route, routeID string, err error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.got = append(r.got, result{action, route, err})
+	r.got = append(r.got, result{action, route, routeID, err})
 }
 func (r *results) PDInbound(context.Context, alert.PDUpdate) error { return nil }
 func (r *results) PDKeys(context.Context, string, string) ([]string, error) {

@@ -266,7 +266,7 @@ func TestActionsAndPagerDuty(t *testing.T) {
 	b := active(t, e)[0]
 	rec.take()
 	// PagerDuty is down: the trigger fails and is retried; after 2 minutes backup notification.
-	e.PDResult(ctx, b.ID, alert.PDTrigger, "default", errors.New("Events API answered 503"))
+	e.PDResult(ctx, b.ID, alert.PDTrigger, "default", "", errors.New("Events API answered 503"))
 	got, _, _ := e.Get(ctx, b.ID)
 	if got.PD.State != alert.PDFailed || got.PD.Retry != "trigger" {
 		t.Fatalf("pd = %+v", got.PD)
@@ -295,11 +295,11 @@ func TestActionsAndPagerDuty(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec.take()
-	e.PDResult(ctx, b.ID, alert.PDTrigger, "Payments", nil)
+	e.PDResult(ctx, b.ID, alert.PDTrigger, "Payments", "", nil)
 	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDAcknowledge {
 		t.Errorf("the acknowledgement follows: %+v", cmds)
 	}
-	e.PDResult(ctx, b.ID, alert.PDAcknowledge, "Payments", nil)
+	e.PDResult(ctx, b.ID, alert.PDAcknowledge, "Payments", "", nil)
 
 	// Resolved in PagerDuty: resolved here.
 	keys, err := e.PDKeys(ctx, "umb-"+b.ID, "")
@@ -329,7 +329,7 @@ func TestBelowThresholdIsNotRetried(t *testing.T) {
 	e, _, rec, c := setup(t)
 	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "app-01", "errors", "warning", "firing")})
 	a := active(t, e)[0]
-	e.PDResult(ctx, a.ID, alert.PDTrigger, "", alert.ErrPDSkipped)
+	e.PDResult(ctx, a.ID, alert.PDTrigger, "", "", alert.ErrPDSkipped)
 	rec.take()
 	c.advance(5 * time.Minute)
 	e.Tick(ctx)
@@ -420,7 +420,7 @@ func TestWindowDoesNotStrandPagerDutyIncidents(t *testing.T) {
 		t.Fatalf("two alerts: %+v", list)
 	}
 	for _, a := range list {
-		e.PDResult(ctx, a.ID, alert.PDTrigger, "default", nil)
+		e.PDResult(ctx, a.ID, alert.PDTrigger, "default", "", nil)
 	}
 	rec.take()
 	st.Write(func(d *store.Data) {
@@ -445,13 +445,13 @@ func TestWindowDoesNotStrandPagerDutyIncidents(t *testing.T) {
 		t.Fatalf("resolve goes to PagerDuty in a window: %+v", cmds)
 	}
 	// The resolve fails: it is retried in the window too.
-	e.PDResult(ctx, cmds[0].Alert.ID, alert.PDResolve, "default", errors.New("Events API answered 503"))
+	e.PDResult(ctx, cmds[0].Alert.ID, alert.PDResolve, "default", "", errors.New("Events API answered 503"))
 	c.advance(2 * time.Minute)
 	e.Tick(ctx)
 	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDResolve {
 		t.Fatalf("the resolve is retried in a window: %+v", cmds)
 	}
-	e.PDResult(ctx, cmds[0].Alert.ID, alert.PDResolve, "default", nil)
+	e.PDResult(ctx, cmds[0].Alert.ID, alert.PDResolve, "default", "", nil)
 
 	// Acknowledged in Umbrella during the window: acknowledged in PagerDuty.
 	other := active(t, e)[0]

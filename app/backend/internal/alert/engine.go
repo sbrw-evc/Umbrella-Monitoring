@@ -244,6 +244,8 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 		a.Status, a.ResolvedAt, a.ResolvedBy, a.AckedBy, a.AckedAt = StatusOpen, nil, "", "", nil
 		a.OpenedAt, a.Fallback, a.FallbackAt = now, false, nil
 		a.PD.State, a.PD.Error, a.PD.Retry, a.PD.AttemptAt = PDPending, "", "", nil
+		// PagerDuty opens a new incident for the trigger after a resolve: it goes by the current route.
+		a.PD.Route, a.PD.RouteID = "", ""
 		c.log(now, KindStatus, "reopened", map[string]string{"window": e.Window.String()}, "")
 		reopened = true
 	}
@@ -459,8 +461,9 @@ func (e *Engine) ActIn(ctx context.Context, id, action, actor, text string, scop
 	return out, nil
 }
 
-// PDResult records the outcome of a delivery to PagerDuty.
-func (e *Engine) PDResult(ctx context.Context, alertID string, action Action, route string, deliveryErr error) {
+// PDResult records the outcome of a delivery to PagerDuty: route is the name of the PagerDuty
+// route used and routeID its ID.
+func (e *Engine) PDResult(ctx context.Context, alertID string, action Action, route, routeID string, deliveryErr error) {
 	now := e.now()
 	var follow []Command
 	err := pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
@@ -494,6 +497,9 @@ func (e *Engine) PDResult(ctx context.Context, alertID string, action Action, ro
 			case PDTrigger:
 				if a.PD.State != PDAcked {
 					a.PD.State = PDAccepted
+				}
+				if routeID != "" {
+					a.PD.RouteID = routeID
 				}
 				switch a.Status {
 				case StatusAcknowledged:
