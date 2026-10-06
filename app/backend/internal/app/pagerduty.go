@@ -91,9 +91,10 @@ type PagerDutyInput struct {
 	Enabled     bool   `json:"enabled"`
 	Region      string `json:"region"`
 	MinSeverity string `json:"min_severity"`
-	PublicURL   string `json:"public_url"`
-	EventsURL   string `json:"events_url"`
-	APIURL      string `json:"api_url"`
+	// PublicURL is kept for older clients; nil keeps the address set in the «Umbrella address» card.
+	PublicURL *string `json:"public_url,omitempty"`
+	EventsURL string  `json:"events_url"`
+	APIURL    string  `json:"api_url"`
 	// Write-only secrets: empty keeps the stored one.
 	RoutingKey    string         `json:"routing_key"`
 	PDServiceID   string         `json:"pd_service_id"`
@@ -104,17 +105,7 @@ type PagerDutyInput struct {
 }
 
 // NormalizePublicURL checks the address Umbrella is reached at.
-func NormalizePublicURL(v string) (string, error) {
-	v = strings.TrimRight(strings.TrimSpace(v), "/")
-	if v == "" {
-		return "", nil
-	}
-	u, err := url.Parse(v)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return "", errors.New("the public address must be an http or https URL without a query")
-	}
-	return v, nil
-}
+func NormalizePublicURL(v string) (string, error) { return model.NormalizePublicURL(v) }
 
 func optionalURL(v string) (string, error) {
 	v = strings.TrimSpace(v)
@@ -156,9 +147,12 @@ func (s *PagerDutyService) Save(ctx context.Context, actor string, in PagerDutyI
 		}
 	})
 	pd := cur.PagerDuty
-	pub, err := NormalizePublicURL(in.PublicURL)
-	if err != nil {
-		return PagerDutyView{}, invalid("public_url_invalid", err)
+	var err error
+	pub := cur.PublicURL
+	if in.PublicURL != nil {
+		if pub, err = NormalizePublicURL(*in.PublicURL); err != nil {
+			return PagerDutyView{}, invalid("public_url_invalid", err)
+		}
 	}
 	switch in.Region {
 	case "", model.PDRegionUS, model.PDRegionEU:

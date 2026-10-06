@@ -1,6 +1,11 @@
 package model
 
-import "time"
+import (
+	"errors"
+	"net/url"
+	"strings"
+	"time"
+)
 
 const (
 	PDRegionUS = "us"
@@ -14,6 +19,20 @@ type Alerting struct {
 	PagerDuty PagerDuty `json:"pagerduty"`
 	Notify    Notify    `json:"notify"`
 	Grafana   Grafana   `json:"grafana"`
+}
+
+// NormalizePublicURL checks the address Umbrella is reached at and drops trailing slashes. An
+// empty address stays empty (not set).
+func NormalizePublicURL(v string) (string, error) {
+	v = strings.TrimRight(strings.TrimSpace(v), "/")
+	if v == "" {
+		return "", nil
+	}
+	u, err := url.Parse(v)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", errors.New("the public address must be an http or https URL without a query")
+	}
+	return v, nil
 }
 
 // PagerDuty is the connection to PagerDuty. Keys and tokens are in OpenBao; only references
