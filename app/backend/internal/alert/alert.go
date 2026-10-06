@@ -22,6 +22,10 @@ const (
 	PDFailed   = "failed"
 	PDSkipped  = "skipped"
 
+	// Backup notification states of an alert.
+	FallbackPending = "pending"
+	FallbackSent    = "sent"
+
 	SourceFiring   = "firing"
 	SourceResolved = "resolved"
 
@@ -111,13 +115,20 @@ func (a *Alert) InScope(scope []string) bool {
 type PD struct {
 	State string `json:"state"`
 	// Key is the dedup_key of the Events API: umb-<alert id>.
-	Key         string     `json:"key"`
+	Key string `json:"key"`
+	// Route names the PagerDuty route of the last delivery. RouteID is the route the accepted
+	// trigger went by: acknowledge, resolve and severity updates go to that PagerDuty service
+	// even after the alert is routed to another team. It is cleared when the alert reopens.
 	Route       string     `json:"route,omitempty"`
+	RouteID     string     `json:"route_id,omitempty"`
 	Error       string     `json:"error,omitempty"`
 	Retry       string     `json:"retry,omitempty"`
 	AttemptAt   *time.Time `json:"attempt_at,omitempty"`
 	IncidentID  string     `json:"incident_id,omitempty"`
 	IncidentURL string     `json:"incident_url,omitempty"`
+	// OldIncidents are the PagerDuty incidents of earlier openings of the alert: their late
+	// webhooks must not change the reopened alert.
+	OldIncidents []string `json:"old_incidents,omitempty"`
 }
 
 type Alert struct {
@@ -144,13 +155,19 @@ type Alert struct {
 	ResolvedBy string     `json:"resolved_by,omitempty"`
 	AckedBy    string     `json:"acked_by,omitempty"`
 	AckedAt    *time.Time `json:"acked_at,omitempty"`
-	// Suppressed: a maintenance window covers the item or its service; nothing is sent.
+	// Suppressed: a maintenance window covers the item or its service; no trigger is sent and no
+	// backup notification, but an incident PagerDuty already has is still acknowledged and resolved.
 	Suppressed    bool       `json:"suppressed"`
 	MaintenanceID string     `json:"maintenance_id,omitempty"`
 	Route         Route      `json:"route"`
 	PD            PD         `json:"pd"`
 	Fallback      bool       `json:"fallback"`
 	FallbackAt    *time.Time `json:"fallback_at,omitempty"`
+	// FallbackState is pending from the moment backup notification is due until the notifier
+	// reports it was attempted (sent); Tick hands a pending one to the notifier again, so it
+	// survives a restart or a full queue. FallbackTry is when it was last handed over.
+	FallbackState string     `json:"fallback_state,omitempty"`
+	FallbackTry   *time.Time `json:"fallback_try,omitempty"`
 	RelatedID     string     `json:"related_id,omitempty"`
 }
 
@@ -209,7 +226,9 @@ type Sender interface {
 	Send(cmd Command)
 }
 
-// Notifier sends backup notification for an alert PagerDuty did not take.
+// Notifier sends backup notification for an alert PagerDuty did not take and reports the
+// attempt back with Engine.FallbackDone. Fallback may be called again for the same alert
+// while it is pending.
 type Notifier interface {
 	Fallback(a Alert)
 }

@@ -45,7 +45,7 @@ type Resolver interface {
 
 // Results is where the gateway reports deliveries and incident changes: the alert engine.
 type Results interface {
-	PDResult(ctx context.Context, alertID string, action alert.Action, route string, err error)
+	PDResult(ctx context.Context, alertID string, action alert.Action, route, routeID string, err error)
 	PDInbound(ctx context.Context, u alert.PDUpdate) error
 	PDKeys(ctx context.Context, incidentKey, incidentID string) ([]string, error)
 }
@@ -99,7 +99,7 @@ func (g *Gateway) Send(cmd alert.Command) {
 	select {
 	case g.queue <- cmd:
 	default:
-		g.report(cmd, "", ErrQueueFull)
+		g.report(cmd, "", "", ErrQueueFull)
 	}
 }
 
@@ -133,21 +133,21 @@ func (p permanent) Unwrap() error { return p.error }
 func (g *Gateway) deliver(ctx context.Context, cmd alert.Command) {
 	set, all := g.settings()
 	if !set.Enabled {
-		g.report(cmd, "", ErrDisabled)
+		g.report(cmd, "", "", ErrDisabled)
 		return
 	}
 	if min := set.MinSeverity; cmd.Action == alert.PDTrigger && min != "" && alert.SeverityRank(cmd.Alert.Severity) < alert.SeverityRank(min) {
-		g.report(cmd, "", fmt.Errorf("%w %s", alert.ErrPDSkipped, min))
+		g.report(cmd, "", "", fmt.Errorf("%w %s", alert.ErrPDSkipped, min))
 		return
 	}
-	routeName, ref := Route(set, cmd.Alert)
+	routeName, routeID, ref := deliveryRoute(set, cmd.Alert)
 	if ref == "" {
-		g.report(cmd, routeName, ErrNoKey)
+		g.report(cmd, routeName, routeID, ErrNoKey)
 		return
 	}
 	key, err := g.sec.Resolve(ref)
 	if err != nil {
-		g.report(cmd, routeName, fmt.Errorf("integration key: %w", err))
+		g.report(cmd, routeName, routeID, fmt.Errorf("integration key: %w", err))
 		return
 	}
 	ev := Build(all.PublicURL, all.Grafana.DashboardURL != "", key, cmd)
@@ -181,12 +181,37 @@ func (g *Gateway) deliver(ctx context.Context, cmd alert.Command) {
 		g.stat.LastError, g.stat.LastErrorAt = err.Error(), &now
 	}
 	g.mu.Unlock()
-	g.report(cmd, routeName, err)
+	g.report(cmd, routeName, routeID, err)
 }
 
 // Route picks the PagerDuty service of an alert: the first route whose team and business
 // service match, otherwise the default integration key.
 func Route(set model.PagerDuty, a alert.Alert) (string, string) {
+	name, _, ref := currentRoute(set, a)
+	return name, ref
+}
+
+// deliveryRoute is the route of a command: the one the accepted trigger went by while it
+// exists, because PagerDuty has the incident in that service and the alert may have been routed
+// to another team since; otherwise the current route.
+func deliveryRoute(set model.PagerDuty, a alert.Alert) (name, id, ref string) {
+	switch id := a.PD.RouteID; {
+	case id == "":
+	case id == DefaultRoute:
+		if set.RoutingKeyRef != "" {
+			return DefaultRoute, DefaultRoute, set.RoutingKeyRef
+		}
+	default:
+		for _, r := range set.Routes {
+			if r.ID == id && r.RoutingKeyRef != "" {
+				return r.Name, r.ID, r.RoutingKeyRef
+			}
+		}
+	}
+	return currentRoute(set, a)
+}
+
+func currentRoute(set model.PagerDuty, a alert.Alert) (name, id, ref string) {
 	team := ""
 	if a.Route.Team != nil {
 		team = a.Route.Team.ID
@@ -197,15 +222,15 @@ func Route(set model.PagerDuty, a alert.Alert) (string, string) {
 			continue
 		}
 		if (r.TeamID == "" || r.TeamID == team) && (r.ServiceID == "" || slices.Contains(services, r.ServiceID)) {
-			return r.Name, r.RoutingKeyRef
+			return r.Name, r.ID, r.RoutingKeyRef
 		}
 	}
-	return DefaultRoute, set.RoutingKeyRef
+	return DefaultRoute, DefaultRoute, set.RoutingKeyRef
 }
 
-func (g *Gateway) report(cmd alert.Command, route string, err error) {
+func (g *Gateway) report(cmd alert.Command, route, routeID string, err error) {
 	if g.results != nil {
-		g.results.PDResult(context.Background(), cmd.Alert.ID, cmd.Action, route, err)
+		g.results.PDResult(context.Background(), cmd.Alert.ID, cmd.Action, route, routeID, err)
 	}
 }
 

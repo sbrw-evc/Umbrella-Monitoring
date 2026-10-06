@@ -37,14 +37,17 @@ type Resolver interface {
 	Resolve(ref string) (string, error)
 }
 
-// Results records what was sent on the timeline of the incident.
+// Results records what was sent on the timeline of the incident, and that backup notification
+// of the incident was attempted, so that it is not handed over again.
 type Results interface {
 	Note(ctx context.Context, id, kind, code string, args map[string]string) error
+	FallbackDone(ctx context.Context, id string) error
 }
 
 type nopResults struct{}
 
 func (nopResults) Note(context.Context, string, string, string, map[string]string) error { return nil }
+func (nopResults) FallbackDone(context.Context, string) error                            { return nil }
 
 type Service struct {
 	st      *store.Store
@@ -52,6 +55,11 @@ type Service struct {
 	client  *http.Client
 	results Results
 	queue   chan alert.Alert
+
+	// queued: incidents in the queue or being delivered; the engine hands a pending incident
+	// over again until it is reported, and a second copy is not queued.
+	qmu    sync.Mutex
+	queued map[string]bool
 
 	mu    sync.RWMutex
 	links *Links
@@ -63,7 +71,7 @@ type Service struct {
 
 func New(st *store.Store, sec Resolver) *Service {
 	return &Service{st: st, sec: sec, client: &http.Client{Timeout: 15 * time.Second}, results: nopResults{},
-		queue: make(chan alert.Alert, queueSize), Retries: 3, Backoff: 2 * time.Second, now: func() time.Time { return time.Now().UTC() }}
+		queue: make(chan alert.Alert, queueSize), queued: map[string]bool{}, Retries: 3, Backoff: 2 * time.Second, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (s *Service) SetResults(r Results) { s.results = r }
@@ -81,12 +89,20 @@ func (s *Service) Links() *Links {
 	return s.links
 }
 
-// Fallback queues backup notification for an incident; the engine calls it once per incident.
+// Fallback queues backup notification for an incident. The engine keeps the incident pending
+// until Deliver reports it, and hands it over again later when the queue is full or the
+// process restarted in between.
 func (s *Service) Fallback(a alert.Alert) {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	if s.queued[a.ID] {
+		return
+	}
 	select {
 	case s.queue <- a:
+		s.queued[a.ID] = true
 	default:
-		slog.Warn("backup notification queue is full", "alert", a.ID)
+		slog.Warn("backup notification queue is full: it is retried later", "alert", a.ID)
 	}
 }
 
@@ -97,6 +113,9 @@ func (s *Service) Run(ctx context.Context) {
 			return
 		case a := <-s.queue:
 			s.Deliver(ctx, a)
+			s.qmu.Lock()
+			delete(s.queued, a.ID)
+			s.qmu.Unlock()
 		}
 	}
 }
@@ -211,10 +230,20 @@ func (s *Service) targets(c config, a alert.Alert) []target {
 	return out
 }
 
-// Deliver sends backup notification for an incident and records the outcome on its timeline.
+// Deliver sends backup notification for an incident, records the outcome on its timeline and
+// then reports the attempt. Delivery cut short by shutdown is not reported: the incident stays
+// pending and is sent after the restart.
 func (s *Service) Deliver(ctx context.Context, a alert.Alert) {
 	c := s.config()
 	targets := s.targets(c, a)
+	defer func() {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := s.results.FallbackDone(ctx, a.ID); err != nil && !errors.Is(err, alert.ErrNotFound) {
+			slog.Warn("backup notification not marked as sent", "alert", a.ID, "err", err)
+		}
+	}()
 	if len(targets) == 0 {
 		s.note(ctx, a.ID, "notify_none", nil)
 		return

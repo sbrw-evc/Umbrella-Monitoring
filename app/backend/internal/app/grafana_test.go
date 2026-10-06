@@ -1,8 +1,10 @@
 package app_test
 
 import (
+	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,16 +66,21 @@ func TestGrafanaRedirect(t *testing.T) {
 		t.Fatalf("grafana_url = %q", detail.Grafana)
 	}
 
+	// A click in PagerDuty is a cross-site navigation: the SameSite=Strict session cookie is not
+	// sent. The answer is a page of Umbrella that opens the link again, now same-site.
 	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := noFollow.Get(f.h.srv.URL + "/go/incidents/" + id + "/grafana")
 	if err != nil {
 		t.Fatal(err)
 	}
+	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if loc := resp.Header.Get("Location"); resp.StatusCode != http.StatusFound || loc != "/incidents?id="+id {
-		t.Fatalf("anonymous: %d %s", resp.StatusCode, loc)
+	hop := "/go/incidents/" + id + "/grafana?same=1"
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), `content="0;url=`+hop+`"`) || resp.Header.Get("Location") != "" {
+		t.Fatalf("cross-site, no cookie: %d %s", resp.StatusCode, body)
 	}
-	req, _ := http.NewRequest(http.MethodGet, f.h.srv.URL+"/go/incidents/"+id+"/grafana", nil)
+	// The same-site request from that page carries the cookie of a signed-in user: Grafana.
+	req, _ := http.NewRequest(http.MethodGet, f.h.srv.URL+hop, nil)
 	for _, c := range f.admin.http.Jar.Cookies(req.URL) {
 		req.AddCookie(c)
 	}
@@ -84,5 +91,14 @@ func TestGrafanaRedirect(t *testing.T) {
 	resp.Body.Close()
 	if u, _ := url.Parse(resp.Header.Get("Location")); resp.StatusCode != http.StatusFound || u.Host != "grafana.example" {
 		t.Fatalf("signed in: %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	// Still no cookie: not signed in, on to the incident page (no loop).
+	resp, err = noFollow.Get(f.h.srv.URL + hop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if loc := resp.Header.Get("Location"); resp.StatusCode != http.StatusFound || loc != "/incidents?id="+id {
+		t.Fatalf("anonymous: %d %s", resp.StatusCode, loc)
 	}
 }

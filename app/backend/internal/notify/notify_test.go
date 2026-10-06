@@ -32,6 +32,16 @@ type note struct {
 type results struct {
 	mu    sync.Mutex
 	notes []note
+	done  []string
+}
+
+func (r *results) FallbackDone(_ context.Context, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// The attempt is reported after it is on the timeline.
+	r.notes = append(r.notes, note{"done:" + id, nil})
+	r.done = append(r.done, id)
+	return nil
 }
 
 func (r *results) Note(_ context.Context, _, _, code string, args map[string]string) error {
@@ -137,7 +147,7 @@ func TestBackupNotificationNobody(t *testing.T) {
 	a := incident()
 	a.Route.People = []alert.Person{{UserID: "u1", Email: "ivanov@example.com"}}
 	s.Deliver(context.Background(), a)
-	if len(res.notes) != 1 || res.notes[0].code != "notify_none" {
+	if len(res.notes) != 2 || res.notes[0].code != "notify_none" || res.notes[1].code != "done:INC-7" {
 		t.Fatalf("notes: %+v", res.notes)
 	}
 }
@@ -162,4 +172,44 @@ func TestChannelTests(t *testing.T) {
 	if _, err := s.TestTelegram(context.Background(), "4242"); !errors.Is(err, notify.ErrNoSecret) {
 		t.Fatalf("missing token: %v", err)
 	}
+}
+
+// Delivery is reported after the outcome is recorded; a delivery cut short by shutdown is not,
+// so the engine sends it after the restart.
+func TestBackupNotificationReported(t *testing.T) {
+	s, _, smtp, _, res := setup(t)
+	s.Deliver(context.Background(), incident())
+	if last := res.notes[len(res.notes)-1]; last.code != "done:INC-7" || len(res.done) != 1 || len(smtp.Mails()) == 0 {
+		t.Fatalf("reported last: %+v", res.notes)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	s.Deliver(ctx, incident())
+	if len(res.done) != 1 {
+		t.Fatalf("an interrupted delivery is not reported: %+v", res.done)
+	}
+
+	// A copy handed over again while one is queued is not queued twice.
+	s.Fallback(incident())
+	s.Fallback(incident())
+	run, stop := context.WithCancel(context.Background())
+	defer stop()
+	go s.Run(run)
+	deadline := time.Now().Add(5 * time.Second)
+	for len(res.doneIDs()) < 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("not delivered")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if n := len(res.doneIDs()); n != 2 {
+		t.Fatalf("delivered %d times", n-1)
+	}
+}
+
+func (r *results) doneIDs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.done...)
 }
