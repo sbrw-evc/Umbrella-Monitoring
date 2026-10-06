@@ -682,3 +682,42 @@ func TestFallbackResetOnReopen(t *testing.T) {
 		t.Fatalf("reset: %+v", got)
 	}
 }
+
+// A reopen window set in the alerting policy replaces the default of 10 minutes.
+func TestCustomReopenWindow(t *testing.T) {
+	ctx := context.Background()
+	e, st, _, c := setup(t)
+	st.Write(func(d *store.Data) { d.Settings.Alerting.Policy = &model.AlertPolicy{ReopenWindowSeconds: 3600} })
+	fire := func(status string) {
+		t.Helper()
+		if err := e.Ingest(ctx, []alert.Incoming{ev("CON-1", "z1", "db-01.example.com", "cpu", "warning", status)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fire("firing")
+	first := active(t, e)[0].ID
+	fire("resolved")
+	// Beyond the default window, within the policy's one: the same alert reopens.
+	c.advance(30 * time.Minute)
+	fire("firing")
+	if list := active(t, e); len(list) != 1 || list[0].ID != first {
+		t.Fatalf("reopened within the policy window: %+v", list)
+	}
+	_, entries, err := e.Get(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened := false
+	for _, en := range entries {
+		reopened = reopened || (en.Code == "reopened" && en.Args["window"] == "1h0m0s")
+	}
+	if !reopened {
+		t.Fatalf("timeline = %+v", entries)
+	}
+	fire("resolved")
+	c.advance(61 * time.Minute)
+	fire("firing")
+	if list := active(t, e); len(list) != 1 || list[0].ID == first {
+		t.Fatalf("a new alert after the policy window: %+v", list)
+	}
+}

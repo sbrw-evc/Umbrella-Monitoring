@@ -9,10 +9,11 @@ import { useSession } from '../session'
 import { Link } from '../../router'
 import { SourcesExplainer } from '../connectors/QuickConnect'
 import { strings } from './strings'
+import { RULE_METHODS, SEVERITIES, type RuleMethod } from '../incidents/types'
 import '../connectors/connectors.css'
 import './rules.css'
 
-type Method = 'red' | 'use'
+type Method = RuleMethod
 type Rule = {
   id: string
   name: string
@@ -36,11 +37,14 @@ type Rule = {
   last_eval_at?: string
 }
 type Source = { id: string; name: string; url: string; credential_id?: string; credential_name?: string; skip_verify: boolean; rules: number; system: boolean; system_id?: string }
-type View = { rules: Rule[]; sources: Source[]; templates: Rule[]; ops: string[] }
+// FormDefaults is rules.FormDefaults: the fields a new rule starts with.
+type FormDefaults = Pick<Rule, 'method' | 'ci_label' | 'op' | 'threshold' | 'for' | 'interval' | 'severity' | 'enabled'>
+type View = { rules: Rule[]; sources: Source[]; templates: Rule[]; ops: string[]; defaults?: { form?: FormDefaults } }
 type Preview = { series: { ci: string; labels: Record<string, string>; value: number; match: boolean; title: string }[]; total: number; matched: number; error?: string }
 type Credential = { id: string; name: string; type: string }
 
-const SEVERITIES = ['info', 'warning', 'error', 'critical']
+// The rule editor lists severities from the mildest up.
+const SEVERITY_OPTIONS = [...SEVERITIES].reverse()
 
 export function RulesPage() {
   const t = useT(strings)
@@ -236,26 +240,20 @@ function SourcesTable({ v, editor, onOpen, onChanged }: { v: View; editor: boole
   )
 }
 
-const EMPTY: Omit<Rule, 'id' | 'series' | 'pending' | 'firing'> = {
-  name: '',
-  method: 'use',
-  signal: '',
-  source_id: '',
-  query: '',
-  ci_label: 'instance',
-  op: '>',
-  threshold: 0,
-  for: '5m',
-  interval: '30s',
-  severity: 'warning',
-  title: '',
-  enabled: true,
+type RuleFields = Omit<Rule, 'id' | 'series' | 'pending' | 'firing'>
+
+// FORM_DEFAULTS is what a new rule starts with when the server does not say (an older server).
+const FORM_DEFAULTS: FormDefaults = { method: 'use', ci_label: 'instance', op: '>', threshold: 0, for: '5m', interval: '30s', severity: 'warning', enabled: true }
+
+// emptyRule is a new rule: the form defaults of the server and empty texts.
+function emptyRule(v: View): RuleFields {
+  return { ...FORM_DEFAULTS, ...v.defaults?.form, name: '', signal: '', source_id: '', query: '', title: '' }
 }
 
-type RuleDraft = typeof EMPTY & { threshold_text: string }
+type RuleDraft = RuleFields & { threshold_text: string }
 
-function ruleDraft(r: Partial<Rule>, sourceID: string): RuleDraft {
-  const d = { ...EMPTY, ...r, source_id: r.source_id || sourceID }
+function ruleDraft(v: View, r: Partial<Rule>, sourceID: string): RuleDraft {
+  const d = { ...emptyRule(v), ...r, source_id: r.source_id || sourceID }
   return { ...d, threshold_text: String(d.threshold) }
 }
 
@@ -282,13 +280,13 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
   const { locale } = useLocale()
   const { timezone } = useSession()
   const editing = value && value !== 'new' ? value : null
-  const [d, setD] = useState<RuleDraft>(() => ruleDraft(editing ?? {}, v.sources[0]?.id ?? ''))
+  const [d, setD] = useState<RuleDraft>(() => ruleDraft(v, editing ?? {}, v.sources[0]?.id ?? ''))
   const [template, setTemplate] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
   const save = useAction()
   const check = useAction()
   useEffect(() => {
-    setD(ruleDraft(editing ?? {}, v.sources[0]?.id ?? ''))
+    setD(ruleDraft(v, editing ?? {}, v.sources[0]?.id ?? ''))
     setTemplate('')
     setPreview(null)
     save.clear()
@@ -300,7 +298,7 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
     setTemplate(i)
     if (i === '') return
     const tpl = v.templates[Number(i)]
-    setD(ruleDraft({ ...tpl, source_id: d.source_id }, d.source_id))
+    setD(ruleDraft(v, { ...tpl, source_id: d.source_id }, d.source_id))
     setPreview(null)
   }
   const submit = () =>
@@ -359,8 +357,9 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
           <Field label={t('rl.method')}>
             {(id) => (
               <Select id={id} value={d.method} onChange={(e) => set({ method: e.target.value as Method })}>
-                <option value="red">{`RED · ${t('rl.method.red.hint')}`}</option>
-                <option value="use">{`USE · ${t('rl.method.use.hint')}`}</option>
+                {RULE_METHODS.map((m) => (
+                  <option key={m} value={m}>{`${m.toUpperCase()} · ${t(`rl.method.${m}.hint`)}`}</option>
+                ))}
               </Select>
             )}
           </Field>
@@ -403,7 +402,7 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
           <Field label={t('rl.severity')}>
             {(id) => (
               <Select id={id} value={d.severity} onChange={(e) => set({ severity: e.target.value })}>
-                {SEVERITIES.map((s) => (
+                {SEVERITY_OPTIONS.map((s) => (
                   <option key={s} value={s}>
                     {t(`sev.${s}`)}
                   </option>

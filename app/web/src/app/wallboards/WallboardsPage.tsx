@@ -6,6 +6,7 @@ import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Banner, Button, formatDate, Modal, Rows } from '../../ui'
 import { SeverityPill } from '../incidents/IncidentDetail'
+import { SEVERITIES } from '../incidents/types'
 import { useSession } from '../session'
 import { copyText, publicURL } from './model'
 import { plural, strings } from './strings'
@@ -322,7 +323,7 @@ function PreviewDialog({ w, onClose }: { w: Wallboard | null; onClose: () => voi
         {p && (
           <>
             <div className="wb-counts">
-              {(['critical', 'error', 'warning', 'info'] as const).map(
+              {SEVERITIES.map(
                 (s) =>
                   p.counts[s] > 0 && (
                     <span key={s} className="wb-count">

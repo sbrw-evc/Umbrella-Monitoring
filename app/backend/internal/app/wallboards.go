@@ -31,11 +31,7 @@ const (
 	maxRefreshSeconds       = 600
 )
 
-var (
-	wallboardSlug     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
-	wallboardMethods  = []string{model.MethodRED, model.MethodUSE, "other"}
-	wallboardSeverity = []string{"critical", "error", "warning", "info"}
-)
+var wallboardSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
 
 // WallboardService keeps the TV wallboards: pages for the operations room opened without
 // signing in from the allowed networks.
@@ -217,12 +213,12 @@ func (s *WallboardService) check(d *store.Data, selfID string, in *WallboardInpu
 		return invalid("too_many_targets", nil)
 	}
 	for _, sev := range in.Severities {
-		if !slices.Contains(wallboardSeverity, sev) {
+		if !model.ValidSeverity(sev) {
 			return invalid("severity_invalid", fmt.Errorf("unknown severity %q", sev))
 		}
 	}
 	for _, m := range in.Methods {
-		if !slices.Contains(wallboardMethods, m) {
+		if !model.ValidMethod(m) {
 			return invalid("method_invalid", fmt.Errorf("unknown method %q", m))
 		}
 	}
@@ -390,11 +386,8 @@ type tvBoard struct {
 }
 
 type tvCounts struct {
-	Total        int `json:"total"`
-	Critical     int `json:"critical"`
-	Error        int `json:"error"`
-	Warning      int `json:"warning"`
-	Info         int `json:"info"`
+	Total int `json:"total"`
+	model.SeverityCounts
 	Acknowledged int `json:"acknowledged"`
 	Open         int `json:"open"`
 }
@@ -483,7 +476,7 @@ func (a *App) wallboardPayload(ctx context.Context, w *model.Wallboard) (TVPaylo
 	}
 	out.Ready, out.More = true, page.More
 	c := page.Counts
-	out.Counts = tvCounts{Total: c.Total, Critical: c.Critical, Error: c.Error, Warning: c.Warning, Info: c.Info, Acknowledged: c.Acknowledged, Open: c.Open}
+	out.Counts = tvCounts{Total: c.Total, SeverityCounts: c.SeverityCounts, Acknowledged: c.Acknowledged, Open: c.Open}
 	for _, al := range page.Alerts {
 		out.Incidents = append(out.Incidents, tvIncidentOf(al))
 	}

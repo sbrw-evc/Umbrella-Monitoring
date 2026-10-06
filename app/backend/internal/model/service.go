@@ -23,6 +23,15 @@ var (
 
 func ValidCriticality(v string) bool { return slices.Contains(Criticalities, v) }
 
+// CriticalityRank orders criticalities by Criticalities: the most critical ranks highest,
+// unknown ones rank 0.
+func CriticalityRank(v string) int {
+	if i := slices.Index(Criticalities, v); i >= 0 {
+		return len(Criticalities) - i
+	}
+	return 0
+}
+
 func ValidServiceStatus(v string) bool { return slices.Contains(ServiceStatuses, v) }
 
 type Link struct {

@@ -64,11 +64,8 @@ type MapEvent struct {
 }
 
 type MapEvents struct {
-	Critical int        `json:"critical"`
-	Error    int        `json:"error"`
-	Warning  int        `json:"warning"`
-	Info     int        `json:"info"`
-	Recent   []MapEvent `json:"recent"`
+	model.SeverityCounts
+	Recent []MapEvent `json:"recent"`
 }
 
 type MapCI struct {
@@ -210,10 +207,6 @@ func (s *CMDBService) Map(ctx context.Context, scope ...string) CMDBMap {
 	return out
 }
 
-// eventKeys are the forms of the ci field of an event a configuration item may be known by,
-// the same the alert engine matches items with.
-func eventKeys(v string) []string { return alert.EventKeys(v) }
-
 // attachEvents matches firing events to configuration items by name, short name, IP address
 // or the DNS name the domain controller has for the item. With a scope, only items of those
 // services get events.
@@ -234,23 +227,19 @@ func attachEvents(d *store.Data, cis map[string]*MapCI, events []ingest.FiringEv
 	}
 	for _, e := range events {
 		var ids []string
-		for _, k := range eventKeys(e.CI) {
+		// The forms of the ci field an item may be known by, the same the alert engine matches.
+		for _, k := range alert.EventKeys(e.CI) {
 			if ids = index[k]; len(ids) > 0 {
 				break
 			}
 		}
 		for _, id := range ids {
 			m := cis[id]
-			switch e.Severity {
-			case "critical":
-				m.Events.Critical++
-			case "error":
-				m.Events.Error++
-			case "warning":
-				m.Events.Warning++
-			default:
-				m.Events.Info++
+			sev := e.Severity
+			if !model.ValidSeverity(sev) {
+				sev = model.SeverityInfo
 			}
+			m.Events.Add(sev, 1)
 			if len(m.Events.Recent) < maxRecentEvents {
 				m.Events.Recent = append(m.Events.Recent, MapEvent{Title: e.Title, Severity: e.Severity, ConnectorID: e.ConnectorID, LastSeen: e.LastSeen})
 			}

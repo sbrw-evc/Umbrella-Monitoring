@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store/storetest"
 )
@@ -115,7 +116,7 @@ func TestBoard(t *testing.T) {
 	if len(ids) != 3 || !p.More {
 		t.Fatalf("limited page = %v more=%v", ids, p.More)
 	}
-	want := BoardCounts{Total: 8, Critical: 3, Error: 2, Warning: 2, Info: 1, Open: 5, Acknowledged: 1, Resolved: 2}
+	want := BoardCounts{Total: 8, SeverityCounts: model.SeverityCounts{Critical: 3, Error: 2, Warning: 2, Info: 1}, Open: 5, Acknowledged: 1, Resolved: 2}
 	if p.Counts != want {
 		t.Fatalf("counts cover every match: %+v, want %+v", p.Counts, want)
 	}

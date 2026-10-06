@@ -1,8 +1,16 @@
+// The alert scale, most severe first: the one list of the interface (model.Severities on the server).
 export const SEVERITIES = ['critical', 'error', 'warning', 'info'] as const
 export const STATUSES = ['active', 'open', 'acknowledged', 'resolved', 'all'] as const
+// Methods of an alert (model.Methods); rules are RED or USE only.
 export const METHODS = ['red', 'use', 'other'] as const
+export const RULE_METHODS = ['red', 'use'] as const
 
 export type Severity = (typeof SEVERITIES)[number]
+export type Method = (typeof METHODS)[number]
+export type RuleMethod = (typeof RULE_METHODS)[number]
+
+// SEVERITY_TONE is the colour each severity is shown in (model.Severity.Tone).
+export const SEVERITY_TONE: Record<Severity, string> = { critical: 'critical', error: 'error', warning: 'warn', info: 'info' }
 
 export type Source = {
   connector_id: string
