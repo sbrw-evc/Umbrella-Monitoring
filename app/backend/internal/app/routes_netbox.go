@@ -20,6 +20,7 @@ func (a *App) registerNetBox(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/cis/{id}", a.authed(a.can("cis:edit", a.updateCI)))
 	mux.HandleFunc("DELETE /api/cis/{id}", a.authed(a.can("cis:edit", a.deleteCI)))
 	mux.HandleFunc("POST /api/cis/{id}/netbox", a.authed(a.can("cis:edit", a.registerCI)))
+	mux.HandleFunc("PUT /api/cis/{id}/aliases", a.authed(a.can("cis:edit", a.setCIAliases)))
 }
 
 func respondNetBox(w http.ResponseWriter, status int, out any, err error) {
