@@ -221,9 +221,9 @@ const (
 // instance) waits until the batch before it is committed and then claims the requests that
 // follow it. Folding was already serialized by the alert engine's global lock, held to the end
 // of a batch, so little parallelism is lost (only pipelines no longer overlap), and batches can
-// no longer deadlock on that lock and the rows of connector_events. Behind that, an event older than the one already stored for
-// its connector and key is never applied (see handle), which covers requests reprocessed or
-// committed late.
+// no longer deadlock on that lock and the rows of connector_events. Behind that, an event
+// older than the one already stored for its connector and key is never applied (see handle),
+// which covers requests reprocessed or committed late.
 //
 // Isolation: every request runs in a savepoint of its own. A request that cannot be stored or
 // folded is rolled back alone and retried up to maxAttempts times, or at once marked failed
@@ -362,7 +362,12 @@ func (q *Queue) fail(ctx context.Context, tx pgx.Tx, r Request, cause error) err
 // keeps the receive time and id of the request that set it):
 //   - an event from an older request than the stored one is stale and is not applied, so a
 //     late or reprocessed request never takes a source back to an earlier state;
-//   - anything else is the newest known state of the source and is folded now.
+//   - an event its own request already stored with the same status and severity was folded
+//     then and is not folded again: a reprocessed request does not re-fire (or reopen) what
+//     it fired before;
+//   - anything else is the newest known state of the source and is folded now. The alert
+//     engine stamps it with the time of folding, so reprocessing applies the last word of a
+//     source as its current state - never a state the source has since left.
 func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Processor, st *statDelta) (func(), error) {
 	st.received++
 	out, perr := process(ctx, r)
@@ -399,7 +404,7 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 		// changed: the first delivery of the alert or a change of its status or severity. The
 		// rest are duplicates (prev is read before the upsert, in the same snapshot). No row
 		// comes back when a newer request already set this key.
-		var changed bool
+		var changed, again bool
 		err := tx.QueryRow(ctx, `WITH prev AS (SELECT status, severity, request_id, request_at FROM connector_events WHERE connector_id = $1 AND key = $3)
 			INSERT INTO connector_events AS ce (connector_id, version, key, title, ci, signal, method, severity, status,
 				external_id, value, labels, request_id, request_at, item)
@@ -409,9 +414,10 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 				external_id = EXCLUDED.external_id, value = EXCLUDED.value, labels = EXCLUDED.labels, request_id = EXCLUDED.request_id,
 				request_at = EXCLUDED.request_at, item = EXCLUDED.item, last_seen = now(), seen = ce.seen + 1
 			WHERE (ce.request_at, ce.request_id) <= (EXCLUDED.request_at, EXCLUDED.request_id)
-			RETURNING coalesce((SELECT status <> $9 OR severity <> $8 FROM prev), true)`,
+			RETURNING coalesce((SELECT status <> $9 OR severity <> $8 FROM prev), true),
+				coalesce((SELECT request_id = $13 AND request_at = $14 FROM prev), false)`,
 			r.ConnectorID, version, e.Event.Key, e.Event.Title, e.Event.CI, e.Event.Signal, e.Event.Method, e.Event.Severity, e.Event.Status,
-			e.Event.ExternalID, e.Event.Value, labels, r.ID, r.ReceivedAt, e.Lineage.Item).Scan(&changed)
+			e.Event.ExternalID, e.Event.Value, labels, r.ID, r.ReceivedAt, e.Lineage.Item).Scan(&changed, &again)
 		if errors.Is(err, pgx.ErrNoRows) {
 			st.duplicates++ // stale: a newer request has spoken for this source
 			continue
@@ -424,7 +430,9 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 		} else {
 			st.duplicates++
 		}
-		apply = append(apply, e.Event)
+		if changed || !again {
+			apply = append(apply, e.Event)
+		}
 	}
 	st.events += inserted
 	note := bodyNote(r.Body)

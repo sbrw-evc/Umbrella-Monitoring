@@ -136,3 +136,45 @@ func TestStaleEventIsNotApplied(t *testing.T) {
 		t.Errorf("the stale request is done: %+v", r)
 	}
 }
+
+// Reprocessing a request used to fold all of its events again with the current time: a firing
+// the source had since resolved, or one folded the first time, opened or reopened an alert.
+func TestReprocessOnlyAppliesNews(t *testing.T) {
+	ctx := context.Background()
+	db := pool(t)
+	q := ingest.New(db)
+	rec := &recorder{}
+	q.SetSink(rec.sink)
+	run := runner(statusPipeline(t))
+
+	// x1 fired and was resolved later; y1 still fires. Both requests have a broken record.
+	enqueue(t, q, "CON-1", `{"alerts":[{"id":"x1","name":"CPU","host":"db-01","sev":"error","status":"firing"},
+		{"id":"x2","name":"Disk","host":"db-01","sev":"bogus","status":"firing"}]}`)
+	enqueue(t, q, "CON-1", `{"alerts":[{"id":"y1","name":"Memory","host":"db-02","sev":"warning","status":"firing"},
+		{"id":"y2","name":"Swap","host":"db-02","sev":"bogus","status":"firing"}]}`)
+	enqueue(t, q, "CON-1", resolved)
+	if _, err := q.Drain(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.String(); got != "x1:firing,y1:firing,x1:resolved" {
+		t.Fatalf("folded: %s", got)
+	}
+	out, err := q.Reprocess(ctx, "CON-1", []int64{}, 1)
+	if err != nil || out.Requeued != 2 {
+		t.Fatalf("reprocess: %+v %v", out, err)
+	}
+	if n, err := q.Drain(ctx, run); err != nil || n != 2 {
+		t.Fatalf("drain: %d %v", n, err)
+	}
+	if got := rec.String(); got != "x1:firing,y1:firing,x1:resolved" {
+		t.Errorf("reprocessing folded old events again: %s", got)
+	}
+	ev, _ := q.Events(ctx, "CON-1", 10)
+	state := map[string]string{}
+	for _, e := range ev {
+		state[e.ExternalID] = e.Status
+	}
+	if state["x1"] != flow.StatusResolved || state["y1"] != flow.StatusFiring {
+		t.Errorf("events = %v", state)
+	}
+}
