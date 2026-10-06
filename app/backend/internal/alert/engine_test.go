@@ -584,3 +584,31 @@ func TestFallbackSurvivesRestart(t *testing.T) {
 		t.Fatalf("state = %+v", got)
 	}
 }
+
+// A reopened alert starts backup notification afresh: a notification still pending from the
+// earlier opening is not sent at once.
+func TestFallbackResetOnReopen(t *testing.T) {
+	ctx := context.Background()
+	e, _, rec, c := setup(t)
+	fire := ev("CON-1", "a", "app-01", "errors", "critical", "firing")
+	e.Ingest(ctx, []alert.Incoming{fire})
+	a := active(t, e)[0]
+	e.PDResult(ctx, a.ID, alert.PDTrigger, "default", "", errors.New("Events API answered 503"))
+	c.advance(alert.DefaultFallbackAfter)
+	e.Tick(ctx)
+	if len(rec.fallback) != 1 {
+		t.Fatalf("due: %+v", rec.fallback)
+	}
+	resolved := fire
+	resolved.Status = alert.SourceResolved
+	e.Ingest(ctx, []alert.Incoming{resolved})
+	c.advance(alert.DefaultFallbackRetry)
+	e.Ingest(ctx, []alert.Incoming{fire})
+	e.Tick(ctx)
+	if len(rec.fallback) != 1 {
+		t.Fatalf("not sent right after the reopening: %d", len(rec.fallback))
+	}
+	if got, _, _ := e.Get(ctx, a.ID); got.Fallback || got.FallbackState != "" || got.FallbackTry != nil {
+		t.Fatalf("reset: %+v", got)
+	}
+}

@@ -249,7 +249,7 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 		opened = true
 	} else if !Active(a.Status) {
 		a.Status, a.ResolvedAt, a.ResolvedBy, a.AckedBy, a.AckedAt = StatusOpen, nil, "", "", nil
-		a.OpenedAt, a.Fallback, a.FallbackAt = now, false, nil
+		a.OpenedAt, a.Fallback, a.FallbackAt, a.FallbackState, a.FallbackTry = now, false, nil, "", nil
 		a.PD.State, a.PD.Error, a.PD.Retry, a.PD.AttemptAt = PDPending, "", "", nil
 		// PagerDuty opens a new incident for the trigger after a resolve: it goes by the current
 		// route, and the old incident is remembered so that its late webhooks are ignored.
