@@ -783,11 +783,13 @@ func (e *Engine) Reroute(ctx context.Context) error {
 	return nil
 }
 
+func sameRef(a, b *Ref) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+
 func sameRoute(a, b Route) bool {
 	if a.Via != b.Via || len(a.Services) != len(b.Services) || len(a.People) != len(b.People) || len(a.Owners) != len(b.Owners) {
 		return false
 	}
-	if (a.Team == nil) != (b.Team == nil) || (a.Team != nil && *a.Team != *b.Team) {
+	if !sameRef(a.Team, b.Team) || !sameRef(a.Service, b.Service) {
 		return false
 	}
 	for i := range a.Services {

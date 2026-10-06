@@ -137,15 +137,26 @@ var criticalityRank = map[string]int{model.CriticalityCritical: 4, model.Critica
 
 // route: the item belongs to business services; the owning team of the most critical active
 // one gets the alert, with its lead and members. A team with nobody hands it to its parent.
-// The people responsible for the item in NetBox are kept as owners.
+// The people responsible for the item are kept as owners.
 func (w *world) route(ci *model.ConfigItem, now time.Time) Route {
-	r := Route{Services: []Ref{}, People: []Person{}, Owners: []Person{}, Via: ViaNone, At: now}
 	if ci == nil {
-		return r
+		return Route{Services: []Ref{}, People: []Person{}, Owners: []Person{}, Via: ViaNone, At: now}
 	}
+	var owners []Person
+	for _, o := range ci.Owners {
+		if u, ok := w.users[o.UserID]; ok && !u.Disabled {
+			owners = append(owners, w.person(u, o.Role))
+		}
+	}
+	return w.routeServices(w.servicesOf(ci.ID), owners, now)
+}
+
+// servicesOf lists the active and planned services of an item, the one whose team gets its
+// alerts first: by criticality, active before planned, then by name.
+func (w *world) servicesOf(ciID string) []model.Service {
 	var svcs []model.Service
 	for _, s := range w.services {
-		if s.Status != model.ServiceRetired && slices.Contains(s.CIIDs, ci.ID) {
+		if s.Status != model.ServiceRetired && slices.Contains(s.CIIDs, ciID) {
 			svcs = append(svcs, s)
 		}
 	}
@@ -163,19 +174,28 @@ func (w *world) route(ci *model.ConfigItem, now time.Time) Route {
 		}
 		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
+	return svcs
+}
+
+// routeServices is the rule chain after the item: the first of the ordered services with an
+// owning team is the primary service and its team gets the alert; the people are the lead and
+// members of that team, or of its nearest ancestor that has anybody. Without people the
+// owners of the item get it.
+func (w *world) routeServices(svcs []model.Service, owners []Person, now time.Time) Route {
+	r := Route{Services: []Ref{}, People: []Person{}, Owners: []Person{}, Via: ViaNone, At: now}
+	r.Owners = append(r.Owners, owners...)
 	for _, s := range svcs {
 		r.Services = append(r.Services, Ref{ID: s.ID, Name: s.Name})
 	}
-	for _, o := range ci.Owners {
-		if u, ok := w.users[o.UserID]; ok && !u.Disabled {
-			r.Owners = append(r.Owners, w.person(u, o.Role))
-		}
+	if len(svcs) > 0 {
+		r.Service = &Ref{ID: svcs[0].ID, Name: svcs[0].Name}
 	}
 	for _, s := range svcs {
 		t, ok := w.teams[s.OwnerTeamID]
 		if !ok {
 			continue
 		}
+		r.Service = &Ref{ID: s.ID, Name: s.Name}
 		r.Team = &Ref{ID: t.ID, Name: t.Name}
 		seen := map[string]bool{}
 		for cur, depth := t, 0; depth < 16 && len(r.People) == 0; depth++ {
@@ -199,6 +219,52 @@ func (w *world) route(ci *model.ConfigItem, now time.Time) Route {
 		r.Via = ViaCIOwners
 	}
 	return r
+}
+
+// PreviewCI is the route an incident of the item would take now, computed by the same rules
+// as the engine. ok is false when the item does not exist.
+func PreviewCI(st *store.Store, ciID string, now time.Time) (r Route, ok bool) {
+	w := snapshot(st)
+	ci, ok := w.cis[ciID]
+	if !ok {
+		return Route{}, false
+	}
+	return w.route(&ci, now), true
+}
+
+// PreviewService is the route of an incident of an item that belongs to this service only.
+// Elsewhere lists the items of the service whose incidents go by another, more critical
+// service instead.
+func PreviewService(st *store.Store, serviceID string, now time.Time) (r Route, elsewhere []Elsewhere, ok bool) {
+	w := snapshot(st)
+	i := slices.IndexFunc(w.services, func(s model.Service) bool { return s.ID == serviceID })
+	if i < 0 {
+		return Route{}, nil, false
+	}
+	svc := w.services[i]
+	r = w.routeServices([]model.Service{svc}, nil, now)
+	elsewhere = []Elsewhere{}
+	for _, id := range svc.CIIDs {
+		ci, found := w.cis[id]
+		if !found {
+			continue
+		}
+		cr := w.route(&ci, now)
+		if cr.Service != nil && cr.Service.ID != svc.ID {
+			elsewhere = append(elsewhere, Elsewhere{CI: Ref{ID: ci.ID, Name: ci.Name}, Service: *cr.Service, Team: cr.Team})
+		}
+	}
+	slices.SortFunc(elsewhere, func(a, b Elsewhere) int {
+		return strings.Compare(strings.ToLower(a.CI.Name), strings.ToLower(b.CI.Name))
+	})
+	return r, elsewhere, true
+}
+
+// Elsewhere is an item of a service whose incidents are routed by another service.
+type Elsewhere struct {
+	CI      Ref  `json:"ci"`
+	Service Ref  `json:"service"`
+	Team    *Ref `json:"team,omitempty"`
 }
 
 func (w *world) teamPeople(t model.Team) []Person {

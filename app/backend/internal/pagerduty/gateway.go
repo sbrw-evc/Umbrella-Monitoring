@@ -191,6 +191,13 @@ func Route(set model.PagerDuty, a alert.Alert) (string, string) {
 	return name, ref
 }
 
+// RouteOf names the route a new trigger of the alert would take: its ID (DefaultRoute for the
+// default integration) and name.
+func RouteOf(set model.PagerDuty, a alert.Alert) (id, name string) {
+	name, id, _ = currentRoute(set, a)
+	return id, name
+}
+
 // deliveryRoute is the route of a command: the one the accepted trigger went by while it
 // exists, because PagerDuty has the incident in that service and the alert may have been routed
 // to another team since; otherwise the current route.

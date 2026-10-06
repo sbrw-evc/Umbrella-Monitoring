@@ -73,12 +73,15 @@ type Person struct {
 // owning team of the most critical one and its people. Owners are the people responsible for
 // the item in NetBox; they get the alert when the team has nobody.
 type Route struct {
-	Services []Ref     `json:"services"`
-	Team     *Ref      `json:"team,omitempty"`
-	People   []Person  `json:"people"`
-	Owners   []Person  `json:"owners"`
-	Via      string    `json:"via"`
-	At       time.Time `json:"at"`
+	Services []Ref `json:"services"`
+	// Service is the primary service: the first of Services whose owning team gets the alert,
+	// or the first service when none has a team. PagerDuty routes match it.
+	Service *Ref      `json:"service,omitempty"`
+	Team    *Ref      `json:"team,omitempty"`
+	People  []Person  `json:"people"`
+	Owners  []Person  `json:"owners"`
+	Via     string    `json:"via"`
+	At      time.Time `json:"at"`
 }
 
 // Recipients are the people backup notification goes to.
