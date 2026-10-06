@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
 	"log/slog"
 	"net/http"
 	"net/textproto"
@@ -164,6 +163,7 @@ type config struct {
 	// token), secretErr why a channel has none it needs.
 	secret    map[string]string
 	secretErr map[string]error
+	msgs      messages
 }
 
 func (s *Service) config() config {
@@ -174,6 +174,7 @@ func (s *Service) config() config {
 		c.set.Notify.ExtraTelegram = slices.Clone(d.Settings.Alerting.Notify.ExtraTelegram)
 		c.locale = d.Settings.DefaultLocale
 	})
+	c.msgs = newMessages(c.locale, nil)
 	c.secret, c.secretErr = map[string]string{}, map[string]error{}
 	for _, ch := range channels {
 		if !ch.Enabled(c.set.Notify) {
@@ -366,165 +367,48 @@ func (s *Service) send(ctx context.Context, c config, m composed, t target) erro
 
 type composed struct{ subject, text, html string }
 
-var words = map[string]map[string]string{
-	"ru": {
-		"head": "PagerDuty не принял инцидент — резервное оповещение", "severity": "Важность", "ci": "КЕ", "signal": "Сигнал",
-		"service": "Сервис", "team": "Команда", "opened": "Открыт", "pd": "PagerDuty", "ack": "Подтвердить", "open": "Открыть в Umbrella",
-		"critical": "критично", "error": "ошибка", "warning": "предупреждение", "info": "инфо",
-		"pd_failed": "ошибка доставки", "pd_pending": "не ответил", "why": "Вы получили это письмо, потому что входите в команду, отвечающую за сервис, или отвечаете за КЕ.",
-		"test": "Проверка резервного оповещения Umbrella", "test_body": "Это проверочное сообщение. Если вы его видите, канал настроен.",
-		"head_new": "Новый инцидент — оповещение Umbrella", "pd_skipped": "не отправлялся (ниже порога важности)",
-		"err.no_key": "не задан ключ интеграции", "err.key_unavailable": "ключ интеграции недоступен", "err.queue_full": "очередь переполнена",
-		"err.breaker": "доставка приостановлена после серии ошибок", "err.unreachable": "PagerDuty недоступен",
-		"err.unavailable": "PagerDuty временно не отвечает", "err.rejected": "PagerDuty отклонил событие",
-		"fu.acknowledged": "Инцидент взят в работу", "fu.resolved": "Инцидент решён",
-		"fu.ack.by": "Взял(а): {who}, {at}", "fu.res.by": "Решил(а): {who}, {at}", "fu.res.auto": "Решён {at}: источники вернулись в норму",
-		"fu.why":               "Вы получили резервное оповещение об этом инциденте; ничего делать не нужно.",
-		"fu.subj.acknowledged": "взят в работу", "fu.subj.resolved": "решён",
-	},
-	"en": {
-		"head": "PagerDuty did not take the incident — backup notification", "severity": "Severity", "ci": "CI", "signal": "Signal",
-		"service": "Service", "team": "Team", "opened": "Opened", "pd": "PagerDuty", "ack": "Acknowledge", "open": "Open in Umbrella",
-		"critical": "critical", "error": "error", "warning": "warning", "info": "info",
-		"pd_failed": "delivery failed", "pd_pending": "no answer", "why": "You get this because you are in the team that owns the service or you are responsible for the CI.",
-		"test": "Umbrella backup notification test", "test_body": "This is a test message. If you see it, the channel is set up.",
-		"head_new": "New incident — Umbrella notification", "pd_skipped": "not sent (below the severity threshold)",
-		"err.no_key": "no integration key is set", "err.key_unavailable": "the integration key is not available", "err.queue_full": "the queue is full",
-		"err.breaker": "delivery is paused after a series of failures", "err.unreachable": "PagerDuty is not reachable",
-		"err.unavailable": "PagerDuty is not answering for now", "err.rejected": "PagerDuty rejected the event",
-		"fu.acknowledged": "The incident is being handled", "fu.resolved": "The incident is resolved",
-		"fu.ack.by": "Taken by {who}, {at}", "fu.res.by": "Resolved by {who}, {at}", "fu.res.auto": "Resolved {at}: the sources are back to normal",
-		"fu.why":               "You got backup notification about this incident; nothing more is needed from you.",
-		"fu.subj.acknowledged": "being handled", "fu.subj.resolved": "resolved",
-	},
-}
-
-func lang(locale string) map[string]string {
-	if locale == "en" {
-		return words["en"]
+// messages of the config: the built-in templates of its language with the overrides.
+func (c config) messages() messages {
+	if c.msgs.builtin != nil {
+		return c.msgs
 	}
-	return words["ru"]
+	return newMessages(c.locale, nil)
 }
 
+// compose is backup notification about an incident for one address.
 func (s *Service) compose(c config, a alert.Alert, t target) composed {
-	w := lang(c.locale)
-	base := strings.TrimRight(c.set.PublicURL, "/")
-	type line struct{ k, v string }
-	lines := []line{{w["severity"], w[a.Severity]}, {w["ci"], a.CIName}}
-	if a.Signal != "" && a.Signal != a.Title {
-		lines = append(lines, line{w["signal"], a.Signal})
-	}
-	if len(a.Route.Services) > 0 {
-		names := make([]string, 0, len(a.Route.Services))
-		for _, r := range a.Route.Services {
-			names = append(names, r.Name)
-		}
-		lines = append(lines, line{w["service"], strings.Join(names, ", ")})
-	}
-	if a.Route.Team != nil {
-		lines = append(lines, line{w["team"], a.Route.Team.Name})
-	}
-	lines = append(lines, line{w["opened"], a.OpenedAt.In(t.tz).Format("02.01.2006 15:04 MST")})
-	// PagerDuty is mentioned only when it was meant to take the incident.
-	head := w["head"]
-	switch a.PD.State {
-	case alert.PDOff:
-		head = w["head_new"]
-	case alert.PDSkipped:
-		head = w["head_new"]
-		lines = append(lines, line{w["pd"], w["pd_skipped"]})
-	case alert.PDFailed:
-		pd := w["pd_failed"]
-		if v, ok := w["err."+a.PD.ErrorCode]; ok {
-			pd += ": " + v
-		} else if a.PD.Error != "" {
-			pd += ": " + a.PD.Error
-		}
-		lines = append(lines, line{w["pd"], pd})
-	default:
-		lines = append(lines, line{w["pd"], w["pd_pending"]})
-	}
-	var open, ack, grafana string
-	if base != "" {
-		open = model.IncidentURL(base, a.ID)
+	m := incidentMessage(a, t.tz)
+	if base := strings.TrimRight(c.set.PublicURL, "/"); base != "" {
+		m.Open = model.IncidentURL(base, a.ID)
 		if c.set.Grafana.DashboardURL != "" {
-			grafana = model.GrafanaHopURL(base, a.ID)
+			m.Grafana = model.GrafanaHopURL(base, a.ID)
 		}
 		if l := s.Links(); l != nil {
-			ack = base + "/ack/" + l.Sign(a.ID, t.recipient, s.now().Add(LinkTTL))
+			m.Ack = base + "/ack/" + l.Sign(a.ID, t.recipient, s.now().Add(LinkTTL))
 		}
 	}
-	title := a.ID + " · " + a.Title
-	var tb, hb strings.Builder
-	tb.WriteString(head + "\n\n" + title + "\n\n")
-	hb.WriteString("🚨 <b>" + html.EscapeString(head) + "</b>\n\n<b>" + html.EscapeString(title) + "</b>\n")
-	for _, l := range lines {
-		tb.WriteString(l.k + ": " + l.v + "\n")
-		hb.WriteString(html.EscapeString(l.k) + ": " + html.EscapeString(l.v) + "\n")
+	return c.messages().render("fallback", m)
+}
+
+// incidentMessage is what the templates see of an incident.
+func incidentMessage(a alert.Alert, tz *time.Location) Message {
+	m := Message{ID: a.ID, Title: a.Title, Severity: a.Severity, CI: a.CIName, Signal: a.Signal, Team: a.Route.Team,
+		Opened: formatTime(&a.OpenedAt, tz), PDState: a.PD.State, PDErrorCode: a.PD.ErrorCode, PDError: a.PD.Error,
+		Event: a.FollowUp, AckedBy: a.AckedBy, AckedAt: formatTime(a.AckedAt, tz), ResolvedBy: a.ResolvedBy, ResolvedAt: formatTime(a.ResolvedAt, tz)}
+	for _, r := range a.Route.Services {
+		m.Services = append(m.Services, r.Name)
 	}
-	if ack != "" || open != "" {
-		tb.WriteString("\n")
-		hb.WriteString("\n")
-	}
-	if ack != "" {
-		tb.WriteString(w["ack"] + ": " + ack + "\n")
-		hb.WriteString(`<a href="` + html.EscapeString(ack) + `">` + html.EscapeString(w["ack"]) + "</a>")
-		if open != "" {
-			hb.WriteString(" · ")
-		}
-	}
-	if open != "" {
-		tb.WriteString(w["open"] + ": " + open + "\n")
-		hb.WriteString(`<a href="` + html.EscapeString(open) + `">` + html.EscapeString(w["open"]) + "</a>")
-	}
-	if grafana != "" {
-		tb.WriteString("Grafana: " + grafana + "\n")
-		hb.WriteString(` · <a href="` + html.EscapeString(grafana) + `">Grafana</a>`)
-	}
-	tb.WriteString("\n-- \n" + w["why"] + "\n")
-	return composed{subject: "[Umbrella] " + title + " (" + w[a.Severity] + ")", text: tb.String(), html: hb.String()}
+	return m
 }
 
 // composeFollowUp is the short message telling that the incident was taken (who and when) or
 // resolved, with a link to it.
 func (s *Service) composeFollowUp(c config, a alert.Alert, tz *time.Location) composed {
-	w := lang(c.locale)
-	at := func(t *time.Time) string {
-		if t == nil {
-			return ""
-		}
-		return t.In(tz).Format("02.01.2006 15:04 MST")
-	}
-	fill := func(k, who, when string) string {
-		return strings.NewReplacer("{who}", who, "{at}", when).Replace(w[k])
-	}
-	var detail string
-	switch {
-	case a.FollowUp == alert.StatusAcknowledged:
-		detail = fill("fu.ack.by", a.AckedBy, at(a.AckedAt))
-	case a.ResolvedBy != "":
-		detail = fill("fu.res.by", a.ResolvedBy, at(a.ResolvedAt))
-	default:
-		detail = fill("fu.res.auto", "", at(a.ResolvedAt))
-	}
-	head := w["fu."+a.FollowUp]
-	title := a.ID + " · " + a.Title
-	open := ""
+	m := incidentMessage(a, tz)
 	if base := strings.TrimRight(c.set.PublicURL, "/"); base != "" {
-		open = model.IncidentURL(base, a.ID)
+		m.Open = model.IncidentURL(base, a.ID)
 	}
-	icon := "✅"
-	if a.FollowUp == alert.StatusAcknowledged {
-		icon = "👀"
-	}
-	text := head + "\n\n" + title + "\n" + detail + "\n"
-	hb := icon + " <b>" + html.EscapeString(head) + "</b>\n\n<b>" + html.EscapeString(title) + "</b>\n" + html.EscapeString(detail) + "\n"
-	if open != "" {
-		text += "\n" + w["open"] + ": " + open + "\n"
-		hb += "\n" + `<a href="` + html.EscapeString(open) + `">` + html.EscapeString(w["open"]) + "</a>"
-	}
-	text += "\n-- \n" + w["fu.why"] + "\n"
-	return composed{subject: "[Umbrella] " + title + " — " + w["fu.subj."+a.FollowUp], text: text, html: hb}
+	return c.messages().render("followup", m)
 }
 
 // DeliverFollowUp tells the addresses backup notification reached that the incident was
@@ -598,8 +482,7 @@ func (s *Service) Test(ctx context.Context, kind, to string) (map[string]string,
 }
 
 func (s *Service) composeTest(c config) composed {
-	w := lang(c.locale)
-	return composed{subject: w["test"], text: w["test_body"] + "\n", html: "✅ <b>" + html.EscapeString(w["test"]) + "</b>\n" + html.EscapeString(w["test_body"])}
+	return c.messages().render("test", Message{})
 }
 
 // TestEmail sends a test message with the saved settings.

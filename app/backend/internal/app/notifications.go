@@ -316,27 +316,22 @@ a{color:var(--accent)}
 {{if .Open}}<p><a href="{{.Open}}">{{.OpenText}}</a></p>{{end}}
 </main></body></html>`))
 
-var ackWords = map[string]map[string]string{
-	"ru": {"ask": "Подтвердить, что вы взяли инцидент в работу?", "button": "Подтвердить", "done": "Инцидент подтверждён. Спасибо!",
-		"already": "Инцидент уже подтверждён.", "resolved": "Инцидент уже решён.", "bad": "Ссылка недействительна или устарела.",
-		"unavailable": "Сервис инцидентов сейчас недоступен. Попробуйте позже.", "open": "Открыть в Umbrella"},
-	"en": {"ask": "Acknowledge that you are on this incident?", "button": "Acknowledge", "done": "The incident is acknowledged. Thank you!",
-		"already": "The incident is already acknowledged.", "resolved": "The incident is already resolved.", "bad": "The link is not valid or has expired.",
-		"unavailable": "Incidents are not available now. Try again later.", "open": "Open in Umbrella"},
-}
-
 // ackPage acknowledges an incident from the link of a notification. GET only shows the page,
-// because messengers open links to make previews; the button posts the form.
+// because messengers open links to make previews; the button posts the form. Its words are
+// the notification words (page.*) of the default language.
 func (a *App) ackPage(w http.ResponseWriter, r *http.Request) {
 	lang := "ru"
 	if a.settings.Get().DefaultLocale == "en" {
 		lang = "en"
 	}
-	words := ackWords[lang]
+	words := map[string]string{}
+	for _, k := range []string{"ask", "button", "done", "already", "resolved", "bad", "unavailable"} {
+		words[k] = notify.Word(lang, "page."+k)
+	}
 	page := struct {
 		Lang, ID, Title, Message, Button, Open, OpenText string
 		Form                                             bool
-	}{Lang: lang, Button: words["button"], OpenText: words["open"]}
+	}{Lang: lang, Button: words["button"], OpenText: notify.Word(lang, "open")}
 	render := func(status int) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
