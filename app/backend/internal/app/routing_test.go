@@ -7,6 +7,7 @@ import (
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/app"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
@@ -51,6 +52,29 @@ func TestRoutePreviewAPI(t *testing.T) {
 	admin.call(http.MethodGet, "/api/cis/CI-1/route", nil, &p)
 	if p.PagerDuty == nil || p.PagerDuty.ID != "R-2" || p.PagerDuty.Name != "SRE on-call" || p.PagerDuty.MinSeverity != "error" {
 		t.Fatalf("pagerduty route = %+v", p.PagerDuty)
+	}
+	if p.Backup != nil {
+		t.Fatalf("backup notification is off: %+v", p.Backup)
+	}
+
+	// With backup notification on, the preview names its addresses: the people of the route,
+	// then the extra recipients; the wait is automatic (PagerDuty is on).
+	h.st.Write(func(d *store.Data) {
+		d.Settings.Alerting.Notify = model.Notify{Email: model.EmailChannel{Enabled: true}, ExtraEmails: []string{"duty@example.com"}, ExtraTelegram: []string{"-100200"}}
+	})
+	admin.call(http.MethodGet, "/api/cis/CI-1/route", nil, &p)
+	if b := p.Backup; b == nil || len(b.Targets) != 2 || b.Targets[0] != (notify.Target{Channel: "email", Address: "lead@example.com"}) ||
+		b.Targets[1].Address != "duty@example.com" || b.DelaySeconds != 120 || b.MinSeverity != "error" {
+		t.Fatalf("backup = %+v", p.Backup)
+	}
+	h.st.Write(func(d *store.Data) {
+		delay := 0
+		d.Settings.Alerting.Notify.DelaySeconds, d.Settings.Alerting.Notify.MinSeverity = &delay, "critical"
+		d.Settings.Alerting.Notify.Telegram.Enabled = true
+	})
+	admin.call(http.MethodGet, "/api/cis/CI-1/route", nil, &p)
+	if b := p.Backup; b == nil || len(b.Targets) != 3 || b.Targets[2] != (notify.Target{Channel: "telegram", Address: "-100200"}) || b.DelaySeconds != 0 || b.MinSeverity != "critical" {
+		t.Fatalf("backup = %+v", p.Backup)
 	}
 
 	if code := admin.call(http.MethodGet, "/api/services/S-2/route", nil, &p); code != 200 {

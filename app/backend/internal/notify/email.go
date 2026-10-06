@@ -41,7 +41,7 @@ func sendMail(ctx context.Context, ch model.EmailChannel, password, to, subject,
 		}
 	}
 	addr := net.JoinHostPort(ch.Host, strconv.Itoa(port))
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, DefaultSMTPTimeout)
 	defer cancel()
 	tlsConf := &tls.Config{ServerName: ch.Host, InsecureSkipVerify: ch.SkipVerify, MinVersion: tls.VersionTLS12} //nolint:gosec // the administrator's choice for internal relays
 	dialer := &net.Dialer{}

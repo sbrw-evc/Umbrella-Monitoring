@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Send } from 'lucide-react'
+import { Eye, RotateCcw, Send } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../../api'
-import { useT } from '../../../i18n'
+import { useLocale, useT } from '../../../i18n'
 import { Banner, Button, Field, Input, Password, Select, Switch, Textarea } from '../../../ui'
 import { ProfileCard } from '../../profile/ProfileCard'
 import { SummaryCard } from '../../profile/SummaryCard'
@@ -10,7 +10,7 @@ import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { reveal } from './PagerDutyCard'
 import { strings } from './strings'
-import { SEVERITIES, type NotifyView } from './types'
+import { SEVERITIES, TEMPLATE_MESSAGES, TEMPLATE_PARTS, type NotifyPreview, type NotifyView } from './types'
 
 // Delays offered for backup notification, in seconds; '' is automatic.
 const DELAYS = [0, 60, 120, 300, 600, 900, 1800, 3600]
@@ -22,6 +22,8 @@ type Draft = {
   extra_telegram: string
   delay: string
   min_severity: string
+  // templates: every template as edited, the built-in text where none is replaced.
+  templates: Record<string, string>
 }
 
 function draftOf(v: NotifyView): Draft {
@@ -32,7 +34,13 @@ function draftOf(v: NotifyView): Draft {
     extra_telegram: v.extra_telegram.join('\n'),
     delay: v.delay_seconds === null || v.delay_seconds === undefined ? '' : String(v.delay_seconds),
     min_severity: v.min_severity || 'error',
+    templates: { ...(v.default_templates ?? {}), ...(v.templates ?? {}) },
   }
+}
+
+// overrides are the templates that differ from the built-in ones.
+function overrides(templates: Record<string, string>, defaults: Record<string, string>) {
+  return Object.fromEntries(Object.entries(templates).filter(([name, text]) => text !== (defaults[name] ?? '')))
 }
 
 const lines = (v: string) =>
@@ -41,7 +49,7 @@ const lines = (v: string) =>
     .map((x) => x.trim())
     .filter(Boolean)
 
-function bodyOf(d: Draft) {
+function bodyOf(d: Draft, defaults: Record<string, string>) {
   return {
     email: {
       enabled: d.email.enabled,
@@ -58,6 +66,8 @@ function bodyOf(d: Draft) {
     extra_telegram: lines(d.extra_telegram),
     delay_seconds: d.delay === '' ? null : Number(d.delay),
     min_severity: d.min_severity,
+    // Without the built-in templates (an older server) the saved ones are kept.
+    templates: Object.keys(defaults).length ? overrides(d.templates, defaults) : undefined,
   }
 }
 
@@ -89,13 +99,14 @@ export function NotifyCard() {
       </ProfileCard>
     )
   }
-  const dirty = JSON.stringify(bodyOf(draft)) !== JSON.stringify(bodyOf(draftOf(view)))
+  const defaults = view.default_templates ?? {}
+  const dirty = JSON.stringify(bodyOf(draft, defaults)) !== JSON.stringify(bodyOf(draftOf(view), defaults))
   const setEmail = (p: Partial<Draft['email']>) => setDraft({ ...draft, email: { ...draft.email, ...p } })
   const setTg = (p: Partial<Draft['telegram']>) => setDraft({ ...draft, telegram: { ...draft.telegram, ...p } })
 
   const save = () =>
     saver.run(async () => {
-      apply(await api<NotifyView>('PUT', '/api/notifications', bodyOf(draft)))
+      apply(await api<NotifyView>('PUT', '/api/notifications', bodyOf(draft, defaults)))
       return t('saved')
     })
   const test = (channel: 'email' | 'telegram') =>
@@ -120,6 +131,7 @@ export function NotifyCard() {
     [t('nt.telegram'), t(view.telegram.enabled ? 'pd.state.on' : 'pd.state.off')],
     [t('nt.extra'), extra],
     [t('nt.summary.when'), t('nt.summary.when.value', { delay: delayText(view.delay_seconds), severity: t(`sev.${view.min_severity || 'error'}`).toLowerCase() })],
+    [t('nt.tpl'), Object.keys(view.templates ?? {}).length ? t('nt.tpl.changed', { n: Object.keys(view.templates ?? {}).length }) : t('nt.tpl.builtin')],
   ]
 
   return (
@@ -227,6 +239,9 @@ export function NotifyCard() {
             </Field>
           </fieldset>
         </section>
+        {Object.keys(defaults).length > 0 && (
+          <Templates templates={draft.templates} defaults={defaults} canEdit={canEdit} onChange={(templates) => setDraft({ ...draft, templates })} />
+        )}
         {canTest && (view.email.enabled || view.telegram.enabled) && (
           <section className="al-section">
             <h3 className="al-sub">{t('nt.test')}</h3>
@@ -259,6 +274,109 @@ export function NotifyCard() {
         )}
       </ProfileCard>
     </>
+  )
+}
+
+// Templates edits the message templates: a text area for each part of each message, a reset to
+// the built-in text, and a preview of a sample incident with the templates as edited.
+function Templates({
+  templates,
+  defaults,
+  canEdit,
+  onChange,
+}: {
+  templates: Record<string, string>
+  defaults: Record<string, string>
+  canEdit: boolean
+  onChange: (t: Record<string, string>) => void
+}) {
+  const t = useT(strings)
+  const { locale } = useLocale()
+  const previewer = useAction(strings)
+  const [preview, setPreview] = useState<NotifyPreview[] | null>(null)
+  const show = () =>
+    previewer.run(async () => {
+      const r = await api<{ messages: NotifyPreview[] }>('POST', '/api/notifications/preview', { templates: overrides(templates, defaults), locale })
+      setPreview(r.messages)
+    })
+  return (
+    <section className="al-section">
+      <h3 className="al-sub">{t('nt.tpl')}</h3>
+      <p className="hint">{t('nt.tpl.hint')}</p>
+      {TEMPLATE_MESSAGES.map((m) => {
+        const changed = TEMPLATE_PARTS.filter((p) => templates[`${m}.${p}`] !== defaults[`${m}.${p}`]).length
+        return (
+          <details key={m} className="al-tpl">
+            <summary>
+              {t(`nt.tpl.${m}`)}
+              {changed > 0 && <span className="pill pill-warn">{t('nt.tpl.changed', { n: changed })}</span>}
+            </summary>
+            <fieldset className="plain-fieldset stack" disabled={!canEdit}>
+              {TEMPLATE_PARTS.map((p) => {
+                const name = `${m}.${p}`
+                const custom = templates[name] !== defaults[name]
+                return (
+                  <Field key={name} label={t(`nt.tpl.${p}`)} hint={custom ? t('nt.tpl.custom') : undefined}>
+                    {(id) => (
+                      <div className="stack al-tpl-code">
+                        <Textarea
+                          id={id}
+                          spellCheck={false}
+                          rows={p === 'subject' ? 2 : 8}
+                          value={templates[name] ?? ''}
+                          onChange={(e) => onChange({ ...templates, [name]: e.target.value })}
+                        />
+                        {custom && canEdit && (
+                          <div>
+                            <Button type="button" variant="ghost" onClick={() => onChange({ ...templates, [name]: defaults[name] ?? '' })}>
+                              <RotateCcw size={14} aria-hidden />
+                              {t('nt.tpl.reset')}
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </Field>
+                )
+              })}
+            </fieldset>
+          </details>
+        )
+      })}
+      <div>
+        <Button type="button" busy={previewer.busy} onClick={() => void show()}>
+          <Eye size={15} aria-hidden />
+          {t('nt.tpl.preview')}
+        </Button>
+      </div>
+      {previewer.error && (
+        <Banner kind="error" title={previewer.error.message}>
+          {previewer.error.detail}
+        </Banner>
+      )}
+      {preview &&
+        !previewer.error &&
+        preview.map((m) => (
+          <div key={m.name} className="stack">
+            <h4 className="al-sub">{t(`nt.tpl.p.${m.name}`)}</h4>
+            {m.error && (
+              <Banner kind="error" title={t('nt.tpl.failed')}>
+                {m.error}
+              </Banner>
+            )}
+            <p>
+              <span className="muted">{t('nt.tpl.subject')}: </span>
+              <b>{m.subject}</b>
+            </p>
+            <pre className="al-tpl-pre" aria-label={t('nt.tpl.text')}>
+              {m.text}
+            </pre>
+            <pre className="al-tpl-pre" aria-label={t('nt.tpl.html')}>
+              {m.html}
+            </pre>
+          </div>
+        ))}
+    </section>
   )
 }
 

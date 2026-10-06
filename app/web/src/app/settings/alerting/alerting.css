@@ -92,3 +92,32 @@
     margin-top: 0;
   }
 }
+
+.al-tpl > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.al-tpl > fieldset {
+  margin-top: 10px;
+}
+
+.al-tpl-code .textarea,
+.al-tpl-pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.al-tpl-pre {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
