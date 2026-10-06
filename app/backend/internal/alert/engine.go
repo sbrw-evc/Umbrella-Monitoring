@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,8 @@ const (
 	// Retention: resolved alerts older than this are deleted with their timelines.
 	Retention = 90 * 24 * time.Hour
 	tickBatch = 1000
+	// maxOldIncidents bounds PD.OldIncidents of an alert that reopens again and again.
+	maxOldIncidents = 20
 )
 
 // ErrPDSkipped: the alert is below the PagerDuty severity threshold. The gateway reports it
@@ -244,8 +247,16 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 		a.Status, a.ResolvedAt, a.ResolvedBy, a.AckedBy, a.AckedAt = StatusOpen, nil, "", "", nil
 		a.OpenedAt, a.Fallback, a.FallbackAt = now, false, nil
 		a.PD.State, a.PD.Error, a.PD.Retry, a.PD.AttemptAt = PDPending, "", "", nil
-		// PagerDuty opens a new incident for the trigger after a resolve: it goes by the current route.
+		// PagerDuty opens a new incident for the trigger after a resolve: it goes by the current
+		// route, and the old incident is remembered so that its late webhooks are ignored.
 		a.PD.Route, a.PD.RouteID = "", ""
+		if a.PD.IncidentID != "" && !slices.Contains(a.PD.OldIncidents, a.PD.IncidentID) {
+			a.PD.OldIncidents = append(a.PD.OldIncidents, a.PD.IncidentID)
+			if len(a.PD.OldIncidents) > maxOldIncidents {
+				a.PD.OldIncidents = a.PD.OldIncidents[len(a.PD.OldIncidents)-maxOldIncidents:]
+			}
+		}
+		a.PD.IncidentID, a.PD.IncidentURL = "", ""
 		c.log(now, KindStatus, "reopened", map[string]string{"window": e.Window.String()}, "")
 		reopened = true
 	}
@@ -535,6 +546,8 @@ type PDUpdate struct {
 	IncidentID  string
 	IncidentURL string
 	Detail      string
+	// OccurredAt is when the change happened in PagerDuty; zero when unknown.
+	OccurredAt time.Time
 }
 
 // PDKeys returns the dedup keys of the alerts bound to a PagerDuty incident or key.
@@ -559,6 +572,16 @@ func (e *Engine) PDInbound(ctx context.Context, u PDUpdate) error {
 			return ErrNotFound
 		}
 		c := &change{a: a, dirty: true}
+		// A late webhook about the incident of an earlier opening must not acknowledge or resolve
+		// the reopened alert: PagerDuty opened a new incident for it. Such an event is known by
+		// its incident (one of the old ones) or by its time (before the alert opened again). An
+		// incident ID that is merely new is taken: incidents merged in PagerDuty move the alert
+		// to another incident.
+		if (u.IncidentID != "" && slices.Contains(a.PD.OldIncidents, u.IncidentID)) ||
+			(!u.OccurredAt.IsZero() && u.OccurredAt.Before(a.OpenedAt)) {
+			c.log(now, KindPagerDuty, "pd_stale", map[string]string{"event": u.EventType, "incident": u.IncidentID}, u.Actor)
+			return c.save(ctx, tx)
+		}
 		if u.IncidentID != "" {
 			a.PD.IncidentID = u.IncidentID
 		}

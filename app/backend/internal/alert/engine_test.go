@@ -480,3 +480,59 @@ func TestWindowDoesNotStrandPagerDutyIncidents(t *testing.T) {
 		t.Fatalf("the trigger after the window: %+v", cmds)
 	}
 }
+
+// A late webhook about the PagerDuty incident of an earlier opening leaves the reopened alert
+// alone.
+func TestStaleWebhookAfterReopen(t *testing.T) {
+	ctx := context.Background()
+	e, _, rec, c := setup(t)
+	fire := ev("CON-1", "a", "app-01", "errors", "critical", "firing")
+	e.Ingest(ctx, []alert.Incoming{fire})
+	a := active(t, e)[0]
+	e.PDResult(ctx, a.ID, alert.PDTrigger, "default", "default", nil)
+	if err := e.PDInbound(ctx, alert.PDUpdate{DedupKey: a.PD.Key, EventType: "incident.triggered", IncidentID: "Q1", OccurredAt: c.t}); err != nil {
+		t.Fatal(err)
+	}
+	c.advance(time.Minute)
+	resolved := fire
+	resolved.Status = alert.SourceResolved
+	e.Ingest(ctx, []alert.Incoming{resolved})
+	c.advance(10 * time.Second)
+	e.Ingest(ctx, []alert.Incoming{fire})
+	reopenedAt := c.t
+	rec.take()
+	if got := active(t, e); len(got) != 1 || got[0].ID != a.ID || got[0].PD.IncidentID != "" {
+		t.Fatalf("reopened without the old incident: %+v", got)
+	}
+
+	// The resolve of the old incident Q1 lands after the reopening.
+	c.advance(time.Second)
+	if err := e.PDInbound(ctx, alert.PDUpdate{DedupKey: a.PD.Key, EventType: "incident.resolved", Actor: "Jane", IncidentID: "Q1", OccurredAt: c.t}); err != nil {
+		t.Fatal(err)
+	}
+	// An acknowledgement made before the reopening, of an incident never seen here.
+	if err := e.PDInbound(ctx, alert.PDUpdate{DedupKey: a.PD.Key, EventType: "incident.acknowledged", Actor: "Jane", IncidentID: "Q0", OccurredAt: reopenedAt.Add(-5 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	got, entries, _ := e.Get(ctx, a.ID)
+	if got.Status != alert.StatusOpen || got.PD.IncidentID != "" {
+		t.Fatalf("stale webhooks changed the reopened alert: %+v", got)
+	}
+	stale := 0
+	for _, en := range entries {
+		if en.Code == "pd_stale" {
+			stale++
+		}
+	}
+	if stale != 2 {
+		t.Errorf("stale webhooks are on the timeline: %d", stale)
+	}
+
+	// The new incident acknowledges the alert.
+	if err := e.PDInbound(ctx, alert.PDUpdate{DedupKey: a.PD.Key, EventType: "incident.acknowledged", Actor: "Jane", IncidentID: "Q2", OccurredAt: c.t}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := e.Get(ctx, a.ID); got.Status != alert.StatusAcknowledged || got.PD.IncidentID != "Q2" {
+		t.Fatalf("the current incident applies: %+v", got)
+	}
+}

@@ -122,6 +122,9 @@ type PD struct {
 	AttemptAt   *time.Time `json:"attempt_at,omitempty"`
 	IncidentID  string     `json:"incident_id,omitempty"`
 	IncidentURL string     `json:"incident_url,omitempty"`
+	// OldIncidents are the PagerDuty incidents of earlier openings of the alert: their late
+	// webhooks must not change the reopened alert.
+	OldIncidents []string `json:"old_incidents,omitempty"`
 }
 
 type Alert struct {

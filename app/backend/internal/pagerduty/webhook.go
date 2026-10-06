@@ -41,10 +41,11 @@ type summary struct {
 
 type WebhookEvent struct {
 	Event struct {
-		ID           string   `json:"id"`
-		EventType    string   `json:"event_type"`
-		ResourceType string   `json:"resource_type"`
-		Agent        *summary `json:"agent"`
+		ID           string    `json:"id"`
+		EventType    string    `json:"event_type"`
+		ResourceType string    `json:"resource_type"`
+		OccurredAt   time.Time `json:"occurred_at"`
+		Agent        *summary  `json:"agent"`
 		Data         struct {
 			ID          string    `json:"id"`
 			Type        string    `json:"type"`
@@ -125,7 +126,7 @@ func (g *Gateway) HandleWebhook(ctx context.Context, body []byte, signature stri
 	applied := 0
 	for _, k := range g.keysFor(ctx, ev.Event.Data.IncidentKey, incID) {
 		err := g.results.PDInbound(ctx, alert.PDUpdate{DedupKey: k, EventType: ev.Event.EventType, Actor: actor,
-			IncidentID: incID, IncidentURL: incURL, Detail: ev.detail()})
+			IncidentID: incID, IncidentURL: incURL, Detail: ev.detail(), OccurredAt: ev.Event.OccurredAt})
 		if err == nil {
 			applied++
 		}

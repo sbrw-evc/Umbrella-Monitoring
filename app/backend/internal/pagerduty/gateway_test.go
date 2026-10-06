@@ -32,8 +32,9 @@ type result struct {
 }
 
 type results struct {
-	mu  sync.Mutex
-	got []result
+	mu      sync.Mutex
+	got     []result
+	inbound []alert.PDUpdate
 }
 
 func (r *results) PDResult(_ context.Context, _ string, action alert.Action, route, routeID string, err error) {
@@ -41,7 +42,12 @@ func (r *results) PDResult(_ context.Context, _ string, action alert.Action, rou
 	defer r.mu.Unlock()
 	r.got = append(r.got, result{action, route, routeID, err})
 }
-func (r *results) PDInbound(context.Context, alert.PDUpdate) error { return nil }
+func (r *results) PDInbound(_ context.Context, u alert.PDUpdate) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.inbound = append(r.inbound, u)
+	return nil
+}
 func (r *results) PDKeys(context.Context, string, string) ([]string, error) {
 	return nil, nil
 }
@@ -118,5 +124,27 @@ func TestSignature(t *testing.T) {
 	}
 	if pagerduty.VerifySignature("", body, sig) || pagerduty.VerifySignature("other", body, sig) {
 		t.Error("no secret or a wrong one fails")
+	}
+}
+
+// The webhook hands the time of the change to the engine, which ignores changes older than the
+// latest opening of the alert.
+func TestWebhookOccurredAt(t *testing.T) {
+	st := store.New()
+	st.Write(func(d *store.Data) {
+		d.Settings.Alerting.PagerDuty = model.PagerDuty{Enabled: true, WebhookSecretRef: "wh"}
+	})
+	g := pagerduty.New(st, secrets{"wh": "s"})
+	res := &results{}
+	g.SetResults(res)
+	body := []byte(`{"event":{"id":"E1","event_type":"incident.resolved","occurred_at":"2026-10-05T12:00:01.250Z",
+		"data":{"id":"Q1","type":"incident","html_url":"https://pd/incidents/Q1","incident_key":"umb-INC-1"}}}`)
+	n, err := g.HandleWebhook(context.Background(), body, pdtest.Sign("s", body))
+	if err != nil || n != 1 {
+		t.Fatal(n, err)
+	}
+	u := res.inbound[0]
+	if u.DedupKey != "umb-INC-1" || u.IncidentID != "Q1" || !u.OccurredAt.Equal(time.Date(2026, 10, 5, 12, 0, 1, 250e6, time.UTC)) {
+		t.Errorf("update = %+v", u)
 	}
 }
