@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Plus, Send, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Plus, Send, Trash2 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../../api'
 import { useResource } from '../../../connections/useRequest'
@@ -111,6 +111,12 @@ export function PagerDutyCard({ onSaved }: { onSaved?: () => void }) {
   const at = (v?: string) => formatDate(v, locale, timezone)
   const dirty = JSON.stringify(bodyOf(draft)) !== JSON.stringify(bodyOf(draftOf(view)))
   const set = (p: Partial<Draft>) => setDraft({ ...draft, ...p })
+  const moveRoute = (i: number, by: number) => {
+    const next = [...draft.routes]
+    const [r] = next.splice(i, 1)
+    next.splice(i + by, 0, r)
+    set({ routes: next })
+  }
   const setRoute = (i: number, p: Partial<RouteDraft>) => set({ routes: draft.routes.map((r, j) => (j === i ? { ...r, ...p } : r)) })
   const st = view.status
 
@@ -280,9 +286,27 @@ export function PagerDutyCard({ onSaved }: { onSaved?: () => void }) {
                           {(id) => <Password id={id} value={r.routing_key} autoComplete="off" onChange={(e) => setRoute(i, { routing_key: e.target.value })} />}
                         </Field>
                       )}
-                      <button type="button" className="icon-btn al-remove" aria-label={t('remove')} title={t('remove')} onClick={() => set({ routes: draft.routes.filter((_, j) => j !== i) })}>
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="al-route-tools">
+                        <span className="al-route-order" title={t('pd.route.order')}>
+                          {i + 1}
+                        </span>
+                        <button type="button" className="icon-btn" onClick={() => moveRoute(i, -1)} disabled={i === 0} title={t('pd.route.up')} aria-label={t('pd.route.up')}>
+                          <ArrowUp size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          onClick={() => moveRoute(i, 1)}
+                          disabled={i === draft.routes.length - 1}
+                          title={t('pd.route.down')}
+                          aria-label={t('pd.route.down')}
+                        >
+                          <ArrowDown size={16} />
+                        </button>
+                        <button type="button" className="icon-btn" aria-label={t('remove')} title={t('remove')} onClick={() => set({ routes: draft.routes.filter((_, j) => j !== i) })}>
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                   <div className="row">

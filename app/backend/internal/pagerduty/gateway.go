@@ -184,8 +184,9 @@ func (g *Gateway) deliver(ctx context.Context, cmd alert.Command) {
 	g.report(cmd, routeName, routeID, err)
 }
 
-// Route picks the PagerDuty service of an alert: the first route whose team and business
-// service match, otherwise the default integration key.
+// Route picks the PagerDuty service of an alert: the first route from the top whose team and
+// business service match the team and the primary service of the alert route (an empty field
+// matches any), otherwise the default integration key.
 func Route(set model.PagerDuty, a alert.Alert) (string, string) {
 	name, _, ref := currentRoute(set, a)
 	return name, ref
@@ -223,7 +224,13 @@ func currentRoute(set model.PagerDuty, a alert.Alert) (name, id, ref string) {
 	if a.Route.Team != nil {
 		team = a.Route.Team.ID
 	}
+	// A route matches the primary service of the alert route, the one its team comes from, so
+	// PagerDuty and backup notification agree on who owns the incident. Alerts routed before the
+	// primary service was recorded match any of their services.
 	services := a.Route.ServiceIDs()
+	if a.Route.Service != nil {
+		services = []string{a.Route.Service.ID}
+	}
 	for _, r := range set.Routes {
 		if r.TeamID == "" && r.ServiceID == "" {
 			continue
