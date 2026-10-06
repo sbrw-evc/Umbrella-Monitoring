@@ -9,6 +9,7 @@ import { BindServicesDialog, type BindAction } from '../bulk/BulkDialogs'
 import { strings as bulkStrings } from '../bulk/strings'
 import { mergeDicts } from '../../connections/connectionStrings'
 import { useSession } from '../session'
+import { clearDeepLink, useDeepLink } from '../deepLink'
 import { PresenceCell, SourcePill, StatusPill } from './Badges'
 import { CIDetail } from './CIDetail'
 import { CIEditor, DeleteDialog } from './CIEditor'
@@ -40,6 +41,7 @@ export function CIsPage() {
   const [epoch, setEpoch] = useState(0)
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const [selected, setSelected] = useState<CI | null>(null)
+  useDeepLink<CI>('/api/cis', setSelected)
   const [editing, setEditing] = useState<{ ci: CI | null } | null>(null)
   const [deleting, setDeleting] = useState<CI | null>(null)
   const q = useDebounced(filters.q, 250)
@@ -122,7 +124,10 @@ export function CIsPage() {
       <CIDetail
         ci={selected}
         editable={editable}
-        onClose={() => setSelected(null)}
+        onClose={() => {
+          clearDeepLink()
+          setSelected(null)
+        }}
         onEdit={(ci) => {
           setSelected(null)
           setEditing({ ci })
