@@ -37,6 +37,7 @@ func (a *App) registerIncidents(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/incidents/bulk", a.authed(a.can("incidents:ack", a.bulkIncidents)))
 	mux.HandleFunc("POST /api/incidents/{id}/create-ci", a.authed(a.can("incidents:view", a.can("cis:edit", a.createIncidentCI))))
 	mux.HandleFunc("POST /api/incidents/{id}/bind-ci", a.authed(a.can("incidents:view", a.can("cis:edit", a.bindIncidentCI))))
+	a.registerAlertPolicy(mux)
 }
 
 func (a *App) alertsReady(w http.ResponseWriter) bool {

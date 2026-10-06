@@ -225,11 +225,11 @@ func (e *Engine) reresolve(ctx context.Context, tx pgx.Tx, c *change, w *world, 
 	return e.pdCmd(a, PDTrigger, now), nil
 }
 
-// expireTests resolves the alerts of test events once they have lasted TestLifetime, with the
-// connector events that fed them.
-func (e *Engine) expireTests(ctx context.Context, now time.Time) error {
-	rows, err := e.db.Query(ctx, `SELECT id FROM alerts WHERE status <> 'resolved' AND doc->'labels'->>'umbrella_test' = 'true'
-		AND first_seen <= $1 ORDER BY seq`, now.Add(-TestLifetime))
+// expireTests resolves the alerts of test events once they have lasted their lifetime
+// (TestLifetime unless the alerting policy sets one), with the connector events that fed them.
+func (e *Engine) expireTests(ctx context.Context, now time.Time, lifetime time.Duration) error {
+	rows, err := e.db.Query(ctx, `SELECT id FROM alerts WHERE status <> '`+StatusResolved+`' AND doc->'labels'->>'`+TestLabel+`' = 'true'
+		AND first_seen <= $1 ORDER BY seq`, now.Add(-lifetime))
 	if err != nil {
 		return err
 	}
