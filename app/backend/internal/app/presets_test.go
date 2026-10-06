@@ -1,0 +1,190 @@
+package app_test
+
+import (
+	"context"
+	"net/http"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/app"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory/directorytest"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets/secretstest"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
+)
+
+func TestPresetRolesCreatedOnceAndEditable(t *testing.T) {
+	_, vault := secretstest.New(t)
+	st := store.New()
+	st.Write(func(d *store.Data) {
+		d.Settings.DefaultLocale = model.LocaleRU
+		d.Users["USR-1"] = &model.User{ID: "USR-1", Username: "old", Source: model.SourceLDAP, Role: model.RoleUser}
+	})
+	if err := app.Migrate(context.Background(), st, vault); err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{model.RoleViewer, model.RoleOnCall, model.RoleServiceOwner, model.RoleIntegrations, model.RoleNOCLead}
+	st.Read(func(d *store.Data) {
+		for _, id := range ids {
+			r := d.Roles[id]
+			if r == nil || r.System {
+				t.Fatalf("preset %s = %+v", id, r)
+			}
+		}
+		if d.Roles[model.RoleViewer].Name != "Наблюдатель" {
+			t.Errorf("presets are named in the language of the installation: %q", d.Roles[model.RoleViewer].Name)
+		}
+		viewer := d.Roles[model.RoleViewer].Permissions
+		for _, p := range []string{"incidents:view", "cmdb:view", "cis:view", "services:view", "maintenance:view", "wallboards:view"} {
+			if !slices.Contains(viewer, p) {
+				t.Errorf("viewer lacks %s: %v", p, viewer)
+			}
+		}
+		if slices.Contains(viewer, "incidents:ack") {
+			t.Error("the viewer changes nothing")
+		}
+		oncall := d.Roles[model.RoleOnCall].Permissions
+		if !slices.Contains(oncall, "incidents:ack") || !slices.Contains(oncall, "maintenance:edit") {
+			t.Errorf("on-call = %v", oncall)
+		}
+		integ := d.Roles[model.RoleIntegrations].Permissions
+		for _, p := range []string{"connectors:view", "connectors:publish", "credentials:edit", "netbox:sync", "monitoring:link", "cis:edit"} {
+			if !slices.Contains(integ, p) {
+				t.Errorf("integrations lacks %s (view permissions of granted pages are added)", p)
+			}
+		}
+		noc := d.Roles[model.RoleNOCLead].Permissions
+		if !slices.Contains(noc, "users:lock") || !slices.Contains(noc, "wallboards:edit") || slices.Contains(noc, "users:delete") {
+			t.Errorf("noc lead = %v", noc)
+		}
+		if d.NewUserRole() != model.RoleViewer {
+			t.Errorf("new users get %q, want the viewer preset", d.NewUserRole())
+		}
+		if d.Users["USR-1"].Role != model.RoleUser {
+			t.Error("existing users keep their role")
+		}
+	})
+
+	// The presets are ordinary roles: changed or deleted, they are not created again.
+	st.Write(func(d *store.Data) {
+		d.Roles[model.RoleOnCall].Name = "Дежурные"
+		d.Roles[model.RoleOnCall].Permissions = []string{"incidents:view"}
+		delete(d.Roles, model.RoleNOCLead)
+	})
+	if err := app.Migrate(context.Background(), st, vault); err != nil {
+		t.Fatal(err)
+	}
+	st.Read(func(d *store.Data) {
+		if r := d.Roles[model.RoleOnCall]; r.Name != "Дежурные" || len(r.Permissions) != 1 {
+			t.Errorf("an edited preset is kept as edited: %+v", r)
+		}
+		if d.Roles[model.RoleNOCLead] != nil {
+			t.Error("a deleted preset must not come back")
+		}
+	})
+}
+
+func TestPresetRolesSkipTakenNames(t *testing.T) {
+	st := store.New()
+	st.Write(func(d *store.Data) {
+		d.Roles["ROL-1"] = &model.Role{ID: "ROL-1", Name: "viewer"}
+		if !d.EnsurePresetRoles(model.LocaleEN, time.Now()) {
+			t.Fatal("first run seeds")
+		}
+		if d.Roles[model.RoleViewer] != nil {
+			t.Error("a preset whose name is taken is skipped")
+		}
+		if d.NewUserRole() != model.RoleUser {
+			t.Errorf("without the viewer preset new users get %q", d.NewUserRole())
+		}
+		if d.EnsurePresetRoles(model.LocaleEN, time.Now()) {
+			t.Error("second run does nothing")
+		}
+	})
+}
+
+func TestNewUserRoleForDirectoryUsers(t *testing.T) {
+	h := newHarness(t)
+	srv := ldapServer(t)
+	srv.Put(directorytest.Entry{DN: "uid=boris,dc=example,dc=org", Password: "boris-pass-1", Attrs: map[string][]string{
+		"objectClass": {"inetOrgPerson"}, "uid": {"boris"}, "cn": {"Boris Petrov"}}})
+	srv.Put(directorytest.Entry{DN: "uid=vera,dc=example,dc=org", Password: "vera-pass-1", Attrs: map[string][]string{
+		"objectClass": {"inetOrgPerson"}, "uid": {"vera"}, "cn": {"Vera Orlova"}}})
+	h.addLocal("admin", "Admin-pass-2026", model.RoleAdmin, time.Now())
+	h.st.Write(func(d *store.Data) {
+		d.EnsureSystemRoles(time.Now())
+		d.EnsurePresetRoles(model.LocaleEN, time.Now())
+	})
+	admin := h.client()
+	admin.login("admin", "Admin-pass-2026")
+	if code := admin.call(http.MethodPut, "/api/settings/ldap", map[string]any{"config": ldapConfig(srv.URL), "bind_password": ldapPass}, nil); code != 200 {
+		t.Fatalf("ldap save = %d", code)
+	}
+
+	// The viewer preset is the default: a new directory user can see incidents at once.
+	boris := h.client()
+	boris.login("boris", "boris-pass-1")
+	if u := h.named("boris"); u.Role != model.RoleViewer {
+		t.Fatalf("boris = %q, want the viewer preset", u.Role)
+	}
+	_, me := boris.me()
+	if me["admins"] != nil {
+		t.Errorf("a user with permissions gets no access banner: %v", me["admins"])
+	}
+
+	var problem map[string]any
+	if code := admin.call(http.MethodPut, "/api/roles/admin/new-users", nil, &problem); code != 400 || problem["error"] != "new_user_role_admin" {
+		t.Fatalf("admin as the new user role = %d %v", code, problem)
+	}
+	var role map[string]any
+	if code := admin.call(http.MethodPut, "/api/roles/"+model.RoleOnCall+"/new-users", nil, &role); code != 200 || role["new_users"] != true {
+		t.Fatalf("set new user role = %d %v", code, role)
+	}
+	vera := h.client()
+	vera.login("vera", "vera-pass-1")
+	if u := h.named("vera"); u.Role != model.RoleOnCall {
+		t.Fatalf("vera = %q, want the chosen role", u.Role)
+	}
+	if u := h.named("boris"); u.Role != model.RoleViewer {
+		t.Fatalf("existing users are not changed: boris = %q", u.Role)
+	}
+
+	// Deleting the chosen role falls back to the role without permissions.
+	if code := admin.call(http.MethodDelete, "/api/roles/"+model.RoleOnCall+"?reassign_to="+model.RoleViewer, nil, nil); code != 204 {
+		t.Fatalf("delete = %d", code)
+	}
+	var refs app.Refs
+	admin.call(http.MethodGet, "/api/refs", nil, &refs)
+	if refs.NewUserRole != model.RoleUser {
+		t.Fatalf("new user role after delete = %q", refs.NewUserRole)
+	}
+}
+
+func TestNoAccessBannerNamesAdministrators(t *testing.T) {
+	h := newHarness(t)
+	now := time.Now()
+	h.st.Write(func(d *store.Data) { d.EnsureSystemRoles(now) })
+	adminID := h.addLocal("admin", "Admin-pass-2026", model.RoleAdmin, now)
+	h.addLocal("root2", "Admin-pass-2026", model.RoleAdmin, now)
+	h.addLocal("nobody", "Nobody-pass-2026", model.RoleUser, now)
+	h.st.Write(func(d *store.Data) {
+		d.Users[adminID].Profile = model.Profile{LastName: "Petrova", FirstName: "Olga", Email: "olga@example.com"}
+		d.UserByName("root2").Disabled = true
+	})
+	c := h.client()
+	c.login("nobody", "Nobody-pass-2026")
+	_, me := c.me()
+	admins, _ := me["admins"].([]any)
+	if len(admins) != 1 {
+		t.Fatalf("admins = %v (locked administrators are not listed)", me["admins"])
+	}
+	if a := admins[0].(map[string]any); a["name"] != "Petrova Olga" || a["email"] != "olga@example.com" {
+		t.Fatalf("admin = %v", a)
+	}
+	a := h.client()
+	a.login("admin", "Admin-pass-2026")
+	if _, me := a.me(); me["admins"] != nil {
+		t.Fatal("administrators get no banner")
+	}
+}

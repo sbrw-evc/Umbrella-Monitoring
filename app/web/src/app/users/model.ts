@@ -15,7 +15,7 @@ export type ManagedUser = User & {
 export type RoleRef = { id: string; name: string; system: boolean }
 export type TeamRef = { id: string; name: string; parent_id: string }
 export type ServiceRef = { id: string; name: string }
-export type Refs = { roles: RoleRef[]; teams: TeamRef[]; services: ServiceRef[] }
+export type Refs = { roles: RoleRef[]; teams: TeamRef[]; services: ServiceRef[]; new_user_role?: string }
 
 export type Filters = { q: string; source: string; role: string; team: string; status: string }
 

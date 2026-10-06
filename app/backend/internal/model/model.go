@@ -129,6 +129,11 @@ type Settings struct {
 	NetBox        netbox.Config    `json:"netbox"`
 	Groups        GroupMappings    `json:"groups"`
 	Alerting      Alerting         `json:"alerting"`
-	SetupAt       time.Time        `json:"setup_at"`
-	SetupBy       string           `json:"setup_by"`
+	// NewUserRole is the role of accounts created by a directory sign-in or synchronization or by
+	// NetBox when no group mapping gives one. Empty or unknown: the system role "user".
+	NewUserRole string `json:"new_user_role"`
+	// PresetRolesSeeded: the preset roles were created once and are not created again.
+	PresetRolesSeeded bool      `json:"-"`
+	SetupAt           time.Time `json:"setup_at"`
+	SetupBy           string    `json:"setup_by"`
 }

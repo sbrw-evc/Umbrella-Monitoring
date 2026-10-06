@@ -24,6 +24,10 @@ func Migrate(ctx context.Context, st *store.Store, vault credentials.Vault) erro
 			d.AddAudit(store.AuditEntry{Actor: "system", Action: "roles.seeded", Detail: "system roles created"})
 			changed = true
 		}
+		if d.EnsurePresetRoles(d.Settings.DefaultLocale, now) {
+			d.AddAudit(store.AuditEntry{Actor: "system", Action: "roles.seeded", Detail: "preset roles created, new users get " + d.NewUserRole()})
+			changed = true
+		}
 		for _, u := range d.Users {
 			if d.Roles[u.Role] == nil {
 				u.Role = model.RoleUser

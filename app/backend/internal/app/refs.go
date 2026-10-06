@@ -37,6 +37,8 @@ type Refs struct {
 	Teams    []TeamRef    `json:"teams"`
 	Users    []UserRef    `json:"users"`
 	Services []ServiceRef `json:"services"`
+	// NewUserRole is the role accounts created by a directory or NetBox get without a mapped role.
+	NewUserRole string `json:"new_user_role"`
 }
 
 type CatalogView struct {
@@ -96,6 +98,7 @@ func byName(a, b string) int { return strings.Compare(strings.ToLower(a), string
 func (a *App) collectRefs() Refs {
 	out := Refs{Roles: []RoleRef{}, Teams: []TeamRef{}, Users: []UserRef{}, Services: []ServiceRef{}}
 	a.deps.Store.Read(func(d *store.Data) {
+		out.NewUserRole = d.NewUserRole()
 		for _, r := range d.Roles {
 			out.Roles = append(out.Roles, RoleRef{ID: r.ID, Name: r.Name, System: r.System})
 		}

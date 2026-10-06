@@ -228,9 +228,9 @@ func assignFromGroups(d *store.Data, u *model.User, source string, admin bool, g
 	case mRole != "":
 		role = mRole
 	case role == "" || role == model.RoleAdmin || d.Roles[role] == nil:
-		role = model.RoleUser
+		role = d.NewUserRole()
 	case known && u.MappedRole != "" && role == u.MappedRole:
-		role = model.RoleUser
+		role = d.NewUserRole()
 	}
 	switch {
 	case mTeam != "":

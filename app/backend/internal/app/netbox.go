@@ -530,7 +530,7 @@ func syncContacts(d *store.Data, inv netbox.Inventory, now time.Time, stats *mod
 		}
 		if u == nil {
 			u = &model.User{ID: d.NextID("USR"), Username: contactUsername(d, c.ID, email), Source: model.SourceNetBox,
-				ExternalID: "netbox-contact-" + strconv.Itoa(c.ID), Role: model.RoleUser, CreatedAt: now}
+				ExternalID: "netbox-contact-" + strconv.Itoa(c.ID), Role: d.NewUserRole(), CreatedAt: now}
 			d.Users[u.ID] = u
 			d.AddAudit(store.AuditEntry{Actor: netboxActor, Action: "user.create", Object: u.ID, Detail: u.Username + " (netbox contact " + strconv.Itoa(c.ID) + ")"})
 			stats.UsersCreated++

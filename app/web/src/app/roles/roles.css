@@ -221,3 +221,15 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.roles-newusers {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.roles-newusers .muted {
+  flex: 1 1 260px;
+  font-size: 13px;
+}

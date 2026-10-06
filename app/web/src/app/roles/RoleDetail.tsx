@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Copy, Trash2 } from 'lucide-react'
+import { Copy, Trash2, UserPlus } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api'
 import { useLocale, useT } from '../../i18n'
@@ -26,6 +26,7 @@ export function RoleDetail({
   onMoved,
   onDuplicate,
   onDelete,
+  onNewUsers,
 }: {
   role: Role
   roles: Role[]
@@ -38,10 +39,12 @@ export function RoleDetail({
   onMoved: (target: string, ids: string[]) => Promise<void>
   onDuplicate: () => void
   onDelete: () => void
+  onNewUsers: () => Promise<void>
 }) {
   const t = useT(strings)
   const { locale } = useLocale()
   const saver = useAction(strings)
+  const defaulter = useAction(strings)
   const [tab, setTab] = useState<Tab>('permissions')
   const admin = role.id === ADMIN
   const perms = Permissions.of(catalog, draft.permissions)
@@ -80,6 +83,37 @@ export function RoleDetail({
           </div>
         )}
       </div>
+      {role.new_users ? (
+        <Banner kind="info" title={t('roles.newUsers.on')}>
+          {t('roles.newUsers.hint')}
+        </Banner>
+      ) : (
+        editable &&
+        !admin && (
+          <div className="roles-newusers">
+            <Button
+              variant="ghost"
+              busy={defaulter.busy}
+              onClick={() =>
+                defaulter.run(async () => {
+                  await api<Role>('PUT', `/api/roles/${encodeURIComponent(role.id)}/new-users`)
+                  await onNewUsers()
+                  return t('roles.newUsers.done')
+                })
+              }
+            >
+              <UserPlus size={16} aria-hidden />
+              {t('roles.newUsers.set')}
+            </Button>
+            <span className="muted">{t('roles.newUsers.hint')}</span>
+          </div>
+        )
+      )}
+      {defaulter.error && (
+        <Banner kind="error" title={defaulter.error.message}>
+          {defaulter.error.detail}
+        </Banner>
+      )}
       <div className="grid-2 roles-fields">
         <Field label={t('roles.name')} hint={role.system ? t('roles.name.system') : undefined}>
           {(id) => (

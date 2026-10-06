@@ -167,7 +167,10 @@ func (s *UsersService) Create(ctx context.Context, actor Actor, in NewUser) (mod
 	if err != nil {
 		return model.User{}, err
 	}
-	role := userOr(in.RoleID, model.RoleUser)
+	role := in.RoleID
+	if role == "" {
+		s.st.Read(func(d *store.Data) { role = d.NewUserRole() })
+	}
 	draft := model.User{Username: username, Name: profile.DisplayName(username), Profile: profile, Source: model.SourceLocal,
 		Role: role, TeamID: in.TeamID, MustChangePassword: in.MustChangePassword == nil || *in.MustChangePassword}
 

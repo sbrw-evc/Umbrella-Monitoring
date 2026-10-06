@@ -20,7 +20,7 @@ export function CreateUserDialog({ open, refs, onClose, onCreated }: { open: boo
   const action = useAction(strings)
   const [username, setUsername] = useState('')
   const [profile, setProfile] = useState<ProfileFields>(blankProfile)
-  const [access, setAccess] = useState<Access>({ role_id: 'user', team_id: '' })
+  const [access, setAccess] = useState<Access>({ role_id: refs.new_user_role || 'user', team_id: '' })
   const [password, setPassword] = useState<NewPassword>(freshPassword)
   const login = username.trim()
   const passwordOk = usePasswordValid(password, login)
