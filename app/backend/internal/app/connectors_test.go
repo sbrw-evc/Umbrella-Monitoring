@@ -134,6 +134,11 @@ func TestCredentialsWriteOnly(t *testing.T) {
 	if got := f.h.bao.Get("umbrella/credentials/" + c.ID); got == nil {
 		t.Errorf("the secret is in OpenBao, paths = %v", f.h.bao.Paths())
 	}
+	var kinds []app.CredentialKind
+	f.expect(f.admin, http.MethodGet, "/api/credentials/kinds", nil, http.StatusOK, &kinds)
+	if len(kinds) != 4 || kinds[0].Type != flow.CredBearer || kinds[1].Fields[0] != "username" || kinds[1].Secrets[0] != "password" {
+		t.Errorf("credential kinds = %+v", kinds)
+	}
 	var problem map[string]any
 	if code := f.admin.call(http.MethodPost, "/api/credentials", app.CredentialInput{Name: "x", Type: flow.CredBasic, Fields: map[string]string{"username": "u"}}, &problem); code != http.StatusBadRequest || problem["error"] != "invalid_credential_secret" {
 		t.Errorf("a new credential needs its secret: %d %v", code, problem)

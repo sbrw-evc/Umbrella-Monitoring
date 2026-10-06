@@ -27,12 +27,32 @@ var (
 	ErrSecretsDown     = errors.New("OpenBao is unavailable")
 )
 
-// credentialKinds: the plain fields and the secret fields of every credential type.
-var credentialKinds = map[string]struct{ fields, secrets []string }{
-	flow.CredBearer: {nil, []string{"token"}},
-	flow.CredBasic:  {[]string{"username"}, []string{"password"}},
-	flow.CredHeader: {[]string{"header"}, []string{"value"}},
-	flow.CredHMAC:   {nil, []string{"secret"}},
+// CredentialKind is a credential type with its plain fields and its secret fields.
+type CredentialKind struct {
+	Type    string   `json:"type"`
+	Fields  []string `json:"fields"`
+	Secrets []string `json:"secrets"`
+}
+
+// credentialKinds are the credential types in the order the web app offers them; it reads
+// them from GET /api/credentials/kinds.
+var credentialKinds = []CredentialKind{
+	{flow.CredBearer, []string{}, []string{"token"}},
+	{flow.CredBasic, []string{"username"}, []string{"password"}},
+	{flow.CredHeader, []string{"header"}, []string{"value"}},
+	{flow.CredHMAC, []string{}, []string{"secret"}},
+}
+
+func credentialKind(typ string) (CredentialKind, bool) {
+	i := slices.IndexFunc(credentialKinds, func(k CredentialKind) bool { return k.Type == typ })
+	if i < 0 {
+		return CredentialKind{}, false
+	}
+	return credentialKinds[i], true
+}
+
+func (a *App) listCredentialKinds(w http.ResponseWriter, r *http.Request) {
+	httpx.JSON(w, http.StatusOK, credentialKinds)
 }
 
 type CredentialInput struct {
@@ -225,12 +245,12 @@ func (in *CredentialInput) normalize(create bool) error {
 	if utf8.RuneCountInString(in.Description) > maxServiceDescription {
 		return invalid("invalid_credential_description", nil)
 	}
-	kind, ok := credentialKinds[in.Type]
+	kind, ok := credentialKind(in.Type)
 	if !ok {
 		return invalid("invalid_credential_type", nil)
 	}
 	fields := map[string]string{}
-	for _, f := range kind.fields {
+	for _, f := range kind.Fields {
 		v := strings.TrimSpace(in.Fields[f])
 		if v == "" || len(v) > 256 {
 			return invalid("invalid_credential_field", fmt.Errorf("%s is required", f))
@@ -242,7 +262,7 @@ func (in *CredentialInput) normalize(create bool) error {
 	}
 	in.Fields = fields
 	secretsIn := map[string]string{}
-	for _, k := range kind.secrets {
+	for _, k := range kind.Secrets {
 		v := in.Secrets[k]
 		if v == "" {
 			if create {
@@ -256,7 +276,7 @@ func (in *CredentialInput) normalize(create bool) error {
 		secretsIn[k] = v
 	}
 	for k := range in.Secrets {
-		if !slices.Contains(kind.secrets, k) {
+		if !slices.Contains(kind.Secrets, k) {
 			return invalid("invalid_credential_secret", fmt.Errorf("%s is not a secret of type %s", k, in.Type))
 		}
 	}
