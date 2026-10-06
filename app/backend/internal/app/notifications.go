@@ -373,7 +373,7 @@ func (a *App) ackPage(w http.ResponseWriter, r *http.Request) {
 	}
 	page.ID, page.Title = al.ID, al.Title
 	if pub := a.settings.Get().Alerting.PublicURL; pub != "" {
-		page.Open = strings.TrimRight(pub, "/") + "/incidents?id=" + al.ID
+		page.Open = model.IncidentURL(pub, al.ID)
 	}
 	switch {
 	case al.Status == alert.StatusResolved:

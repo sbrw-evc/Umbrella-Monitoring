@@ -139,7 +139,7 @@ func (a *App) grafanaSave(w http.ResponseWriter, r *http.Request) {
 // signed in goes on to the incident page instead of looping.
 func (a *App) grafanaRedirect(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	fallback := "/incidents?id=" + url.QueryEscape(id)
+	fallback := model.IncidentURL("", id)
 	if a.alerts == nil || !a.ingestReady() {
 		http.Redirect(w, r, fallback, http.StatusFound)
 		return
@@ -147,7 +147,7 @@ func (a *App) grafanaRedirect(w http.ResponseWriter, r *http.Request) {
 	c, err := r.Cookie(CookieName)
 	if err != nil {
 		if r.URL.Query().Get(sameSiteHop) == "" {
-			hopPage(w, "/go/incidents/"+url.PathEscape(id)+"/grafana?"+sameSiteHop+"=1")
+			hopPage(w, model.GrafanaHopURL("", id)+"?"+sameSiteHop+"=1")
 			return
 		}
 		http.Redirect(w, r, fallback, http.StatusFound)

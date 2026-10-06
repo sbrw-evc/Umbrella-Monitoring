@@ -316,7 +316,7 @@ func Build(publicURL string, grafana bool, routingKey string, cmd alert.Command)
 	ev := Event{RoutingKey: routingKey, EventAction: string(cmd.Action), DedupKey: a.PD.Key, Client: "Umbrella"}
 	base := strings.TrimRight(publicURL, "/")
 	if base != "" {
-		ev.ClientURL = base + "/incidents?id=" + a.ID
+		ev.ClientURL = model.IncidentURL(base, a.ID)
 	}
 	if cmd.Action != alert.PDTrigger {
 		return ev
@@ -371,9 +371,9 @@ func Build(publicURL string, grafana bool, routingKey string, cmd alert.Command)
 		CustomDetails: details,
 	}
 	if base != "" {
-		ev.Links = []Link{{Href: base + "/incidents?id=" + a.ID, Text: "Umbrella incident"}}
+		ev.Links = []Link{{Href: model.IncidentURL(base, a.ID), Text: "Umbrella incident"}}
 		if grafana {
-			ev.Links = append(ev.Links, Link{Href: base + "/go/incidents/" + a.ID + "/grafana", Text: "Incident context in Grafana"})
+			ev.Links = append(ev.Links, Link{Href: model.GrafanaHopURL(base, a.ID), Text: "Incident context in Grafana"})
 		}
 	}
 	return ev

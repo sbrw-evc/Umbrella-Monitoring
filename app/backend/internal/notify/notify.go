@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/textproto"
-	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -445,9 +444,9 @@ func (s *Service) compose(c config, a alert.Alert, t target) composed {
 	}
 	var open, ack, grafana string
 	if base != "" {
-		open = base + "/incidents?id=" + url.QueryEscape(a.ID)
+		open = model.IncidentURL(base, a.ID)
 		if c.set.Grafana.DashboardURL != "" {
-			grafana = base + "/go/incidents/" + url.PathEscape(a.ID) + "/grafana"
+			grafana = model.GrafanaHopURL(base, a.ID)
 		}
 		if l := s.Links(); l != nil {
 			ack = base + "/ack/" + l.Sign(a.ID, t.recipient, s.now().Add(LinkTTL))
@@ -510,7 +509,7 @@ func (s *Service) composeFollowUp(c config, a alert.Alert, tz *time.Location) co
 	title := a.ID + " · " + a.Title
 	open := ""
 	if base := strings.TrimRight(c.set.PublicURL, "/"); base != "" {
-		open = base + "/incidents?id=" + url.QueryEscape(a.ID)
+		open = model.IncidentURL(base, a.ID)
 	}
 	icon := "✅"
 	if a.FollowUp == alert.StatusAcknowledged {
