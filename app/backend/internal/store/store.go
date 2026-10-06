@@ -96,6 +96,12 @@ func (d *Data) init() {
 	if d.MonitoringSources == nil {
 		d.MonitoringSources = map[string]*model.MonitoringSource{}
 	}
+	// gob drops empty lists: a snapshot gives back nil where the hosts had [].
+	for _, src := range d.MonitoringSources {
+		if src != nil {
+			src.NormalizeHosts()
+		}
+	}
 	if d.NetBoxContacts == nil {
 		d.NetBoxContacts = map[int]string{}
 	}

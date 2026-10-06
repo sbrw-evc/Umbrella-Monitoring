@@ -49,6 +49,8 @@ type TargetRef struct {
 
 func (s *MaintenanceService) view(d *store.Data, m *model.Maintenance, now time.Time) MaintenanceView {
 	v := MaintenanceView{Maintenance: *m, State: m.State(now), CIs: []TargetRef{}, Services: []TargetRef{}}
+	// gob drops empty lists, so a window read back from the snapshot may have nil here.
+	v.CIIDs, v.ServiceIDs = nonNil(m.CIIDs), nonNil(m.ServiceIDs)
 	for _, id := range m.CIIDs {
 		if ci := d.ConfigItems[id]; ci != nil {
 			v.CIs = append(v.CIs, TargetRef{ID: id, Name: ci.Name})
