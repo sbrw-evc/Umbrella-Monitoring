@@ -82,6 +82,11 @@ type Reprocessed struct {
 // Reprocess puts the requests behind the given failures (all open ones when ids is empty) back
 // into the queue for the given version and closes the failures. Requests whose partition has
 // expired cannot be processed again and are counted as missing.
+//
+// A requeued request is processed again in full, but only what is still news reaches the
+// alerts (see handle): an event of a source that has sent something newer since is skipped,
+// and an event the same request already folded is not folded again. What remains is the
+// newest known state of its source and is applied as its current state.
 func (q *Queue) Reprocess(ctx context.Context, connectorID string, ids []int64, version int) (Reprocessed, error) {
 	var out Reprocessed
 	err := pgx.BeginFunc(ctx, q.pool, func(tx pgx.Tx) error {
