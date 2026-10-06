@@ -7,6 +7,7 @@ import { useLocale, useT } from '../../i18n'
 import { Link, useRouter } from '../../router'
 import { Banner, Button, Field, formatDate, Input, Modal, Select, Textarea } from '../../ui'
 import { useSession } from '../session'
+import { CreateToken, useCanCreateToken } from './CreateToken'
 import { ConnectorEditor } from './Editor'
 import { slugify } from './graph'
 import { strings } from './strings'
@@ -155,19 +156,77 @@ export function CredentialSelect({
   )
 }
 
-function SlotMapping({ slots, choices, value, onChange }: { slots: Slot[]; choices: CredentialChoice[]; value: Record<string, string>; onChange: (v: Record<string, string>) => void }) {
+function SlotMapping({
+  slots,
+  choices: loaded,
+  value,
+  onChange,
+  name = '',
+}: {
+  slots: Slot[]
+  choices: CredentialChoice[]
+  value: Record<string, string>
+  onChange: (v: Record<string, string>) => void
+  name?: string
+}) {
   const t = useT(strings)
+  // Tokens made with «Create token» in this dialog.
+  const [made, setMade] = useState<CredentialChoice[]>([])
+  const canToken = useCanCreateToken([])
   if (slots.length === 0) return null
+  const choices = [...loaded, ...made.filter((m) => !loaded.some((c) => c.id === m.id))]
   return (
     <div className="stack">
       <p className="muted">{t('cn.slots.hint')}</p>
       {slots.map((s) => (
-        <Field key={s.slot} label={s.name ? t('cn.slots.named', { slot: s.slot, name: s.name }) : s.slot} optional={t('cn.optional')}>
-          {(id) => <CredentialSelect id={id} value={value[s.slot] ?? ''} types={s.types} choices={choices} onChange={(v) => onChange({ ...value, [s.slot]: v })} />}
-        </Field>
+        <SlotField
+          key={s.slot}
+          slot={s}
+          choices={choices}
+          value={value[s.slot] ?? ''}
+          name={name}
+          onChange={(v) => onChange({ ...value, [s.slot]: v })}
+          onMade={(c) => setMade((m) => [...m, c])}
+        />
       ))}
-      {choices.length === 0 && <p className="hint">{t('cn.slots.noCreds')}</p>}
+      {choices.length === 0 && !canToken && <p className="hint">{t('cn.slots.noCreds')}</p>}
     </div>
+  )
+}
+
+// SlotField picks the credential of one slot; «Create token» makes a Bearer token for it in place.
+function SlotField({
+  slot: s,
+  choices,
+  value,
+  name,
+  onChange,
+  onMade,
+}: {
+  slot: Slot
+  choices: CredentialChoice[]
+  value: string
+  name: string
+  onChange: (v: string) => void
+  onMade: (c: CredentialChoice) => void
+}) {
+  const t = useT(strings)
+  const canToken = useCanCreateToken(s.types)
+  return (
+    <>
+      <Field label={s.name ? t('cn.slots.named', { slot: s.slot, name: s.name }) : s.slot} optional={t('cn.optional')}>
+        {(id) => <CredentialSelect id={id} value={value} types={s.types} choices={choices} onChange={onChange} />}
+      </Field>
+      {canToken && (
+        <CreateToken
+          name={name}
+          onCreated={(c) => {
+            onMade(c)
+            onChange(c.id)
+          }}
+        />
+      )}
+    </>
   )
 }
 
@@ -264,7 +323,7 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
       <Field label={t('cn.field.description')} optional={t('cn.optional')}>
         {(id) => <Textarea id={id} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />}
       </Field>
-      {current && <SlotMapping slots={current.credentials} choices={choices.data ?? []} value={creds} onChange={setCreds} />}
+      {current && <SlotMapping key={preset} slots={current.credentials} choices={choices.data ?? []} value={creds} onChange={setCreds} name={name} />}
       <ErrorBanner error={action.error} strings={strings} />
     </Modal>
   )
@@ -340,7 +399,7 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
           <p className="muted">{t('cn.import.summary', { nodes: check.nodes, samples: check.samples })}</p>
           <Field label={t('cn.field.name')}>{(id) => <Input id={id} value={name} onChange={(e) => setName(e.target.value)} />}</Field>
           <Field label={t('cn.field.slug')}>{(id) => <Input id={id} className="cn-mono" value={slug} onChange={(e) => setSlug(e.target.value)} />}</Field>
-          <SlotMapping slots={check.credentials} choices={check.choices} value={creds} onChange={setCreds} />
+          <SlotMapping slots={check.credentials} choices={check.choices} value={creds} onChange={setCreds} name={name} />
         </>
       )}
       <ErrorBanner error={action.error} strings={strings} />
