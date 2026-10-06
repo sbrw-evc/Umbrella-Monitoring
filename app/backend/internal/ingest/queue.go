@@ -205,12 +205,25 @@ func (s *statDelta) add(o statDelta) {
 }
 
 const (
+	// drainLockKey makes batches run one at a time across workers and Umbrella instances, so
+	// events are folded into alerts in the order the requests were received.
+	drainLockKey = 0x756d622d696e6773
 	// maxAttempts bounds the retries of a request whose storing or folding failed for a
 	// reason that may pass (a lock timeout, the alert tables not ready yet).
 	maxAttempts = 3
 )
 
 // Drain claims one batch of pending requests and processes it. It returns how many it took.
+//
+// Ordering: a resolved applied before its firing leaves an alert burning for good, so the
+// requests are folded strictly in the order they were received. Each batch takes a
+// transaction-level advisory lock before it claims anything: a second worker (or another
+// instance) waits until the batch before it is committed and then claims the requests that
+// follow it. Folding was already serialized by the alert engine's global lock, held to the end
+// of a batch, so little parallelism is lost (only pipelines no longer overlap), and batches can
+// no longer deadlock on that lock and the rows of connector_events. Behind that, an event older than the one already stored for
+// its connector and key is never applied (see handle), which covers requests reprocessed or
+// committed late.
 //
 // Isolation: every request runs in a savepoint of its own. A request that cannot be stored or
 // folded is rolled back alone and retried up to maxAttempts times, or at once marked failed
@@ -220,8 +233,11 @@ func (q *Queue) Drain(ctx context.Context, process Processor) (int, error) {
 	var after []func()
 	err := pgx.BeginFunc(ctx, q.pool, func(tx pgx.Tx) error {
 		after = after[:0]
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(drainLockKey)); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `SELECT id, received_at, connector_id, version, attempts, remote_ip, method, headers, query, body
-			FROM ingest_requests WHERE status = 'pending' ORDER BY received_at LIMIT $1 FOR UPDATE SKIP LOCKED`, claimBatch)
+			FROM ingest_requests WHERE status = 'pending' ORDER BY received_at, id LIMIT $1 FOR UPDATE SKIP LOCKED`, claimBatch)
 		if err != nil {
 			return err
 		}
@@ -341,6 +357,12 @@ func (q *Queue) fail(ctx context.Context, tx pgx.Tx, r Request, cause error) err
 }
 
 // handle stores what a request produced and folds its events into alerts.
+//
+// Every event is checked against the one stored for its connector and key (connector_events
+// keeps the receive time and id of the request that set it):
+//   - an event from an older request than the stored one is stale and is not applied, so a
+//     late or reprocessed request never takes a source back to an earlier state;
+//   - anything else is the newest known state of the source and is folded now.
 func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Processor, st *statDelta) (func(), error) {
 	st.received++
 	out, perr := process(ctx, r)
@@ -375,9 +397,10 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 		cleanEvent(&e.Event)
 		labels, _ := json.Marshal(e.Event.Labels)
 		// changed: the first delivery of the alert or a change of its status or severity. The
-		// rest are duplicates (prev is read before the upsert, in the same snapshot).
+		// rest are duplicates (prev is read before the upsert, in the same snapshot). No row
+		// comes back when a newer request already set this key.
 		var changed bool
-		err := tx.QueryRow(ctx, `WITH prev AS (SELECT status, severity FROM connector_events WHERE connector_id = $1 AND key = $3)
+		err := tx.QueryRow(ctx, `WITH prev AS (SELECT status, severity, request_id, request_at FROM connector_events WHERE connector_id = $1 AND key = $3)
 			INSERT INTO connector_events AS ce (connector_id, version, key, title, ci, signal, method, severity, status,
 				external_id, value, labels, request_id, request_at, item)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
@@ -385,9 +408,14 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 				signal = EXCLUDED.signal, method = EXCLUDED.method, severity = EXCLUDED.severity, status = EXCLUDED.status,
 				external_id = EXCLUDED.external_id, value = EXCLUDED.value, labels = EXCLUDED.labels, request_id = EXCLUDED.request_id,
 				request_at = EXCLUDED.request_at, item = EXCLUDED.item, last_seen = now(), seen = ce.seen + 1
+			WHERE (ce.request_at, ce.request_id) <= (EXCLUDED.request_at, EXCLUDED.request_id)
 			RETURNING coalesce((SELECT status <> $9 OR severity <> $8 FROM prev), true)`,
 			r.ConnectorID, version, e.Event.Key, e.Event.Title, e.Event.CI, e.Event.Signal, e.Event.Method, e.Event.Severity, e.Event.Status,
 			e.Event.ExternalID, e.Event.Value, labels, r.ID, r.ReceivedAt, e.Lineage.Item).Scan(&changed)
+		if errors.Is(err, pgx.ErrNoRows) {
+			st.duplicates++ // stale: a newer request has spoken for this source
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
