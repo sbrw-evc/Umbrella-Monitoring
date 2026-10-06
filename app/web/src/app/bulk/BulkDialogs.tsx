@@ -10,9 +10,9 @@ import { strings as ciStrings } from '../cis/strings'
 import { strings as monStrings } from '../monitoring/strings'
 import type { ServiceList } from '../services/types'
 import { BulkResults, ciRows, type BulkCIsResult, type BulkHostsResult } from './BulkResults'
-import { strings } from './strings'
+import { requestStrings, strings } from './strings'
 
-const dialogStrings = mergeDicts(ciStrings, monStrings, strings)
+const dialogStrings = mergeDicts(ciStrings, monStrings, strings, requestStrings)
 
 export type BindAction = 'bind' | 'unbind'
 

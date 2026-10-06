@@ -72,6 +72,8 @@ const page: Dict = {
     'en.off': 'Sign-in with Microsoft Entra ID is off.',
     'en.off.sessions': 'Saving signs out Entra ID users who are signed in now.',
     'en.off.noAdmin': 'There is no active local administrator. Entra ID sign-in cannot be turned off, otherwise nobody could administer Umbrella.',
+    'err.ldap_bind_password_required': 'Enter the service account password.',
+    'err.no_local_admin': 'There is no active local administrator, so sign-in through the directory or Microsoft Entra ID cannot be turned off.',
   },
   ru: {
     'dir.title': 'LDAP / Active Directory',
@@ -142,6 +144,8 @@ const page: Dict = {
     'en.off': 'Вход через Microsoft Entra ID выключен.',
     'en.off.sessions': 'При сохранении пользователи Entra ID, которые сейчас в системе, будут из неё выведены.',
     'en.off.noAdmin': 'Нет активного локального администратора. Вход через Entra ID нельзя выключить, иначе администрировать Umbrella будет некому.',
+    'err.ldap_bind_password_required': 'Введите пароль служебной учётной записи.',
+    'err.no_local_admin': 'Нет активного локального администратора, поэтому вход через каталог или Microsoft Entra ID отключить нельзя.',
   },
 }
 
