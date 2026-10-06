@@ -28,6 +28,8 @@ const (
 
 	// Backup notification states of an alert.
 	FallbackPending = "pending"
+	// FallbackSending: the notifier is sending it; acknowledging the alert no longer cancels it.
+	FallbackSending = "sending"
 	FallbackSent    = "sent"
 
 	// TestLabel marks the test events of a connector: their incidents go nowhere (neither to
@@ -130,9 +132,9 @@ type PD struct {
 	// Route names the PagerDuty route of the last delivery. RouteID is the route the accepted
 	// trigger went by: acknowledge, resolve and severity updates go to that PagerDuty service
 	// even after the alert is routed to another team. It is cleared when the alert reopens.
-	Route       string     `json:"route,omitempty"`
-	RouteID     string     `json:"route_id,omitempty"`
-	Error       string     `json:"error,omitempty"`
+	Route   string `json:"route,omitempty"`
+	RouteID string `json:"route_id,omitempty"`
+	Error   string `json:"error,omitempty"`
 	// ErrorCode is the code of Error the interface translates (see DeliveryError).
 	ErrorCode   string     `json:"error_code,omitempty"`
 	Retry       string     `json:"retry,omitempty"`

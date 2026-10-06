@@ -851,7 +851,8 @@ func (e *Engine) Tick(ctx context.Context) error {
 				case a.FallbackState == FallbackPending && a.Status != StatusOpen:
 					// Acknowledged in between (an older version did not cancel it then).
 					e.taken(c, now)
-				case a.FallbackState == FallbackPending && !a.Suppressed && (a.FallbackTry == nil || now.Sub(*a.FallbackTry) >= e.FallbackRetry):
+				case (a.FallbackState == FallbackPending || a.FallbackState == FallbackSending) && !a.Suppressed &&
+					(a.FallbackTry == nil || now.Sub(*a.FallbackTry) >= e.FallbackRetry):
 					// The pending state is saved with the hand-over, so a notification lost with
 					// the process or dropped by a full queue goes out on a later tick.
 					t := now
@@ -1001,16 +1002,19 @@ func (e *Engine) FallbackDue(ctx context.Context, id string) (bool, error) {
 		if a == nil {
 			return ErrNotFound
 		}
-		if a.FallbackState != FallbackPending || a.Suppressed {
+		if (a.FallbackState != FallbackPending && a.FallbackState != FallbackSending) || a.Suppressed {
 			return nil
 		}
+		c := &change{a: a, dirty: true}
 		if a.Status != StatusOpen {
-			c := &change{a: a}
+			// A sending one left by a stopped process is cancelled the same way.
+			a.FallbackState = FallbackPending
 			e.taken(c, now)
 			return c.save(ctx, tx)
 		}
+		a.FallbackState = FallbackSending
 		due = true
-		return nil
+		return c.save(ctx, tx)
 	})
 	return due, err
 }
@@ -1030,7 +1034,7 @@ func (e *Engine) FallbackDone(ctx context.Context, id string, sent []Notified) e
 		if a == nil {
 			return ErrNotFound
 		}
-		if a.FallbackState != FallbackPending {
+		if a.FallbackState != FallbackPending && a.FallbackState != FallbackSending {
 			return nil
 		}
 		a.FallbackState, a.Notified = FallbackSent, sent

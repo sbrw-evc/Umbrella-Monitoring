@@ -57,6 +57,25 @@ func TestBackupNotificationRoundTrip(t *testing.T) {
 	if !v.HasPassword || !v.HasToken {
 		t.Fatalf("kept = %+v", v)
 	}
+	// Delay and minimum severity of backup notification.
+	if v.DelaySeconds != nil || v.MinSeverity != "error" || v.PDEnabled || v.AutoDelaySeconds != 0 {
+		t.Fatalf("defaults = %+v", v)
+	}
+	settings["delay_seconds"] = -1
+	f.expect(f.admin, http.MethodPut, "/api/notifications", settings, http.StatusBadRequest, nil)
+	settings["delay_seconds"], settings["min_severity"] = 90, "loud"
+	f.expect(f.admin, http.MethodPut, "/api/notifications", settings, http.StatusBadRequest, nil)
+	settings["min_severity"] = "warning"
+	f.expect(f.admin, http.MethodPut, "/api/notifications", settings, http.StatusOK, &v)
+	if v.DelaySeconds == nil || *v.DelaySeconds != 90 || v.MinSeverity != "warning" {
+		t.Fatalf("saved = %+v", v)
+	}
+	delete(settings, "delay_seconds")
+	delete(settings, "min_severity")
+	f.expect(f.admin, http.MethodPut, "/api/notifications", settings, http.StatusOK, &v)
+	if v.DelaySeconds != nil || v.MinSeverity != "error" {
+		t.Fatalf("automatic again = %+v", v)
+	}
 
 	var test map[string]any
 	f.expect(f.admin, http.MethodPost, "/api/notifications/test", map[string]any{"channel": "email"}, http.StatusOK, &test)

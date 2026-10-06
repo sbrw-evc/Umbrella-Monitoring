@@ -370,7 +370,7 @@ var words = map[string]map[string]string{
 		"err.unavailable": "PagerDuty временно не отвечает", "err.rejected": "PagerDuty отклонил событие",
 		"fu.acknowledged": "Инцидент взят в работу", "fu.resolved": "Инцидент решён",
 		"fu.ack.by": "Взял(а): {who}, {at}", "fu.res.by": "Решил(а): {who}, {at}", "fu.res.auto": "Решён {at}: источники вернулись в норму",
-		"fu.why": "Вы получили резервное оповещение об этом инциденте; ничего делать не нужно.",
+		"fu.why":               "Вы получили резервное оповещение об этом инциденте; ничего делать не нужно.",
 		"fu.subj.acknowledged": "взят в работу", "fu.subj.resolved": "решён",
 	},
 	"en": {
@@ -385,7 +385,7 @@ var words = map[string]map[string]string{
 		"err.unavailable": "PagerDuty is not answering for now", "err.rejected": "PagerDuty rejected the event",
 		"fu.acknowledged": "The incident is being handled", "fu.resolved": "The incident is resolved",
 		"fu.ack.by": "Taken by {who}, {at}", "fu.res.by": "Resolved by {who}, {at}", "fu.res.auto": "Resolved {at}: the sources are back to normal",
-		"fu.why": "You got backup notification about this incident; nothing more is needed from you.",
+		"fu.why":               "You got backup notification about this incident; nothing more is needed from you.",
 		"fu.subj.acknowledged": "being handled", "fu.subj.resolved": "resolved",
 	},
 }

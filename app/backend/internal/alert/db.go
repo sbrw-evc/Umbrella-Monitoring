@@ -67,7 +67,8 @@ const pdOffMigration = `
 UPDATE alerts SET pd_state = 'off', attention = (status <> 'resolved'),
 	doc = jsonb_set(doc, '{pd}', ((doc->'pd') - 'error' - 'retry') || '{"state": "off"}'::jsonb)
 WHERE pd_state = 'failed' AND doc->'pd'->>'error' = 'PagerDuty is not enabled';
-DELETE FROM alert_timeline WHERE kind = 'pagerduty' AND code = 'pd_failed' AND args->>'error' = 'PagerDuty is not enabled';
+DELETE FROM alert_timeline WHERE kind = 'pagerduty' AND code = 'pd_failed'
+	AND 'PagerDuty is not enabled' IN (args->>'error', args->>'detail');
 `
 
 // lockKey serializes folding events into alerts between workers and Umbrella instances, so

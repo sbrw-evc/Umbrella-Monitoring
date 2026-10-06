@@ -240,6 +240,8 @@ func TestFallbackSettings(t *testing.T) {
 	if _, n, _ := rec.counts(); n != 1 || rec.fallback[0].Severity != "warning" {
 		t.Fatalf("a warning goes after 30 s, info never: %+v", rec.fallback)
 	}
+	e.FallbackDue(ctx, rec.fallback[0].ID)
+	e.FallbackDone(ctx, rec.fallback[0].ID, nil)
 	c.advance(time.Hour)
 	e.Tick(ctx)
 	if _, n, _ := rec.counts(); n != 1 {
