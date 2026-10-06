@@ -1,7 +1,6 @@
 package app
 
 import (
-	"errors"
 	"net/http"
 	"slices"
 	"strings"
@@ -113,15 +112,6 @@ func knownAs(ci *model.ConfigItem, name string) bool {
 	return false
 }
 
-func ciAliasError(w http.ResponseWriter, err error) {
-	var taken *AliasTakenError
-	if errors.As(err, &taken) {
-		httpx.Error(w, http.StatusConflict, "alias_taken", taken)
-		return
-	}
-	netboxError(w, err)
-}
-
 type aliasesInput struct {
 	Aliases []string `json:"aliases"`
 }
@@ -133,7 +123,7 @@ func (a *App) setCIAliases(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.cis.SetAliases(current(r).user.Username, r.PathValue("id"), in.Aliases)
 	if err != nil {
-		ciAliasError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)

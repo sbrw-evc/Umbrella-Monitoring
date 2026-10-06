@@ -371,15 +371,6 @@ func (a *App) listRules(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, a.rules.View())
 }
 
-func rulesError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, ErrSourceInUse):
-		httpx.Error(w, http.StatusConflict, "source_in_use", nil)
-	default:
-		writeError(w, err)
-	}
-}
-
 func (a *App) createRule(w http.ResponseWriter, r *http.Request) {
 	var in model.Rule
 	if !httpx.Decode(w, r, &in) {
@@ -387,7 +378,7 @@ func (a *App) createRule(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.rules.Create(current(r).user.Username, in)
 	if err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, out)
@@ -400,7 +391,7 @@ func (a *App) updateRule(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.rules.Update(r.Context(), current(r).user.Username, r.PathValue("id"), in)
 	if err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -408,7 +399,7 @@ func (a *App) updateRule(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) deleteRule(w http.ResponseWriter, r *http.Request) {
 	if err := a.rules.Delete(r.Context(), current(r).user.Username, r.PathValue("id")); err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -421,7 +412,7 @@ func (a *App) previewRule(w http.ResponseWriter, r *http.Request) {
 	}
 	rule, err := ruleInput(in)
 	if err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, a.ruleEngine.Preview(r.Context(), rule))
@@ -447,7 +438,7 @@ func (a *App) createSource(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.rules.CreateSource(current(r).user.Username, in)
 	if err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, out)
@@ -460,7 +451,7 @@ func (a *App) updateSource(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.rules.UpdateSource(current(r).user.Username, r.PathValue("id"), in)
 	if err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -468,7 +459,7 @@ func (a *App) updateSource(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) deleteSource(w http.ResponseWriter, r *http.Request) {
 	if err := a.rules.DeleteSource(current(r).user.Username, r.PathValue("id")); err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -477,7 +468,7 @@ func (a *App) deleteSource(w http.ResponseWriter, r *http.Request) {
 func (a *App) mergeSource(w http.ResponseWriter, r *http.Request) {
 	out, err := a.rules.MergeSource(current(r).user.Username, r.PathValue("id"))
 	if err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)

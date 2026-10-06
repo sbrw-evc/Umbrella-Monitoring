@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/flow"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
@@ -420,20 +418,4 @@ func (s *CredentialsService) Resolve(id string) (Resolved, error) {
 		out.Secrets[k] = v
 	}
 	return out, nil
-}
-
-func credentialError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, ErrCredentialInUse):
-		var ue *CredentialInUseError
-		if errors.As(err, &ue) {
-			httpx.JSON(w, http.StatusConflict, map[string]any{"error": "credential_in_use", "detail": ue.Error(), "used_by": ue.Uses})
-			return
-		}
-		writeProblem(w, http.StatusConflict, "credential_in_use", nil)
-	case errors.Is(err, ErrSecretsDown):
-		writeProblem(w, http.StatusServiceUnavailable, "secrets_unavailable", err)
-	default:
-		writeError(w, err)
-	}
 }

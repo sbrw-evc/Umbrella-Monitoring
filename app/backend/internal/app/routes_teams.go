@@ -21,7 +21,7 @@ func (a *App) listTeams(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) getTeam(w http.ResponseWriter, r *http.Request) {
 	v, err := a.teams.Get(r.PathValue("id"))
-	orgRespond(w, http.StatusOK, v, err)
+	reply(w, http.StatusOK, v, err)
 }
 
 func (a *App) createTeam(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +30,7 @@ func (a *App) createTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := a.teams.Create(current(r).user.Username, in)
-	orgRespond(w, http.StatusCreated, v, err)
+	reply(w, http.StatusCreated, v, err)
 }
 
 func (a *App) updateTeam(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +39,7 @@ func (a *App) updateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := a.teams.Update(current(r).user.Username, r.PathValue("id"), in)
-	orgRespond(w, http.StatusOK, v, err)
+	reply(w, http.StatusOK, v, err)
 }
 
 func (a *App) deleteTeam(w http.ResponseWriter, r *http.Request) {
@@ -56,5 +56,5 @@ func (a *App) setTeamMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := a.teams.SetMembers(current(r).user.Username, r.PathValue("id"), in.UserIDs)
-	orgRespond(w, http.StatusOK, v, err)
+	reply(w, http.StatusOK, v, err)
 }

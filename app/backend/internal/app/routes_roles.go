@@ -30,7 +30,7 @@ func (a *App) listRoles(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) getRole(w http.ResponseWriter, r *http.Request) {
 	v, err := a.roles.Get(r.PathValue("id"))
-	orgRespond(w, http.StatusOK, v, err)
+	reply(w, http.StatusOK, v, err)
 }
 
 func (a *App) createRole(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +39,7 @@ func (a *App) createRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := a.roles.Create(current(r).user.Username, in)
-	orgRespond(w, http.StatusCreated, v, err)
+	reply(w, http.StatusCreated, v, err)
 }
 
 func (a *App) updateRole(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +48,7 @@ func (a *App) updateRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := a.roles.Update(current(r).user.Username, r.PathValue("id"), in)
-	orgRespond(w, http.StatusOK, v, err)
+	reply(w, http.StatusOK, v, err)
 }
 
 func (a *App) deleteRole(w http.ResponseWriter, r *http.Request) {
@@ -69,10 +69,10 @@ func (a *App) addRoleMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := a.roles.AddMembers(current(r).user, r.PathValue("id"), in.UserIDs)
-	orgRespond(w, http.StatusOK, v, err)
+	reply(w, http.StatusOK, v, err)
 }
 
 func (a *App) setNewUserRole(w http.ResponseWriter, r *http.Request) {
 	v, err := a.roles.SetNewUserRole(current(r).user.Username, r.PathValue("id"))
-	orgRespond(w, http.StatusOK, v, err)
+	reply(w, http.StatusOK, v, err)
 }
