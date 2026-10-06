@@ -18,7 +18,7 @@ export type User = ProfileFields & {
   permissions?: string[]
   /** Active administrators; sent only to a user without any permission. */
   admins?: { name: string; email?: string }[]
-  team_id?: string
+  team_ids?: string[]
   /** Business services whose incidents the user sees; empty or absent: all. Ignored for administrators. */
   service_ids?: string[]
   must_change_password?: boolean

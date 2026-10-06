@@ -58,17 +58,18 @@ type UserFilter struct {
 
 type NewUser struct {
 	model.Profile
-	Username           string `json:"username"`
-	Password           string `json:"password"`
-	RoleID             string `json:"role_id"`
-	TeamID             string `json:"team_id"`
-	MustChangePassword *bool  `json:"must_change_password"`
+	Username           string   `json:"username"`
+	Password           string   `json:"password"`
+	RoleID             string   `json:"role_id"`
+	TeamIDs            []string `json:"team_ids"`
+	MustChangePassword *bool    `json:"must_change_password"`
 }
 
 type UserChanges struct {
 	Profile *model.Profile `json:"profile"`
 	RoleID  *string        `json:"role_id"`
-	TeamID  *string        `json:"team_id"`
+	// TeamIDs replaces the teams of the user.
+	TeamIDs *[]string `json:"team_ids"`
 	// ServiceIDs replaces the business services whose incidents the user sees; empty: all.
 	ServiceIDs *[]string `json:"service_ids"`
 }
@@ -106,7 +107,7 @@ func (s *UsersService) List(f UserFilter) []model.User {
 		for _, u := range d.Users {
 			if f.Source != "" && u.Source != f.Source ||
 				f.Role != "" && d.RoleOf(u).ID != f.Role ||
-				f.Team != "" && !teams[u.TeamID] ||
+				f.Team != "" && !slices.ContainsFunc(u.TeamIDs, func(t string) bool { return teams[t] }) ||
 				f.Status == userStatusActive && u.Disabled ||
 				f.Status == userStatusLocked && !u.Disabled ||
 				q != "" && !userMatches(u, q) {
@@ -172,12 +173,17 @@ func (s *UsersService) Create(ctx context.Context, actor Actor, in NewUser) (mod
 		s.st.Read(func(d *store.Data) { role = d.NewUserRole() })
 	}
 	draft := model.User{Username: username, Name: profile.DisplayName(username), Profile: profile, Source: model.SourceLocal,
-		Role: role, TeamID: in.TeamID, MustChangePassword: in.MustChangePassword == nil || *in.MustChangePassword}
+		Role: role, TeamIDs: in.TeamIDs, MustChangePassword: in.MustChangePassword == nil || *in.MustChangePassword}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var policy model.PasswordPolicy
-	s.st.Read(func(d *store.Data) { policy, err = d.Settings.Password, checkNewUser(d, actor, draft) })
+	s.st.Read(func(d *store.Data) {
+		policy, err = d.Settings.Password, checkNewUser(d, actor, draft)
+		if err == nil {
+			draft.TeamIDs, err = userTeams(d, draft.TeamIDs)
+		}
+	})
 	if err != nil {
 		return model.User{}, err
 	}
@@ -210,20 +216,10 @@ func checkNewUser(d *store.Data, actor Actor, u model.User) error {
 	if d.UserByName(u.Username) != nil {
 		return ErrUsernameTaken
 	}
-	if err := checkUserRefs(d, u.Role, u.TeamID); err != nil {
-		return err
-	}
-	return guardUserChange(d, actor, nil, &u)
-}
-
-func checkUserRefs(d *store.Data, role, team string) error {
-	if d.Roles[role] == nil {
+	if d.Roles[u.Role] == nil {
 		return invalid("unknown_role", nil)
 	}
-	if team != "" && d.Teams[team] == nil {
-		return invalid("unknown_team", nil)
-	}
-	return nil
+	return guardUserChange(d, actor, nil, &u)
 }
 
 func normalUserProfile(in model.Profile) (model.Profile, error) {
@@ -255,15 +251,18 @@ func (s *UsersService) Update(actor Actor, id string, in UserChanges) (model.Use
 			u.Profile, u.Name = profile, profile.DisplayName(u.Username)
 			changes = append(changes, "profile")
 		}
-		role, team := d.RoleOf(u).ID, u.TeamID
+		role, teams := d.RoleOf(u).ID, u.TeamIDs
 		if in.RoleID != nil {
 			role = *in.RoleID
 		}
-		if in.TeamID != nil {
-			team = *in.TeamID
+		if d.Roles[role] == nil {
+			return "", invalid("unknown_role", nil)
 		}
-		if err := checkUserRefs(d, role, team); err != nil {
-			return "", err
+		if in.TeamIDs != nil {
+			var err error
+			if teams, err = userTeams(d, *in.TeamIDs); err != nil {
+				return "", err
+			}
 		}
 		if role != d.RoleOf(u).ID {
 			if u.ID == actor.User.ID {
@@ -272,9 +271,9 @@ func (s *UsersService) Update(actor Actor, id string, in UserChanges) (model.Use
 			u.Role = role
 			changes = append(changes, "role "+role)
 		}
-		if team != u.TeamID {
-			u.TeamID = team
-			changes = append(changes, "team "+userOr(team, "none"))
+		if !slices.Equal(teams, u.TeamIDs) {
+			u.TeamIDs = teams
+			changes = append(changes, "teams "+userOr(strings.Join(teams, " "), "none"))
 		}
 		if in.ServiceIDs != nil {
 			scope, err := userServiceScope(d, *in.ServiceIDs)
@@ -499,8 +498,8 @@ func adminCounts(d *store.Data, skip map[string]bool, extra ...*model.User) (act
 
 func describeUser(d *store.Data, u *model.User) string {
 	out := u.Username + ", role " + d.RoleOf(u).ID
-	if u.TeamID != "" {
-		out += ", team " + u.TeamID
+	if len(u.TeamIDs) > 0 {
+		out += ", teams " + strings.Join(u.TeamIDs, " ")
 	}
 	return out
 }

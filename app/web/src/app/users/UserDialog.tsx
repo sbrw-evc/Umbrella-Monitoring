@@ -17,7 +17,8 @@ import { strings } from './strings'
 
 type Mode = 'edit' | 'password' | 'delete'
 
-const accessOf = (u: ManagedUser): Access => ({ role_id: u.role, team_id: u.team_id ?? '' })
+const accessOf = (u: ManagedUser): Access => ({ role_id: u.role, team_ids: u.team_ids ?? [] })
+const sameIds = (a: string[], b: string[]) => a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i])
 
 export function UserDialog({
   user,
@@ -188,11 +189,11 @@ function EditView({
   const savedScope = user.service_ids ?? []
   const scopeChanged = scope.length !== savedScope.length || scope.some((id) => !savedScope.includes(id))
   const dirty =
-    (local && profileChanged(profile, profileOf(user))) || access.role_id !== saved.role_id || access.team_id !== saved.team_id || scopeChanged
+    (local && profileChanged(profile, profileOf(user))) || access.role_id !== saved.role_id || !sameIds(access.team_ids, saved.team_ids) || scopeChanged
 
   const save = () =>
     action.run(async () => {
-      const body = { ...(local ? { profile } : {}), role_id: access.role_id, team_id: access.team_id, service_ids: scope }
+      const body = { ...(local ? { profile } : {}), role_id: access.role_id, team_ids: access.team_ids, service_ids: scope }
       onChanged(await api<ManagedUser>('PUT', `/api/users/${encodeURIComponent(user.id)}`, body))
       return t('usr.saved')
     })

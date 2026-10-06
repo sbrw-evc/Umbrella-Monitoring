@@ -51,10 +51,10 @@ func (c *clock) advance(d time.Duration) { c.t = c.t.Add(d) }
 func catalog() *store.Store {
 	st := store.New()
 	st.Write(func(d *store.Data) {
-		d.Users["U-1"] = &model.User{ID: "U-1", Username: "lead", Name: "Lead One", TeamID: "T-2", Profile: model.Profile{Email: "lead@example.com"}, Telegram: "1001"}
-		d.Users["U-2"] = &model.User{ID: "U-2", Username: "eng", Name: "Engineer Two", TeamID: "T-2", Profile: model.Profile{Email: "eng@example.com"}}
+		d.Users["U-1"] = &model.User{ID: "U-1", Username: "lead", Name: "Lead One", TeamIDs: []string{"T-2"}, Profile: model.Profile{Email: "lead@example.com"}, Telegram: "1001"}
+		d.Users["U-2"] = &model.User{ID: "U-2", Username: "eng", Name: "Engineer Two", TeamIDs: []string{"T-2"}, Profile: model.Profile{Email: "eng@example.com"}}
 		d.Users["U-3"] = &model.User{ID: "U-3", Username: "owner", Name: "Owner Three", Profile: model.Profile{Email: "owner@example.com"}}
-		d.Users["U-4"] = &model.User{ID: "U-4", Username: "gone", Name: "Gone", TeamID: "T-2", Disabled: true}
+		d.Users["U-4"] = &model.User{ID: "U-4", Username: "gone", Name: "Gone", TeamIDs: []string{"T-2"}, Disabled: true}
 		d.Teams["T-1"] = &model.Team{ID: "T-1", Name: "Platform"}
 		d.Teams["T-2"] = &model.Team{ID: "T-2", Name: "Payments SRE", ParentID: "T-1", LeadID: "U-1"}
 		d.Teams["T-3"] = &model.Team{ID: "T-3", Name: "Empty", ParentID: "T-2"}

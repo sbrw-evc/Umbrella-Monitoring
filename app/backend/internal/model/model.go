@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"net/mail"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -98,12 +99,17 @@ type User struct {
 	Source       string     `json:"source"`
 	Timezone     string     `json:"timezone"`
 	Role         string     `json:"role"`
-	TeamID       string     `json:"team_id"`
-	// MappedRole and MappedTeam are the values a group mapping last gave the user. When the
-	// mapping stops matching, a value still equal to them is withdrawn; a value changed by hand
-	// since then is kept.
-	MappedRole string `json:"mapped_role,omitempty"`
-	MappedTeam string `json:"mapped_team,omitempty"`
+	// TeamIDs are the teams the user is a member of; a person may be in several teams.
+	TeamIDs []string `json:"team_ids"`
+	// TeamID and MappedTeam are the single team of older versions, kept only so that their
+	// snapshots decode; the store moves them into TeamIDs and MappedTeams on load.
+	TeamID     string `json:"-"`
+	MappedTeam string `json:"-"`
+	// MappedRole and MappedTeams are what a group mapping last gave the user. When the mapping
+	// stops giving them, a role still equal to MappedRole and the teams of MappedTeams are
+	// withdrawn; a role changed by hand since then is kept.
+	MappedRole  string   `json:"mapped_role,omitempty"`
+	MappedTeams []string `json:"mapped_teams,omitempty"`
 	// ServiceIDs are the business services whose incidents the user sees; empty means all.
 	// Administrators always see every incident.
 	ServiceIDs []string `json:"service_ids,omitempty"`
@@ -139,4 +145,26 @@ type Settings struct {
 	NetBoxUsersDecided bool      `json:"-"`
 	SetupAt            time.Time `json:"setup_at"`
 	SetupBy            string    `json:"setup_by"`
+}
+
+// InTeam reports whether the user is a member of the team.
+func (u *User) InTeam(id string) bool { return id != "" && slices.Contains(u.TeamIDs, id) }
+
+// MigrateTeams moves the single team of older versions into the team list.
+func (u *User) MigrateTeams() bool {
+	changed := false
+	if u.TeamID != "" {
+		if !slices.Contains(u.TeamIDs, u.TeamID) {
+			u.TeamIDs = append(u.TeamIDs, u.TeamID)
+			slices.Sort(u.TeamIDs)
+		}
+		u.TeamID, changed = "", true
+	}
+	if u.MappedTeam != "" {
+		if !slices.Contains(u.MappedTeams, u.MappedTeam) {
+			u.MappedTeams = append(u.MappedTeams, u.MappedTeam)
+		}
+		u.MappedTeam, changed = "", true
+	}
+	return changed
 }

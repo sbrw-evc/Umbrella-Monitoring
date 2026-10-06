@@ -4,7 +4,7 @@ export const groupStrings: Dict = {
   en: {
     'gm.title': 'Groups → roles and teams',
     'gm.text':
-      'Members of a directory group get the role and the team of its row, including members of nested groups. The table is applied at every sign-in and on the schedule below. For the role and for the team separately, the first matching row from the top wins; the administrators group of the connection wins over the table.',
+      'Members of a directory group get the role and the team of its row, including members of nested groups. The table is applied at every sign-in and on the schedule below. For the role the first matching row from the top wins; every matching row adds its team (a person can be in several teams). The administrators group of the connection wins over the table. Users the table gives no role get the role for new users.',
     'gm.manual':
       'A value given by the table replaces one set by hand. When a user no longer matches any row, what the table gave is taken back (the role becomes User, the team is cleared), but a value an administrator changed by hand since then is kept.',
     'gm.empty': 'No rows yet. Without rows, roles and teams of directory users are set by hand.',
@@ -57,7 +57,7 @@ export const groupStrings: Dict = {
   ru: {
     'gm.title': 'Группы → роли и команды',
     'gm.text':
-      'Участники группы каталога получают роль и команду из её строки, в том числе участники вложенных групп. Таблица применяется при каждом входе и по расписанию ниже. Для роли и для команды по отдельности побеждает первая подходящая строка сверху; группа администраторов из настроек подключения важнее таблицы.',
+      'Участники группы каталога получают роль и команду из её строки, в том числе участники вложенных групп. Таблица применяется при каждом входе и по расписанию ниже. Для роли побеждает первая подходящая строка сверху; каждая подходящая строка добавляет свою команду (человек может быть в нескольких командах). Группа администраторов из настроек подключения важнее таблицы. Кому таблица не выдала роль, получает роль для новых пользователей.',
     'gm.manual':
       'Значение из таблицы заменяет заданное вручную. Когда пользователь перестаёт подходить под строки, выданное таблицей забирается (роль становится «Пользователь», команда очищается), но значение, которое администратор с тех пор изменил вручную, сохраняется.',
     'gm.empty': 'Строк пока нет. Без них роли и команды пользователей каталога задаются вручную.',

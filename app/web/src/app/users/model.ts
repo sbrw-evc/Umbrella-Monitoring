@@ -5,7 +5,7 @@ export type ScopeService = { id: string; name: string; missing?: boolean }
 
 export type ManagedUser = User & {
   display_name: string
-  team_name?: string
+  teams?: ScopeService[]
   services?: ScopeService[]
   disabled: boolean
   created_at: string

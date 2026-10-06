@@ -245,3 +245,46 @@ func TestNetBoxContactAccountsKeptForExistingSettings(t *testing.T) {
 		}
 	})
 }
+
+// Every matching row of the group table adds its team; teams set by hand stay.
+func TestGroupMappingGivesSeveralTeams(t *testing.T) {
+	h := newHarness(t)
+	srv := ldapServer(t)
+	srv.Put(directorytest.Entry{DN: "ou=groups,dc=example,dc=org"})
+	srv.Put(directorytest.Entry{DN: ldapOps, Attrs: map[string][]string{"member": {"uid=anna,dc=example,dc=org"}}})
+	srv.Put(directorytest.Entry{DN: ldapEng, Attrs: map[string][]string{"member": {"uid=anna,dc=example,dc=org"}}})
+	h.addLocal("admin", "Admin-pass-2026", model.RoleAdmin, time.Now())
+	h.addRoleAndTeam("operator", "TEAM-1")
+	h.addRoleAndTeam("viewer", "TEAM-2")
+	h.addRoleAndTeam("other", "TEAM-3")
+	admin := h.client()
+	admin.login("admin", "Admin-pass-2026")
+	cfg := ldapConfig(srv.URL)
+	delete(cfg, "admin_group_dn")
+	admin.call(http.MethodPut, "/api/settings/ldap", map[string]any{"config": cfg, "bind_password": ldapPass}, nil)
+	rows := []any{
+		map[string]any{"source": "ldap", "group": ldapOps, "role_id": "operator", "team_id": "TEAM-1"},
+		map[string]any{"source": "ldap", "group": ldapEng, "team_id": "TEAM-2"},
+	}
+	if code := admin.call(http.MethodPut, "/api/settings/groups", map[string]any{"mappings": rows}, nil); code != 200 {
+		t.Fatalf("save = %d", code)
+	}
+	h.client().login("anna", "anna-pass-1")
+	if u := h.named("anna"); teamsOf(u) != "TEAM-1,TEAM-2" || u.Role != "operator" {
+		t.Fatalf("anna = %+v", u)
+	}
+	id := h.named("anna").ID
+	if code := admin.call(http.MethodPut, "/api/users/"+id, map[string]any{"team_ids": []string{"TEAM-1", "TEAM-2", "TEAM-3"}}, nil); code != 200 {
+		t.Fatalf("hand-made team = %d", code)
+	}
+	// anna leaves eng: TEAM-2 is withdrawn, the hand-made TEAM-3 stays.
+	srv.Put(directorytest.Entry{DN: ldapEng, Attrs: map[string][]string{"member": {}}})
+	var view groupsReply
+	admin.call(http.MethodPost, "/api/settings/groups/sync", nil, &view)
+	if u := h.named("anna"); teamsOf(u) != "TEAM-1,TEAM-3" {
+		t.Fatalf("anna after leaving eng = %v", u.TeamIDs)
+	}
+	if view.Mapped.Teams != 1 {
+		t.Fatalf("mapped = %+v", view.Mapped)
+	}
+}

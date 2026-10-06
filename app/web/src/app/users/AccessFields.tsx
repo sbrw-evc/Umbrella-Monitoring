@@ -8,7 +8,7 @@ import { adminOf, teamOptions, type Refs, type ScopeService } from './model'
 import { strings } from './strings'
 import '../services/services.css'
 
-export type Access = { role_id: string; team_id: string }
+export type Access = { role_id: string; team_ids: string[] }
 
 export function RoleSelect({
   id,
@@ -63,6 +63,27 @@ export function TeamSelect({
   )
 }
 
+/** TeamsPicker picks the teams of a user: a person may be a member of several teams. */
+export function TeamsPicker({ id, refs, value, onChange }: { id: string; refs: Refs; value: string[]; onChange: (ids: string[]) => void }) {
+  const t = useT(strings)
+  const options = useMemo(() => teamOptions(refs.teams), [refs.teams])
+  const paths = useMemo(() => new Map(options.map((o) => [o.id, o.path])), [options])
+  const labelOf = (key: string) => {
+    const path = paths.get(key)
+    return { key, label: path ?? t('usr.team.missing', { id: key }), title: path ?? key, muted: !path }
+  }
+  return (
+    <MultiPicker
+      id={id}
+      selected={value}
+      options={options.map((o) => ({ id: o.id, label: o.name, depth: o.depth }))}
+      labelOf={labelOf}
+      placeholder={t('usr.teams.add')}
+      onChange={onChange}
+    />
+  )
+}
+
 export function AccessFields({
   refs,
   value,
@@ -86,8 +107,8 @@ export function AccessFields({
           </fieldset>
         )}
       </Field>
-      <Field label={t('usr.field.team')}>
-        {(id) => <TeamSelect id={id} refs={refs} value={value.team_id} onChange={(team_id) => onChange({ ...value, team_id })} emptyLabel={t('usr.noTeam')} />}
+      <Field label={t('usr.field.teams')} hint={t('usr.field.teams.hint')}>
+        {(id) => <TeamsPicker id={id} refs={refs} value={value.team_ids} onChange={(team_ids) => onChange({ ...value, team_ids })} />}
       </Field>
     </div>
   )

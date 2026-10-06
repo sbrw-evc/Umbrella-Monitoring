@@ -92,8 +92,10 @@ func snapshot(st *store.Store) *world {
 			c := *u
 			c.Avatar = nil
 			w.users[id] = c
-			if u.TeamID != "" && !u.Disabled {
-				w.members[u.TeamID] = append(w.members[u.TeamID], id)
+			if !u.Disabled {
+				for _, t := range u.TeamIDs {
+					w.members[t] = append(w.members[t], id)
+				}
 			}
 		}
 		for _, m := range d.Maintenance {

@@ -160,8 +160,9 @@ func (s *TeamsService) Delete(actor, id string) error {
 		}
 		cleared := 0
 		for _, u := range d.Users {
-			if u.TeamID == id {
-				u.TeamID = ""
+			if u.InTeam(id) {
+				u.TeamIDs = withoutID(u.TeamIDs, id)
+				u.MappedTeams = withoutID(u.MappedTeams, id)
 				cleared++
 			}
 		}
@@ -176,7 +177,7 @@ func (s *TeamsService) Delete(actor, id string) error {
 		delete(d.Teams, id)
 		dropMappingRefs(d, "", id)
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "team.delete", Object: id,
-			Detail: fmt.Sprintf("%s; %d child team(s) moved up, %d member(s) left without a team", path, len(children), cleared)})
+			Detail: fmt.Sprintf("%s; %d child team(s) moved up, %d member(s) removed from it", path, len(children), cleared)})
 		err = nil
 	})
 	return err
@@ -198,14 +199,15 @@ func (s *TeamsService) SetMembers(actor, id string, userIDs []string) (TeamView,
 		var added, removed []*model.User
 		for _, u := range users {
 			keep[u.ID] = true
-			if u.TeamID != id {
-				u.TeamID = id
+			if !u.InTeam(id) {
+				u.TeamIDs = append(slices.Clone(u.TeamIDs), id)
+				slices.Sort(u.TeamIDs)
 				added = append(added, u)
 			}
 		}
 		for _, u := range d.Users {
-			if u.TeamID == id && !keep[u.ID] {
-				u.TeamID = ""
+			if u.InTeam(id) && !keep[u.ID] {
+				u.TeamIDs = withoutID(u.TeamIDs, id)
 				removed = append(removed, u)
 			}
 		}
@@ -336,8 +338,8 @@ func (h hierarchy) place(id, name, parentID string) error {
 func teamMembers(d *store.Data) map[string][]OrgMember {
 	out := map[string][]OrgMember{}
 	for _, u := range d.Users {
-		if u.TeamID != "" {
-			out[u.TeamID] = append(out[u.TeamID], orgMemberOf(d, u))
+		for _, t := range u.TeamIDs {
+			out[t] = append(out[t], orgMemberOf(d, u))
 		}
 	}
 	return out
@@ -391,4 +393,15 @@ func leadName(d *store.Data, id string) string {
 		return u.Username
 	}
 	return ""
+}
+
+// withoutID is a copy of ids without id; nil when nothing is left.
+func withoutID(ids []string, id string) []string {
+	var out []string
+	for _, x := range ids {
+		if x != id {
+			out = append(out, x)
+		}
+	}
+	return out
 }

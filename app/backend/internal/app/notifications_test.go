@@ -25,7 +25,7 @@ func TestBackupNotificationRoundTrip(t *testing.T) {
 		d.Services["S-1"] = &model.Service{ID: "S-1", Name: "Billing", OwnerTeamID: "T-1", Status: model.ServiceActive, CIIDs: []string{"CI-1"}}
 		for _, u := range d.Users {
 			if u.Username == "admin" {
-				u.Email, u.TeamID = "admin@example.com", "T-1"
+				u.Email, u.TeamIDs = "admin@example.com", []string{"T-1"}
 				d.Teams["T-1"].LeadID = u.ID
 			}
 		}

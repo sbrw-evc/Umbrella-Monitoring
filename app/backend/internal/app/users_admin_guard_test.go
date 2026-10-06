@@ -44,7 +44,7 @@ func TestGuardKeepsAdministrators(t *testing.T) {
 	check("D", lock, ErrLastAdmin)
 	check("D", demote, ErrLastAdmin)
 	check("D", nil, ErrLastAdmin)
-	check("D", func(u *model.User) { u.TeamID = "T" }, nil)
+	check("D", func(u *model.User) { u.TeamIDs = []string{"T"} }, nil)
 
 	plain := Actor{User: model.User{ID: "Y", Role: model.RoleUser}}
 	st.Read(func(d *store.Data) {

@@ -23,13 +23,13 @@ type TeamRef struct {
 }
 
 type UserRef struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Name     string `json:"name"`
-	Source   string `json:"source"`
-	Disabled bool   `json:"disabled"`
-	RoleID   string `json:"role_id"`
-	TeamID   string `json:"team_id"`
+	ID       string   `json:"id"`
+	Username string   `json:"username"`
+	Name     string   `json:"name"`
+	Source   string   `json:"source"`
+	Disabled bool     `json:"disabled"`
+	RoleID   string   `json:"role_id"`
+	TeamIDs  []string `json:"team_ids"`
 }
 
 type Refs struct {
@@ -107,7 +107,7 @@ func (a *App) collectRefs() Refs {
 		}
 		for _, u := range d.Users {
 			out.Users = append(out.Users, UserRef{ID: u.ID, Username: u.Username, Name: u.Profile.DisplayName(u.Username), Source: u.Source,
-				Disabled: u.Disabled, RoleID: d.RoleOf(u).ID, TeamID: u.TeamID})
+				Disabled: u.Disabled, RoleID: d.RoleOf(u).ID, TeamIDs: teamList(u.TeamIDs)})
 		}
 		for _, s := range d.Services {
 			out.Services = append(out.Services, ServiceRef{ID: s.ID, Name: s.Name})

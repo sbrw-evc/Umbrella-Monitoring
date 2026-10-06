@@ -55,7 +55,7 @@ func TestUserServiceScopeEdit(t *testing.T) {
 	}
 
 	// Other changes keep the scope; a deleted service shows as missing.
-	code = admin.call(http.MethodPut, "/api/users/"+id, map[string]any{"team_id": ""}, &v)
+	code = admin.call(http.MethodPut, "/api/users/"+id, map[string]any{"team_ids": []string{}}, &v)
 	expect(t, "other change", code, http.StatusOK, v)
 	h.st.Write(func(d *store.Data) { delete(d.Services, "S-2") })
 	var list []scopedView

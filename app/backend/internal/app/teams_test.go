@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,8 +109,9 @@ func TestTeamMembershipAndDelete(t *testing.T) {
 	}
 	f.do(f.admin, http.MethodPut, "/api/teams/"+oncall.ID+"/members", map[string]any{"user_ids": []string{u2}}, http.StatusOK, &got)
 	teams := f.teams()
-	if teams[sre.ID].MemberCount != 1 || teams[oncall.ID].MemberCount != 1 || teams[oncall.ID].Members[0].TeamID != oncall.ID {
-		t.Fatalf("after move sre=%+v oncall=%+v", teams[sre.ID], teams[oncall.ID])
+	// A person can be in several teams: adding olga to Oncall keeps her in SRE.
+	if teams[sre.ID].MemberCount != 2 || teams[oncall.ID].MemberCount != 1 || !slices.Equal(teams[oncall.ID].Members[0].TeamIDs, sorted(sre.ID, oncall.ID)) {
+		t.Fatalf("after adding sre=%+v oncall=%+v", teams[sre.ID], teams[oncall.ID])
 	}
 	f.expect(f.admin, http.MethodPut, "/api/teams/"+sre.ID+"/members", map[string]any{"user_ids": []string{"USR-404"}}, http.StatusBadRequest, "unknown_user")
 
@@ -132,8 +134,8 @@ func TestTeamMembershipAndDelete(t *testing.T) {
 	if _, ok := teams[sre.ID]; ok || teams[oncall.ID].ParentID != root.ID || teams[db.ID].ParentID != root.ID || teams[db.ID].Depth != 2 {
 		t.Fatalf("after delete %+v", teams)
 	}
-	if f.userField(u1, func(u *model.User) string { return u.TeamID }) != "" || f.userField(u2, func(u *model.User) string { return u.TeamID }) != oncall.ID {
-		t.Fatal("members of the deleted team must be left without a team")
+	if f.userField(u1, userTeams) != "" || f.userField(u2, userTeams) != oncall.ID {
+		t.Fatal("members of the deleted team lose only that team")
 	}
 	f.h.st.Read(func(d *store.Data) {
 		s := d.Services["SVC-T"]
@@ -143,8 +145,16 @@ func TestTeamMembershipAndDelete(t *testing.T) {
 	})
 
 	f.do(f.admin, http.MethodPut, "/api/teams/"+oncall.ID+"/members", map[string]any{"user_ids": []string{}}, http.StatusOK, &got)
-	if got.MemberCount != 0 || f.userField(u2, func(u *model.User) string { return u.TeamID }) != "" {
+	if got.MemberCount != 0 || f.userField(u2, userTeams) != "" {
 		t.Fatalf("cleared = %+v", got)
 	}
 	f.expect(f.admin, http.MethodDelete, "/api/teams/"+sre.ID, nil, http.StatusNotFound, "not_found")
+}
+
+func userTeams(u *model.User) string { return strings.Join(u.TeamIDs, ",") }
+
+func sorted(ids ...string) []string {
+	out := slices.Clone(ids)
+	slices.Sort(out)
+	return out
 }

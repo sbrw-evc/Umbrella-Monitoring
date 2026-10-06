@@ -51,8 +51,10 @@ export function UsersList({ users, refs, onOpen }: { users: ManagedUser[]; refs:
               </span>
             </span>
             <span data-label={t('usr.col.role')}>{roleLabel(t, u.role, u.role_name)}</span>
-            <span data-label={t('usr.col.team')} className={u.team_id ? '' : 'muted'}>
-              {u.team_id ? (paths.get(u.team_id) ?? u.team_name ?? u.team_id) : t('usr.noTeam')}
+            <span data-label={t('usr.col.team')} className={u.team_ids?.length ? '' : 'muted'}>
+              {u.team_ids?.length
+                ? u.team_ids.map((id) => paths.get(id) ?? u.teams?.find((x) => x.id === id)?.name ?? id).join(', ')
+                : t('usr.noTeam')}
             </span>
             <span data-label={t('usr.col.source')}>
               <SourcePill user={u} />

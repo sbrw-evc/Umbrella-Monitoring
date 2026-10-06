@@ -103,6 +103,12 @@ func (d *Data) init() {
 			src.NormalizeHosts()
 		}
 	}
+	// Older snapshots have one team per user.
+	for _, u := range d.Users {
+		if u != nil {
+			u.MigrateTeams()
+		}
+	}
 	if d.NetBoxContacts == nil {
 		d.NetBoxContacts = map[int]string{}
 	}
