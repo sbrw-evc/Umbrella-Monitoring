@@ -228,6 +228,27 @@ func formatTime(t *time.Time, tz *time.Location) string {
 	return t.In(tz).Format(timeLayout)
 }
 
+// CleanTemplates normalizes overrides as they come from a form: line ends become \n, and empty
+// ones and those equal to the built-in template are dropped; nil when none is left. The rest
+// are checked with CheckTemplates.
+func CleanTemplates(in map[string]string) (map[string]string, error) {
+	var out map[string]string
+	for n, v := range in {
+		v = strings.ReplaceAll(v, "\r\n", "\n")
+		if strings.TrimSpace(v) == "" || v == builtinFiles[n] || v == builtinFiles[n]+"\n" {
+			continue
+		}
+		if out == nil {
+			out = map[string]string{}
+		}
+		out[n] = v
+	}
+	if err := CheckTemplates(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // CheckTemplates parses the overrides and renders them with a sample incident in every
 // language, so a mistake is found when they are saved rather than when an incident comes.
 func CheckTemplates(overrides map[string]string) error {

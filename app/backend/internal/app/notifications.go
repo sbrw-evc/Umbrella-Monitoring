@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -49,6 +50,8 @@ type NotifyView struct {
 	// delay is set (DelaySeconds is null): 2 minutes with PagerDuty, none without it.
 	PDEnabled        bool `json:"pd_enabled"`
 	AutoDelaySeconds int  `json:"auto_delay_seconds"`
+	// DefaultTemplates are the built-in message templates by name: what Templates replace.
+	DefaultTemplates map[string]string `json:"default_templates"`
 }
 
 func (s *NotificationsService) View() NotifyView {
@@ -59,6 +62,7 @@ func (s *NotificationsService) View() NotifyView {
 		n = d.Settings.Alerting.Notify
 		n.ExtraEmails = slices.Clone(n.ExtraEmails)
 		n.ExtraTelegram = slices.Clone(n.ExtraTelegram)
+		n.Templates = maps.Clone(n.Templates)
 		pub = d.Settings.Alerting.PublicURL
 		pdOn = d.Settings.Alerting.PagerDuty.Enabled
 	})
@@ -79,7 +83,7 @@ func (s *NotificationsService) View() NotifyView {
 		n.MinSeverity = alert.DefaultFallbackSeverity
 	}
 	return NotifyView{Notify: n, HasPassword: n.Email.PasswordRef != "", HasToken: n.Telegram.TokenRef != "", PublicURL: pub,
-		Links: pub != "" && s.n.Links() != nil, PDEnabled: pdOn, AutoDelaySeconds: auto}
+		Links: pub != "" && s.n.Links() != nil, PDEnabled: pdOn, AutoDelaySeconds: auto, DefaultTemplates: notify.DefaultTemplates()}
 }
 
 type EmailInput struct {
@@ -109,6 +113,26 @@ type NotifyInput struct {
 	DelaySeconds *int `json:"delay_seconds"`
 	// MinSeverity: empty is error.
 	MinSeverity string `json:"min_severity"`
+	// Templates replace built-in message templates by name; absent (null) keeps the saved ones,
+	// {} goes back to the built-in ones.
+	Templates map[string]string `json:"templates,omitempty"`
+}
+
+// maxTemplateSize bounds one message template.
+const maxTemplateSize = 16 << 10
+
+// cleanTemplates checks the message templates of a form.
+func cleanTemplates(in map[string]string) (map[string]string, error) {
+	for n, v := range in {
+		if len(v) > maxTemplateSize {
+			return nil, invalid("template_invalid", fmt.Errorf("%s: longer than %d bytes", n, maxTemplateSize))
+		}
+	}
+	out, err := notify.CleanTemplates(in)
+	if err != nil {
+		return nil, invalid("template_invalid", err)
+	}
+	return out, nil
 }
 
 func cleanList(in []string, valid func(string) bool, code string) ([]string, error) {
@@ -170,6 +194,12 @@ func (s *NotificationsService) Save(ctx context.Context, actor string, in Notify
 	if in.MinSeverity != "" && alert.SeverityRank(in.MinSeverity) == 0 {
 		return NotifyView{}, invalid("severity_invalid", nil)
 	}
+	templates := n.Templates
+	if in.Templates != nil {
+		if templates, err = cleanTemplates(in.Templates); err != nil {
+			return NotifyView{}, err
+		}
+	}
 	token := strings.TrimSpace(in.Telegram.Token)
 	if in.Telegram.Enabled && token == "" && n.Telegram.TokenRef == "" {
 		return NotifyView{}, invalid("token_required", nil)
@@ -196,11 +226,17 @@ func (s *NotificationsService) Save(ctx context.Context, actor string, in Notify
 	n.Telegram = model.TelegramChannel{Enabled: in.Telegram.Enabled, TokenRef: tokenRef, APIURL: api}
 	n.ExtraEmails, n.ExtraTelegram = extraEmails, extraTelegram
 	n.DelaySeconds, n.MinSeverity = in.DelaySeconds, in.MinSeverity
+	n.Templates = templates
 	now := time.Now().UTC()
 	n.UpdatedAt, n.UpdatedBy = &now, actor
+	detail := fmt.Sprintf("email=%v telegram=%v delay=%s min_severity=%s", n.Email.Enabled, n.Telegram.Enabled, delayText(n.DelaySeconds), n.MinSeverity)
+	if len(n.Templates) > 0 {
+		names := slices.Sorted(maps.Keys(n.Templates))
+		detail += " templates=" + strings.Join(names, ",")
+	}
 	s.st.Write(func(d *store.Data) {
 		d.Settings.Alerting.Notify = n
-		d.AddAudit(store.AuditEntry{Actor: actor, Action: "settings.notify", Detail: fmt.Sprintf("email=%v telegram=%v delay=%s min_severity=%s", n.Email.Enabled, n.Telegram.Enabled, delayText(n.DelaySeconds), n.MinSeverity)})
+		d.AddAudit(store.AuditEntry{Actor: actor, Action: "settings.notify", Detail: detail})
 	})
 	return s.View(), nil
 }
@@ -238,6 +274,7 @@ func (a *App) registerNotifications(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/notifications", a.authed(a.can("settings.alerting:view", a.notifyView)))
 	mux.HandleFunc("PUT /api/notifications", a.authed(a.can("settings.alerting:edit", a.notifySave)))
 	mux.HandleFunc("POST /api/notifications/test", a.authed(a.can("settings.alerting:test", a.notifyTest)))
+	mux.HandleFunc("POST /api/notifications/preview", a.authed(a.can("settings.alerting:view", a.notifyPreview)))
 	mux.HandleFunc("GET /ack/{token}", a.ackPage)
 	mux.HandleFunc("POST /ack/{token}", a.ackPage)
 }
@@ -253,6 +290,40 @@ func (a *App) notifySave(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.notifications.Save(r.Context(), current(r).user.Username, in)
 	settingsRespond(w, out, err)
+}
+
+type notifyPreviewInput struct {
+	// Templates: the overrides being edited; null previews the saved ones.
+	Templates map[string]string `json:"templates"`
+	// Locale: en or ru; empty is the default language.
+	Locale string `json:"locale"`
+}
+
+// notifyPreview renders the messages of a sample incident with templates that are not saved yet.
+func (a *App) notifyPreview(w http.ResponseWriter, r *http.Request) {
+	var in notifyPreviewInput
+	if !httpx.Decode(w, r, &in) {
+		return
+	}
+	set := a.settings.Get()
+	templates := set.Alerting.Notify.Templates
+	if in.Templates != nil {
+		var err error
+		if templates, err = cleanTemplates(in.Templates); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
+	locale := in.Locale
+	if locale == "" {
+		locale = set.DefaultLocale
+	}
+	out, err := notify.PreviewTemplates(locale, templates)
+	if err != nil {
+		writeError(w, invalid("template_invalid", err))
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"messages": out})
 }
 
 type notifyTestInput struct {

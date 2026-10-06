@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/textproto"
 	"slices"
@@ -172,9 +173,10 @@ func (s *Service) config() config {
 		c.set = d.Settings.Alerting
 		c.set.Notify.ExtraEmails = slices.Clone(d.Settings.Alerting.Notify.ExtraEmails)
 		c.set.Notify.ExtraTelegram = slices.Clone(d.Settings.Alerting.Notify.ExtraTelegram)
+		c.set.Notify.Templates = maps.Clone(d.Settings.Alerting.Notify.Templates)
 		c.locale = d.Settings.DefaultLocale
 	})
-	c.msgs = newMessages(c.locale, nil)
+	c.msgs = newMessages(c.locale, c.set.Notify.Templates)
 	c.secret, c.secretErr = map[string]string{}, map[string]error{}
 	for _, ch := range channels {
 		if !ch.Enabled(c.set.Notify) {

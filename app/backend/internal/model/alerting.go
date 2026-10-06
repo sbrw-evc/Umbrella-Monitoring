@@ -104,6 +104,9 @@ type Notify struct {
 	ExtraTelegram []string   `json:"extra_telegram"`
 	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
 	UpdatedBy     string     `json:"updated_by,omitempty"`
+	// Templates replace built-in message templates by name ("fallback.text", "followup.html"…);
+	// nil keeps the built-in ones.
+	Templates map[string]string `json:"templates,omitempty"`
 }
 
 const (
