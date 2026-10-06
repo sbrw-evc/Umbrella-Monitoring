@@ -25,7 +25,6 @@ import (
 const (
 	ChannelEmail    = "email"
 	ChannelTelegram = "telegram"
-	queueSize       = 1000
 )
 
 var (
@@ -88,8 +87,8 @@ type Service struct {
 }
 
 func New(st *store.Store, sec Resolver) *Service {
-	return &Service{st: st, sec: sec, client: &http.Client{Timeout: 15 * time.Second}, results: nopResults{},
-		queue: make(chan job, queueSize), queued: map[string]bool{}, Retries: 3, Backoff: 2 * time.Second, now: func() time.Time { return time.Now().UTC() }}
+	return &Service{st: st, sec: sec, client: &http.Client{Timeout: DefaultHTTPTimeout}, results: nopResults{},
+		queue: make(chan job, DefaultQueueSize), queued: map[string]bool{}, Retries: DefaultRetries, Backoff: DefaultBackoff, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (s *Service) SetResults(r Results) { s.results = r }

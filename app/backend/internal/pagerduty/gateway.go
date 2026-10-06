@@ -33,12 +33,7 @@ var (
 	ErrBreaker    = &alert.DeliveryError{Code: "breaker", Msg: "the circuit breaker is open after a series of failures"}
 )
 
-const (
-	breakerThreshold = 5
-	breakerPause     = 60 * time.Second
-	DefaultRoute     = "default"
-	queueSize        = 10000
-)
+const DefaultRoute = "default"
 
 // Resolver reads a secret by its openbao:// reference.
 type Resolver interface {
@@ -81,8 +76,8 @@ type Gateway struct {
 }
 
 func New(st *store.Store, sec Resolver) *Gateway {
-	return &Gateway{st: st, sec: sec, client: &http.Client{Timeout: 15 * time.Second}, queue: make(chan alert.Command, queueSize),
-		Retries: 3, Backoff: 500 * time.Millisecond}
+	return &Gateway{st: st, sec: sec, client: &http.Client{Timeout: DefaultHTTPTimeout}, queue: make(chan alert.Command, DefaultQueueSize),
+		Retries: DefaultRetries, Backoff: DefaultBackoff}
 }
 
 func (g *Gateway) SetResults(r Results) { g.results = r }
@@ -262,8 +257,8 @@ func (g *Gateway) fail(err error) {
 	g.stat.ConsecFails++
 	now := time.Now().UTC()
 	g.stat.LastError, g.stat.LastErrorAt = err.Error(), &now
-	if g.stat.ConsecFails >= breakerThreshold {
-		g.breakerTill = now.Add(breakerPause)
+	if g.stat.ConsecFails >= DefaultBreakerThreshold {
+		g.breakerTill = now.Add(DefaultBreakerPause)
 		g.stat.ConsecFails = 0
 		slog.Warn("pagerduty circuit breaker opened", "err", err)
 	}
