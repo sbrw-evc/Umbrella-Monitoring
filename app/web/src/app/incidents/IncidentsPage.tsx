@@ -8,6 +8,7 @@ import { useT } from '../../i18n'
 import { Banner, Button, Input, Select } from '../../ui'
 import { useSession } from '../session'
 import { BulkConfirm } from './CatalogForms'
+import { OnboardingChecklist } from '../onboarding/OnboardingChecklist'
 import { IncidentDetail, PDPill, SeverityPill, StatusPill } from './IncidentDetail'
 import { ago } from './format'
 import { strings } from './strings'
@@ -152,8 +153,23 @@ export function IncidentsPage() {
 
       <AnimatePresence mode="wait" initial={false}>
         {alerts.length === 0 ? (
-          <motion.div key="empty" className="card svc-empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <p>{t(!filtered ? 'inc.empty.active' : 'inc.empty')}</p>
+          <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            {filtered ? (
+              <div className="card svc-empty">
+                <p>{t('inc.empty')}</p>
+              </div>
+            ) : (
+              // Nothing at all: until the installation can deliver an incident, show what is left to do.
+              <OnboardingChecklist
+                epoch={epoch}
+                incidentsNote
+                fallback={
+                  <div className="card svc-empty">
+                    <p>{t('inc.empty.active')}</p>
+                  </div>
+                }
+              />
+            )}
           </motion.div>
         ) : (
           <motion.div key="list" className="card cn-table-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>

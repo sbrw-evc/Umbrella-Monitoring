@@ -18,7 +18,6 @@ type Draft = {
   enabled: boolean
   region: 'us' | 'eu'
   min_severity: string
-  public_url: string
   events_url: string
   api_url: string
   routing_key: string
@@ -37,7 +36,6 @@ function draftOf(v: PagerDutyView): Draft {
     enabled: v.enabled,
     region: v.region,
     min_severity: v.min_severity ?? '',
-    public_url: v.public_url,
     events_url: v.events_url ?? '',
     api_url: v.api_url ?? '',
     routing_key: '',
@@ -62,7 +60,6 @@ function bodyOf(d: Draft) {
     enabled: d.enabled,
     region: d.region,
     min_severity: d.min_severity,
-    public_url: d.public_url,
     events_url: d.events_url,
     api_url: d.api_url,
     routing_key: d.routing_key,
@@ -73,7 +70,9 @@ function bodyOf(d: Draft) {
   }
 }
 
-export function PagerDutyCard({ onSaved }: { onSaved?: () => void }) {
+// reloadKey changes when the Umbrella address is saved in its own card: the webhook address is
+// read again, the unsaved form stays.
+export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void; reloadKey?: number }) {
   const t = useT(strings)
   const { locale } = useLocale()
   const { can, timezone } = useSession()
@@ -95,6 +94,10 @@ export function PagerDutyCard({ onSaved }: { onSaved?: () => void }) {
   useEffect(() => {
     void load(async () => apply(await api<PagerDutyView>('GET', '/api/pagerduty')))
   }, [load])
+  useEffect(() => {
+    if (!reloadKey) return
+    api<PagerDutyView>('GET', '/api/pagerduty').then(setView, () => {})
+  }, [reloadKey])
   const hasToken = !!view?.has_api_token
   useEffect(() => {
     if (!hasToken || !canEdit) return
@@ -189,9 +192,6 @@ export function PagerDutyCard({ onSaved }: { onSaved?: () => void }) {
       >
         <fieldset className="plain-fieldset stack" disabled={!canEdit}>
           <Switch checked={draft.enabled} onChange={(enabled) => set({ enabled })} label={t('pd.enable')} hint={t('pd.enable.hint')} />
-          <Field label={t('pd.public')} hint={t('pd.public.hint')}>
-            {(id) => <Input id={id} value={draft.public_url} placeholder="https://umbrella.example.com" onChange={(e) => set({ public_url: e.target.value })} />}
-          </Field>
         </fieldset>
         <AnimatePresence initial={false} mode="wait">
           {draft.enabled ? (

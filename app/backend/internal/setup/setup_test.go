@@ -288,6 +288,11 @@ func TestWizardEndToEnd(t *testing.T) {
 		t.Fatalf("unknown timezone = %d %v", code, res)
 	}
 	complete["timezone"] = "Europe/Moscow"
+	complete["public_url"] = "ftp://umbrella.example.org"
+	if code := e.setup("complete", complete, &res); code != 400 || res["error"] != "public_url_invalid" {
+		t.Fatalf("bad public address = %d %v", code, res)
+	}
+	complete["public_url"] = " https://umbrella.example.org/ "
 	if code := e.setup("complete", complete, &res); code != 400 || res["error"] != "invalid_password_policy" {
 		t.Fatalf("inconsistent policy = %d %v", code, res)
 	}
@@ -316,6 +321,11 @@ func TestWizardEndToEnd(t *testing.T) {
 		}
 		if got := d.Settings.Alerting.PagerDuty.MinSeverity; got != "error" {
 			t.Errorf("a new install sends errors and critical alerts to PagerDuty, not everything: %q", got)
+		}
+	})
+	e.result.Store.Read(func(d *store.Data) {
+		if got := d.Settings.Alerting.PublicURL; got != "https://umbrella.example.org" {
+			t.Fatalf("public address saved by the wizard = %q", got)
 		}
 	})
 	if v := bao.Get("umbrella/postgres"); v["password"] != pg.password {
@@ -496,9 +506,15 @@ func TestWizardEndToEnd(t *testing.T) {
 	reuse["reuse_existing"] = true
 	complete["postgres"] = reuse
 	complete["admin"] = map[string]any{"username": "admin", "password": "Second-pass-2026!"}
+	complete["public_url"] = ""
 	if code := again.setup("complete", complete, nil); code != 200 {
 		t.Fatalf("reinstall with reuse = %d", code)
 	}
+	again.result.Store.Read(func(d *store.Data) {
+		if got := d.Settings.Alerting.PublicURL; got != "https://umbrella.example.org" {
+			t.Fatalf("an empty public address must keep the stored one, got %q", got)
+		}
+	})
 	if code, _ := again.login("admin", "Second-pass-2026!"); code != 200 {
 		t.Fatal("admin password must be reset by the reinstall")
 	}
