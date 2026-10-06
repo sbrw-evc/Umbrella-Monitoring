@@ -7,6 +7,7 @@ import { useLocale, useT } from '../../i18n'
 import { Banner, Button, formatDate, Modal, Rows, SettingRow } from '../../ui'
 import { ProfileFieldsGrid } from '../profile/ProfileFieldsGrid'
 import { useAction, type Action } from '../profile/useAction'
+import { ADMIN } from '../roles/permissions'
 import { useSession } from '../session'
 import { profileChanged, profileOf, type ProfileFields } from '../types'
 import { AccessFields, ScopeField, type Access, type ScopeMode } from './AccessFields'
@@ -227,7 +228,7 @@ function EditView({
             mode={mode}
             value={scope}
             known={user.services}
-            admin={access.role_id === 'admin'}
+            admin={access.role_id === ADMIN}
             onMode={setMode}
             onChange={setScope}
           />

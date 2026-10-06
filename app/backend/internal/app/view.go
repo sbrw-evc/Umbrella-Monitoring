@@ -66,7 +66,7 @@ func (a *App) adminContacts() []AdminContact {
 	out := []AdminContact{}
 	a.deps.Store.Read(func(d *store.Data) {
 		for _, u := range d.Users {
-			if !u.Disabled && d.RoleOf(u).ID == model.RoleAdmin {
+			if !u.Disabled && d.IsAdmin(u) {
 				out = append(out, AdminContact{Name: u.Profile.DisplayName(u.Username), Email: u.Email})
 			}
 		}

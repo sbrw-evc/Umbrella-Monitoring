@@ -1,4 +1,5 @@
 import { TreeIndex } from '../org/treeIndex'
+import { ADMIN } from '../roles/permissions'
 import type { User } from '../types'
 
 export type ScopeService = { id: string; name: string; missing?: boolean }
@@ -47,7 +48,7 @@ export function teamOptions(teams: TeamRef[]): TeamOption[] {
 }
 
 export function adminOf(u: { role: string }) {
-  return u.role === 'admin'
+  return u.role === ADMIN
 }
 
 /** scopeModeOf: the scope mode, also for accounts saved before modes existed. */
