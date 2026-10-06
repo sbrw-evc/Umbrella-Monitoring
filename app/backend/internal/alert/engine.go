@@ -380,8 +380,13 @@ func (e *Engine) resolve(c *change, now time.Time, why, actor string) {
 	c.log(now, KindStatus, "resolved", map[string]string{"why": why}, actor)
 }
 
+// pdCmd makes a PagerDuty command and stamps the attempt. A maintenance window holds back
+// triggers only: an incident PagerDuty already has is still acknowledged and resolved there,
+// otherwise it would stay open and keep escalating. A window that starts while the incident is
+// open in PagerDuty leaves it open there (nothing is resolved just because work began); the
+// acknowledgement or resolution made during the window is what closes it.
 func (e *Engine) pdCmd(a *Alert, action Action, now time.Time) *Command {
-	if a.Suppressed {
+	if a.Suppressed && (action == PDTrigger || !pdHas(a)) {
 		return nil
 	}
 	t := now
@@ -671,14 +676,14 @@ func (e *Engine) Tick(ctx context.Context) error {
 	return nil
 }
 
+// pdHas: PagerDuty took a trigger of the alert, so it has an incident to acknowledge or resolve.
+func pdHas(a *Alert) bool { return a.PD.State == PDAccepted || a.PD.State == PDAcked }
+
 func (e *Engine) retry(a *Alert, now time.Time) *Command {
-	if a.Suppressed {
-		return nil
-	}
 	if a.PD.AttemptAt != nil && now.Sub(*a.PD.AttemptAt) < e.RetryEvery {
 		return nil
 	}
-	delivered := a.PD.State == PDAccepted || a.PD.State == PDAcked
+	delivered := pdHas(a)
 	switch {
 	case a.Status == StatusResolved:
 		if !delivered || a.PD.Retry == "" {
@@ -687,7 +692,8 @@ func (e *Engine) retry(a *Alert, now time.Time) *Command {
 		}
 		return e.pdCmd(a, PDResolve, now)
 	case !delivered:
-		if a.PD.State != PDPending && a.PD.State != PDFailed {
+		// In a window the trigger waits for its end (Tick turns skipped back to pending).
+		if a.Suppressed || (a.PD.State != PDPending && a.PD.State != PDFailed) {
 			return nil
 		}
 		return e.pdCmd(a, PDTrigger, now)

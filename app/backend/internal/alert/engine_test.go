@@ -407,3 +407,76 @@ func TestLongCommentKeepsCharacters(t *testing.T) {
 		t.Errorf("comment kept %d characters, valid UTF-8 %v", utf8.RuneCountInString(got), utf8.ValidString(got))
 	}
 }
+
+// An incident PagerDuty took is still acknowledged and resolved there when a maintenance
+// window covers the alert; the start of a window alone resolves nothing.
+func TestWindowDoesNotStrandPagerDutyIncidents(t *testing.T) {
+	ctx := context.Background()
+	e, st, rec, c := setup(t)
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "app-01", "errors", "critical", "firing")})
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "b", "app-01", "latency", "critical", "firing")})
+	list := active(t, e)
+	if len(list) != 2 {
+		t.Fatalf("two alerts: %+v", list)
+	}
+	for _, a := range list {
+		e.PDResult(ctx, a.ID, alert.PDTrigger, "default", nil)
+	}
+	rec.take()
+	st.Write(func(d *store.Data) {
+		d.Maintenance["MW-1"] = &model.Maintenance{ID: "MW-1", Title: "Repair", ServiceIDs: []string{"S-1"},
+			Start: c.t, End: c.t.Add(time.Hour)}
+	})
+	c.advance(time.Minute)
+	e.Tick(ctx)
+	if cmds := rec.take(); len(cmds) != 0 {
+		t.Fatalf("a window that starts sends nothing: %+v", cmds)
+	}
+	for _, a := range active(t, e) {
+		if !a.Suppressed || a.PD.State != alert.PDAccepted {
+			t.Fatalf("suppressed and still open in PagerDuty: %+v", a)
+		}
+	}
+
+	// Fixed during the window: the source resolves, the incident is resolved in PagerDuty.
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "app-01", "errors", "critical", "resolved")})
+	cmds := rec.take()
+	if len(cmds) != 1 || cmds[0].Action != alert.PDResolve {
+		t.Fatalf("resolve goes to PagerDuty in a window: %+v", cmds)
+	}
+	// The resolve fails: it is retried in the window too.
+	e.PDResult(ctx, cmds[0].Alert.ID, alert.PDResolve, "default", errors.New("Events API answered 503"))
+	c.advance(2 * time.Minute)
+	e.Tick(ctx)
+	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDResolve {
+		t.Fatalf("the resolve is retried in a window: %+v", cmds)
+	}
+	e.PDResult(ctx, cmds[0].Alert.ID, alert.PDResolve, "default", nil)
+
+	// Acknowledged in Umbrella during the window: acknowledged in PagerDuty.
+	other := active(t, e)[0]
+	if _, err := e.Act(ctx, other.ID, "ack", "eng", ""); err != nil {
+		t.Fatal(err)
+	}
+	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDAcknowledge {
+		t.Fatalf("ack goes to PagerDuty in a window: %+v", cmds)
+	}
+	if _, err := e.Act(ctx, other.ID, "resolve", "eng", ""); err != nil {
+		t.Fatal(err)
+	}
+	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDResolve {
+		t.Fatalf("manual resolve goes to PagerDuty in a window: %+v", cmds)
+	}
+
+	// An alert that opened in the window and never went to PagerDuty: nothing until the window
+	// ends, then the trigger while it still fires.
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "c", "app-01", "queue", "critical", "firing")})
+	if cmds := rec.take(); len(cmds) != 0 {
+		t.Fatalf("no trigger in a window: %+v", cmds)
+	}
+	c.advance(time.Hour)
+	e.Tick(ctx)
+	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDTrigger || cmds[0].Alert.Signal != "queue" {
+		t.Fatalf("the trigger after the window: %+v", cmds)
+	}
+}

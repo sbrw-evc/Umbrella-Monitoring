@@ -144,7 +144,8 @@ type Alert struct {
 	ResolvedBy string     `json:"resolved_by,omitempty"`
 	AckedBy    string     `json:"acked_by,omitempty"`
 	AckedAt    *time.Time `json:"acked_at,omitempty"`
-	// Suppressed: a maintenance window covers the item or its service; nothing is sent.
+	// Suppressed: a maintenance window covers the item or its service; no trigger is sent and no
+	// backup notification, but an incident PagerDuty already has is still acknowledged and resolved.
 	Suppressed    bool       `json:"suppressed"`
 	MaintenanceID string     `json:"maintenance_id,omitempty"`
 	Route         Route      `json:"route"`
