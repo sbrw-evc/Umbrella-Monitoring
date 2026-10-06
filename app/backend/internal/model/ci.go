@@ -90,6 +90,10 @@ type ConfigItem struct {
 	UpdatedAt   time.Time    `json:"updated_at"`
 	UpdatedBy   string       `json:"updated_by"`
 	SyncedAt    *time.Time   `json:"synced_at,omitempty"`
+
+	// Aliases are other names events call the item by (a host name in a monitoring system, a
+	// Prometheus instance). They are kept in Umbrella, also for items imported from NetBox.
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 // Imported items mirror NetBox and change only there.
