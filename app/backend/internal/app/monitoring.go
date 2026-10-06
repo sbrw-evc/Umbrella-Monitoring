@@ -45,6 +45,7 @@ func init() {
 	statuses = append(statuses,
 		orgStatus{ErrMonitoringRunning, http.StatusConflict, "monitoring_running"},
 		orgStatus{ErrHostNotFound, http.StatusNotFound, "host_not_found"},
+		orgStatus{ErrSourceInUse, http.StatusConflict, "source_in_use"},
 	)
 }
 
@@ -77,6 +78,7 @@ type MonitoringSourceInput struct {
 	SyncMinutes  int    `json:"sync_minutes"`
 	Query        string `json:"query"`
 	HostLabel    string `json:"host_label"`
+	ConnectorID  string `json:"connector_id"`
 }
 
 type MonitoringSourceView struct {
@@ -87,6 +89,22 @@ type MonitoringSourceView struct {
 	Unmatched      int        `json:"unmatched"`
 	Running        bool       `json:"running"`
 	NextSyncAt     *time.Time `json:"next_sync_at,omitempty"`
+	// Connector receives the alerts of the system; Rules counts the RED and USE rules that
+	// query a Prometheus system.
+	Connector *SystemConnector `json:"connector,omitempty"`
+	Rules     int              `json:"rules"`
+}
+
+// SystemConnector is the alert intake of a monitoring system. LastReceived is filled in by
+// the handler from the intake statistics.
+type SystemConnector struct {
+	ID           string     `json:"id"`
+	Name         string     `json:"name"`
+	Slug         string     `json:"slug"`
+	Status       string     `json:"status"`
+	IngestPath   string     `json:"ingest_path"`
+	LastReceived *time.Time `json:"last_received,omitempty"`
+	Received     int        `json:"received"`
 }
 
 type MonitoringView struct {
@@ -262,6 +280,16 @@ func (s *MonitoringService) sourceView(d *store.Data, m *hostMatcher, src *model
 	if c := d.Credentials[src.CredentialID]; c != nil {
 		v.CredentialName = c.Name
 	}
+	if cn := d.Connectors[src.ConnectorID]; cn != nil {
+		v.Connector = &SystemConnector{ID: cn.ID, Name: cn.Name, Slug: cn.Slug, Status: statusOf(cn), IngestPath: "/api/ingest/" + cn.Slug}
+	} else {
+		v.ConnectorID = ""
+	}
+	for _, r := range d.Rules {
+		if r.SourceID == src.ID {
+			v.Rules++
+		}
+	}
 	for _, h := range src.Hosts {
 		// The same groups as the host list: a host said to be no item is neither matched nor
 		// unmatched.
@@ -318,6 +346,9 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 	} else {
 		in.Query, in.HostLabel = "", ""
 	}
+	if in.ConnectorID != "" && d.Connectors[in.ConnectorID] == nil {
+		return invalid("connector_not_found", nil)
+	}
 	if in.CredentialID == "" {
 		if in.Kind == model.MonitoringZabbix {
 			return invalid("monitoring_credential_required", nil)
@@ -341,6 +372,7 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 func (in MonitoringSourceInput) apply(src *model.MonitoringSource) {
 	src.Name, src.Kind, src.URL, src.CredentialID, src.SkipVerify = in.Name, in.Kind, in.URL, in.CredentialID, in.SkipVerify
 	src.Enabled, src.SyncMinutes, src.Query, src.HostLabel = in.Enabled, in.SyncMinutes, in.Query, in.HostLabel
+	src.ConnectorID = in.ConnectorID
 }
 
 func (s *MonitoringService) Create(actor string, in MonitoringSourceInput) (MonitoringSourceView, error) {
@@ -375,6 +407,10 @@ func (s *MonitoringService) Update(actor, id string, in MonitoringSourceInput) (
 		if err = s.check(d, &in); err != nil {
 			return
 		}
+		if in.Kind != model.MonitoringPrometheus && rulesUse(d, id) {
+			err = ErrSourceInUse
+			return
+		}
 		// Another system means other hosts: what was read and linked before no longer applies.
 		if src.Kind != in.Kind || !strings.EqualFold(src.URL, in.URL) {
 			src.Hosts, src.Links, src.Sync = nil, map[string]string{}, model.MonitoringSync{}
@@ -394,9 +430,43 @@ func (s *MonitoringService) Delete(actor, id string) error {
 		if src == nil {
 			return
 		}
+		if rulesUse(d, id) {
+			err = ErrSourceInUse
+			return
+		}
 		delete(d.MonitoringSources, id)
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "monitoring.delete", Object: id, Detail: src.Name})
 		err = nil
+	})
+	return err
+}
+
+// rulesUse: RED or USE rules query the source.
+func rulesUse(d *store.Data, id string) bool {
+	for _, r := range d.Rules {
+		if r.SourceID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// LinkConnector makes a connector the alert intake of a monitoring system; an empty ID unlinks.
+func (s *MonitoringService) LinkConnector(actor, id, connectorID string) error {
+	err := ErrNotFound
+	s.st.Write(func(d *store.Data) {
+		src := d.MonitoringSources[id]
+		if src == nil {
+			return
+		}
+		if connectorID != "" && d.Connectors[connectorID] == nil {
+			err = invalid("connector_not_found", nil)
+			return
+		}
+		err = nil
+		src.ConnectorID = connectorID
+		src.UpdatedBy, src.UpdatedAt = actor, s.now()
+		d.AddAudit(store.AuditEntry{Actor: actor, Action: "monitoring.connector", Object: id, Detail: src.Name + ": connector " + firstSet(connectorID, "none")})
 	})
 	return err
 }

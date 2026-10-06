@@ -35,6 +35,8 @@ func (a *App) registerIncidents(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/incidents/{id}", a.authed(a.can("incidents:view", a.getIncident)))
 	mux.HandleFunc("POST /api/incidents/{id}/{action}", a.authed(a.can("incidents:ack", a.actIncident)))
 	mux.HandleFunc("POST /api/incidents/bulk", a.authed(a.can("incidents:ack", a.bulkIncidents)))
+	mux.HandleFunc("POST /api/incidents/{id}/create-ci", a.authed(a.can("incidents:view", a.can("cis:edit", a.createIncidentCI))))
+	mux.HandleFunc("POST /api/incidents/{id}/bind-ci", a.authed(a.can("incidents:view", a.can("cis:edit", a.bindIncidentCI))))
 }
 
 func (a *App) alertsReady(w http.ResponseWriter) bool {
@@ -48,10 +50,7 @@ func (a *App) alertsReady(w http.ResponseWriter) bool {
 
 // incidentScope is the business services whose incidents the user sees; nil means all of them.
 func (a *App) incidentScope(u model.User) []string {
-	if len(u.ServiceIDs) == 0 || a.access.Grant(u).RoleID == model.RoleAdmin {
-		return nil
-	}
-	return u.ServiceIDs
+	return a.userScope(u).ids()
 }
 
 func incidentFilter(r *http.Request) alert.Filter {
@@ -92,6 +91,11 @@ type incidentView struct {
 	Grafana  string        `json:"grafana_url,omitempty"`
 	// Connectors names the connectors of the sources.
 	Connectors map[string]string `json:"connectors"`
+	// CI, Services and Maintenance: what the catalog has on the item, the services (with their
+	// links) and the maintenance window of the incident.
+	CI          *incidentCI          `json:"ci,omitempty"`
+	Services    []incidentService    `json:"services"`
+	Maintenance *incidentMaintenance `json:"maintenance,omitempty"`
 }
 
 func (a *App) getIncident(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +111,9 @@ func (a *App) getIncident(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	names := map[string]string{}
+	view := incidentView{Alert: al, Timeline: entries, Grafana: a.grafanaLink(al), Connectors: names}
 	a.deps.Store.Read(func(d *store.Data) {
+		incidentContext(d, al, &view)
 		for _, src := range al.Sources {
 			if c := d.Connectors[src.ConnectorID]; c != nil {
 				names[src.ConnectorID] = c.Name
@@ -116,7 +122,7 @@ func (a *App) getIncident(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	})
-	httpx.JSON(w, http.StatusOK, incidentView{Alert: al, Timeline: entries, Grafana: a.grafanaLink(al), Connectors: names})
+	httpx.JSON(w, http.StatusOK, view)
 }
 
 type actInput struct {

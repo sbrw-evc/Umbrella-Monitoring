@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Plus, Send, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Plus, Send, Trash2 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../../api'
 import { useResource } from '../../../connections/useRequest'
@@ -18,7 +18,6 @@ type Draft = {
   enabled: boolean
   region: 'us' | 'eu'
   min_severity: string
-  public_url: string
   events_url: string
   api_url: string
   routing_key: string
@@ -37,7 +36,6 @@ function draftOf(v: PagerDutyView): Draft {
     enabled: v.enabled,
     region: v.region,
     min_severity: v.min_severity ?? '',
-    public_url: v.public_url,
     events_url: v.events_url ?? '',
     api_url: v.api_url ?? '',
     routing_key: '',
@@ -62,7 +60,6 @@ function bodyOf(d: Draft) {
     enabled: d.enabled,
     region: d.region,
     min_severity: d.min_severity,
-    public_url: d.public_url,
     events_url: d.events_url,
     api_url: d.api_url,
     routing_key: d.routing_key,
@@ -73,7 +70,9 @@ function bodyOf(d: Draft) {
   }
 }
 
-export function PagerDutyCard({ onSaved }: { onSaved?: () => void }) {
+// reloadKey changes when the Umbrella address is saved in its own card: the webhook address is
+// read again, the unsaved form stays.
+export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void; reloadKey?: number }) {
   const t = useT(strings)
   const { locale } = useLocale()
   const { can, timezone } = useSession()
@@ -95,6 +94,10 @@ export function PagerDutyCard({ onSaved }: { onSaved?: () => void }) {
   useEffect(() => {
     void load(async () => apply(await api<PagerDutyView>('GET', '/api/pagerduty')))
   }, [load])
+  useEffect(() => {
+    if (!reloadKey) return
+    api<PagerDutyView>('GET', '/api/pagerduty').then(setView, () => {})
+  }, [reloadKey])
   const hasToken = !!view?.has_api_token
   useEffect(() => {
     if (!hasToken || !canEdit) return
@@ -111,6 +114,12 @@ export function PagerDutyCard({ onSaved }: { onSaved?: () => void }) {
   const at = (v?: string) => formatDate(v, locale, timezone)
   const dirty = JSON.stringify(bodyOf(draft)) !== JSON.stringify(bodyOf(draftOf(view)))
   const set = (p: Partial<Draft>) => setDraft({ ...draft, ...p })
+  const moveRoute = (i: number, by: number) => {
+    const next = [...draft.routes]
+    const [r] = next.splice(i, 1)
+    next.splice(i + by, 0, r)
+    set({ routes: next })
+  }
   const setRoute = (i: number, p: Partial<RouteDraft>) => set({ routes: draft.routes.map((r, j) => (j === i ? { ...r, ...p } : r)) })
   const st = view.status
 
@@ -189,9 +198,6 @@ export function PagerDutyCard({ onSaved }: { onSaved?: () => void }) {
       >
         <fieldset className="plain-fieldset stack" disabled={!canEdit}>
           <Switch checked={draft.enabled} onChange={(enabled) => set({ enabled })} label={t('pd.enable')} hint={t('pd.enable.hint')} />
-          <Field label={t('pd.public')} hint={t('pd.public.hint')}>
-            {(id) => <Input id={id} value={draft.public_url} placeholder="https://umbrella.example.com" onChange={(e) => set({ public_url: e.target.value })} />}
-          </Field>
         </fieldset>
         <AnimatePresence initial={false} mode="wait">
           {draft.enabled ? (
@@ -280,9 +286,27 @@ export function PagerDutyCard({ onSaved }: { onSaved?: () => void }) {
                           {(id) => <Password id={id} value={r.routing_key} autoComplete="off" onChange={(e) => setRoute(i, { routing_key: e.target.value })} />}
                         </Field>
                       )}
-                      <button type="button" className="icon-btn al-remove" aria-label={t('remove')} title={t('remove')} onClick={() => set({ routes: draft.routes.filter((_, j) => j !== i) })}>
-                        <Trash2 size={16} />
-                      </button>
+                      <div className="al-route-tools">
+                        <span className="al-route-order" title={t('pd.route.order')}>
+                          {i + 1}
+                        </span>
+                        <button type="button" className="icon-btn" onClick={() => moveRoute(i, -1)} disabled={i === 0} title={t('pd.route.up')} aria-label={t('pd.route.up')}>
+                          <ArrowUp size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          onClick={() => moveRoute(i, 1)}
+                          disabled={i === draft.routes.length - 1}
+                          title={t('pd.route.down')}
+                          aria-label={t('pd.route.down')}
+                        >
+                          <ArrowDown size={16} />
+                        </button>
+                        <button type="button" className="icon-btn" aria-label={t('remove')} title={t('remove')} onClick={() => set({ routes: draft.routes.filter((_, j) => j !== i) })}>
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                   <div className="row">

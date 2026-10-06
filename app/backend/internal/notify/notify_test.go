@@ -30,17 +30,35 @@ type note struct {
 }
 
 type results struct {
-	mu    sync.Mutex
-	notes []note
-	done  []string
+	mu      sync.Mutex
+	notes   []note
+	done    []string
+	reached []alert.Notified
+	// taken: FallbackDue answers that the incident is no longer due.
+	taken     bool
+	followUps []string
 }
 
-func (r *results) FallbackDone(_ context.Context, id string) error {
+func (r *results) FallbackDue(context.Context, string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !r.taken, nil
+}
+
+func (r *results) FallbackDone(_ context.Context, id string, sent []alert.Notified) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	// The attempt is reported after it is on the timeline.
 	r.notes = append(r.notes, note{"done:" + id, nil})
 	r.done = append(r.done, id)
+	r.reached = sent
+	return nil
+}
+
+func (r *results) FollowUpDone(_ context.Context, id, event string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.followUps = append(r.followUps, id+":"+event)
 	return nil
 }
 
@@ -212,4 +230,28 @@ func (r *results) doneIDs() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]string(nil), r.done...)
+}
+
+// A team with its own channel: backup notification goes to the channel (and the lead the route
+// keeps), not to every member.
+func TestTeamChannelGetsBackupNotification(t *testing.T) {
+	s, _, smtp, tg, _ := setup(t)
+	a := incident()
+	a.Route.People = a.Route.People[:1]
+	a.Route.Channel = &alert.Channel{Email: "sre-duty@example.com", Telegram: "-100300"}
+	s.Deliver(context.Background(), a)
+	var to []string
+	for _, m := range smtp.Mails() {
+		to = append(to, m.To)
+	}
+	if strings.Join(to, ",") != "ivanov@example.com,sre-duty@example.com,duty@example.com" {
+		t.Fatalf("mails to %v", to)
+	}
+	var chats []string
+	for _, m := range tg.Messages() {
+		chats = append(chats, m.ChatID)
+	}
+	if strings.Join(chats, ",") != "4242,-100300,-100200" {
+		t.Fatalf("telegram to %v", chats)
+	}
 }

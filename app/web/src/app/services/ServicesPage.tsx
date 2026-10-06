@@ -6,6 +6,7 @@ import { useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
 import { Banner, Button, Input, Segmented, Select } from '../../ui'
 import { useSession } from '../session'
+import { clearDeepLink, useDeepLink } from '../deepLink'
 import { DeleteDialog } from './DeleteDialog'
 import { OptionSelect, teamOptions } from './Pickers'
 import { ServiceCards, type Grouping } from './ServiceCards'
@@ -35,6 +36,7 @@ export function ServicesPage() {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const [grouping, setGrouping] = useState<Grouping>('none')
   const [selected, setSelected] = useState<Service | null>(null)
+  useDeepLink<Service>('/api/services', setSelected)
   const [editing, setEditing] = useState<Editing>(null)
   const [deleting, setDeleting] = useState<Service | null>(null)
   const q = useDebounced(filters.q, 250)
@@ -147,7 +149,10 @@ export function ServicesPage() {
       <ServiceDetail
         service={selected}
         editable={editable}
-        onClose={() => setSelected(null)}
+        onClose={() => {
+          clearDeepLink()
+          setSelected(null)
+        }}
         onEdit={(s) => {
           setSelected(null)
           setEditing({ service: s })

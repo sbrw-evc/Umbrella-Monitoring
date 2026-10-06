@@ -59,11 +59,14 @@ type Config struct {
 	ImportVMs      bool   `json:"import_vms"`
 	ImportServices bool   `json:"import_services"`
 	SyncContacts   bool   `json:"sync_contacts"`
-	SyncDirectory  bool   `json:"sync_directory"`
-	SiteID         int    `json:"site_id"`
-	DeviceRoleID   int    `json:"device_role_id"`
-	DeviceTypeID   int    `json:"device_type_id"`
-	ClusterID      int    `json:"cluster_id"`
+	// CreateUsers makes a user account for a contact no account matches by e-mail. Off: such
+	// contacts are not responsible people of their items until the person has an account.
+	CreateUsers   bool `json:"create_users"`
+	SyncDirectory bool `json:"sync_directory"`
+	SiteID        int  `json:"site_id"`
+	DeviceRoleID  int  `json:"device_role_id"`
+	DeviceTypeID  int  `json:"device_type_id"`
+	ClusterID     int  `json:"cluster_id"`
 }
 
 // Defaults: import everything once a connection is set up, hourly.

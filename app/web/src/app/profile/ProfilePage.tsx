@@ -1,5 +1,6 @@
 import { Avatar } from '../../Avatar'
 import { useT } from '../../i18n'
+import { Banner } from '../../ui'
 import { useSession } from '../session'
 import { strings } from '../strings'
 import { fullName } from '../types'
@@ -12,6 +13,8 @@ import { TimezoneCard } from './TimezoneCard'
 export function ProfilePage() {
   const t = useT(strings)
   const { user } = useSession()
+  const noAccess = user.role !== 'admin' && (user.permissions?.length ?? 0) === 0
+  const admins = user.admins ?? []
   return (
     <>
       <div className="page-head">
@@ -23,6 +26,33 @@ export function ProfilePage() {
           </div>
         </div>
       </div>
+      {noAccess && (
+        <div className="profile-noaccess">
+          <Banner kind="warn" title={t('profile.noAccess.title')}>
+            <p>{t('profile.noAccess.text')}</p>
+            {admins.length > 0 ? (
+              <>
+                <p>{t('profile.noAccess.admins')}</p>
+                <ul className="profile-admins">
+                  {admins.map((a, i) => (
+                    <li key={i}>
+                      {a.name}
+                      {a.email && (
+                        <>
+                          {' — '}
+                          <a href={`mailto:${a.email}`}>{a.email}</a>
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p>{t('profile.noAccess.none')}</p>
+            )}
+          </Banner>
+        </div>
+      )}
       <div className="cards">
         <PersonalCard />
         {user.source === 'local' && <PasswordCard />}

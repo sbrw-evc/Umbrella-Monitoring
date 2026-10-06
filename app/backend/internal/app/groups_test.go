@@ -39,6 +39,8 @@ func (h *harness) addRoleAndTeam(roleID, teamID string) {
 	})
 }
 
+func teamsOf(u model.User) string { return strings.Join(u.TeamIDs, ",") }
+
 func (h *harness) named(name string) model.User {
 	var out model.User
 	h.st.Read(func(d *store.Data) {
@@ -105,31 +107,32 @@ func TestGroupMappingLDAP(t *testing.T) {
 
 	anna := h.client()
 	anna.login("anna", "anna-pass-1")
-	if u := h.named("anna"); u.Role != "operator" || u.TeamID != "TEAM-1" || u.MappedRole != "operator" || u.MappedTeam != "TEAM-1" {
+	if u := h.named("anna"); u.Role != "operator" || teamsOf(u) != "TEAM-1" || u.MappedRole != "operator" || strings.Join(u.MappedTeams, ",") != "TEAM-1" {
 		t.Fatalf("anna after sign-in = %+v", u)
 	}
 	boris := h.client()
 	boris.login("boris", "boris-pass-1")
-	if u := h.named("boris"); u.Role != model.RoleUser || u.TeamID != "" {
+	if u := h.named("boris"); u.Role != model.RoleUser || teamsOf(u) != "" {
 		t.Fatalf("boris = %+v", u)
 	}
 
 	// A hand-made change to a mapped value is overridden by the next synchronization...
 	annaID, borisID := h.named("anna").ID, h.named("boris").ID
-	if code := admin.call(http.MethodPut, "/api/users/"+annaID, map[string]any{"role_id": "viewer", "team_id": "TEAM-2"}, nil); code != 200 {
+	if code := admin.call(http.MethodPut, "/api/users/"+annaID, map[string]any{"role_id": "viewer", "team_ids": []string{"TEAM-2"}}, nil); code != 200 {
 		t.Fatalf("manual edit = %d", code)
 	}
 	// ...while values set by hand for users no row matches are kept.
-	if code := admin.call(http.MethodPut, "/api/users/"+borisID, map[string]any{"role_id": "viewer", "team_id": "TEAM-2"}, nil); code != 200 {
+	if code := admin.call(http.MethodPut, "/api/users/"+borisID, map[string]any{"role_id": "viewer", "team_ids": []string{"TEAM-2"}}, nil); code != 200 {
 		t.Fatalf("manual edit = %d", code)
 	}
 	if code := admin.call(http.MethodPost, "/api/settings/groups/sync", nil, &view); code != 200 || !view.Sync.OK || view.Sync.LDAP.Users != 2 || view.Sync.LDAP.Changed != 1 {
 		t.Fatalf("sync = %d %+v", code, view.Sync)
 	}
-	if u := h.named("anna"); u.Role != "operator" || u.TeamID != "TEAM-1" {
+	// The mapped team is added again next to the team set by hand.
+	if u := h.named("anna"); u.Role != "operator" || teamsOf(u) != "TEAM-1,TEAM-2" {
 		t.Fatalf("anna after sync = %+v", u)
 	}
-	if u := h.named("boris"); u.Role != "viewer" || u.TeamID != "TEAM-2" {
+	if u := h.named("boris"); u.Role != "viewer" || teamsOf(u) != "TEAM-2" {
 		t.Fatalf("boris after sync = %+v", u)
 	}
 	if view.Mapped.Roles != 1 || view.Mapped.Teams != 1 {
@@ -139,11 +142,11 @@ func TestGroupMappingLDAP(t *testing.T) {
 	// Leaving the groups withdraws what the table gave.
 	srv.Put(directorytest.Entry{DN: ldapOps, Attrs: map[string][]string{"member": {"uid=boris,dc=example,dc=org"}}})
 	admin.call(http.MethodPost, "/api/settings/groups/sync", nil, &view)
-	if u := h.named("anna"); u.Role != model.RoleUser || u.TeamID != "" || u.MappedRole != "" {
+	if u := h.named("anna"); u.Role != model.RoleUser || teamsOf(u) != "TEAM-2" || u.MappedRole != "" || len(u.MappedTeams) != 0 {
 		t.Fatalf("anna out of the groups = %+v", u)
 	}
 	// boris is now in ops and eng: the first row wins for the role, over his hand-set value.
-	if u := h.named("boris"); u.Role != "operator" || u.TeamID != "TEAM-1" {
+	if u := h.named("boris"); u.Role != "operator" || teamsOf(u) != "TEAM-1,TEAM-2" {
 		t.Fatalf("boris in the groups = %+v", u)
 	}
 
@@ -191,7 +194,7 @@ func TestGroupMappingEntra(t *testing.T) {
 	if where := h.client().signInEntra(); where != "/" {
 		t.Fatalf("sign-in ended at %s", where)
 	}
-	if u := h.named("anna@contoso.com"); u.Role != "operator" || u.TeamID != "TEAM-1" {
+	if u := h.named("anna@contoso.com"); u.Role != "operator" || teamsOf(u) != "TEAM-1" {
 		t.Fatalf("anna after sign-in = %+v", u)
 	}
 
@@ -202,7 +205,7 @@ func TestGroupMappingEntra(t *testing.T) {
 	if code := admin.call(http.MethodPost, "/api/settings/groups/sync", nil, &view); code != 200 || !view.Sync.OK || view.Sync.Entra.Changed != 1 || view.Sync.LDAP.Checked {
 		t.Fatalf("sync = %d %+v", code, view.Sync)
 	}
-	if u := h.named("anna@contoso.com"); u.Role != model.RoleUser || u.TeamID != "" {
+	if u := h.named("anna@contoso.com"); u.Role != model.RoleUser || teamsOf(u) != "" {
 		t.Fatalf("anna after sync = %+v", u)
 	}
 

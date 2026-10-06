@@ -5,6 +5,7 @@ import { defaultPolicy, ruleText, rules, type PasswordPolicy } from '../policy'
 import { errorText, useLocale, useT } from '../i18n'
 import { Banner, Button, formatDate, Rows, zoneLabel } from '../ui'
 import { DefaultsEditor } from './DefaultsEditor'
+import { OnboardingChecklist } from './onboarding/OnboardingChecklist'
 import { useSession } from './session'
 import { statusStrings } from './statusStrings'
 import { strings } from './strings'
@@ -166,9 +167,11 @@ export function SystemStatus() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<{ message: string; detail?: string } | null>(null)
   const [editing, setEditing] = useState(false)
+  const [epoch, setEpoch] = useState(0)
   const closeEditor = useCallback(() => setEditing(false), [])
 
   const load = useCallback(async () => {
+    setEpoch((e) => e + 1)
     setBusy(true)
     setError(null)
     try {
@@ -234,6 +237,9 @@ export function SystemStatus() {
       <div className="status-summary">
         <Pill state={problems ? 'error' : 'ok'} t={t} label={problems ? t('status.problems', { n: problems }) : t('status.allOk')} />
         <span className="muted">{t('status.checkedAt', { at: date(s.checked_at) })}</span>
+      </div>
+      <div className="status-onboarding">
+        <OnboardingChecklist epoch={epoch} />
       </div>
       <div className="cards">
         <Card title={t('card.app')} t={t}>

@@ -37,6 +37,13 @@ const (
 // so the alert is not retried.
 var ErrPDSkipped = errors.New("below the PagerDuty severity threshold")
 
+// ErrPDOff: PagerDuty is turned off. The gateway reports it when it was turned off after the
+// command was made; the alert is then "off", not failed.
+var ErrPDOff = errors.New("PagerDuty is not enabled")
+
+// DefaultFallbackSeverity is the lowest severity backup notification takes by default.
+const DefaultFallbackSeverity = "error"
+
 type Engine struct {
 	db     *pgxpool.Pool
 	st     *store.Store
@@ -47,8 +54,8 @@ type Engine struct {
 	// Window: an alert resolved this long ago opens again on a new firing event instead of a
 	// new alert, and RED and USE alerts of one service opened within it are linked.
 	Window time.Duration
-	// FallbackAfter: an error or critical alert PagerDuty has not taken this long after it
-	// opened goes to backup notification.
+	// FallbackAfter: how long backup notification waits for PagerDuty to take an alert while
+	// PagerDuty is on and the settings name no delay of their own (Notify.DelaySeconds).
 	FallbackAfter time.Duration
 	FallbackRetry time.Duration
 	RetryEvery    time.Duration
@@ -66,6 +73,7 @@ func (nopSender) Send(Command) {}
 type nopNotifier struct{}
 
 func (nopNotifier) Fallback(Alert) {}
+func (nopNotifier) FollowUp(Alert) {}
 
 func New(db *pgxpool.Pool, st *store.Store) *Engine {
 	return &Engine{db: db, st: st, pd: nopSender{}, notify: nopNotifier{}, now: func() time.Time { return time.Now().UTC() },
@@ -76,6 +84,37 @@ func (e *Engine) SetSender(s Sender)            { e.pd = s }
 func (e *Engine) SetNotifier(n Notifier)        { e.notify = n }
 func (e *Engine) SetClock(now func() time.Time) { e.now = now }
 func (e *Engine) DB() *pgxpool.Pool             { return e.db }
+
+// policy is what the alerting settings say about delivery right now.
+type policy struct {
+	pdOn bool
+	// delay and minSeverity: when backup notification goes out and for which alerts.
+	delay       time.Duration
+	minSeverity string
+}
+
+func (e *Engine) policy() policy {
+	var p policy
+	var delay *int
+	e.st.Read(func(d *store.Data) {
+		al := d.Settings.Alerting
+		p.pdOn, p.minSeverity = al.PagerDuty.Enabled, al.Notify.MinSeverity
+		if al.Notify.DelaySeconds != nil {
+			v := *al.Notify.DelaySeconds
+			delay = &v
+		}
+	})
+	switch {
+	case delay != nil:
+		p.delay = time.Duration(max(0, *delay)) * time.Second
+	case p.pdOn:
+		p.delay = e.FallbackAfter
+	}
+	if SeverityRank(p.minSeverity) == 0 {
+		p.minSeverity = DefaultFallbackSeverity
+	}
+	return p
+}
 
 func (e *Engine) world() *world {
 	v := e.st.Version()
@@ -126,19 +165,15 @@ func (e *Engine) Apply(ctx context.Context, tx pgx.Tx, events []Incoming) (after
 	}
 	w := e.world()
 	now := e.now()
-	var cmds []Command
+	out := &handover{}
 	for _, in := range events {
-		c, err := e.fold(ctx, tx, w, in, now)
+		c, err := e.fold(ctx, tx, w, in, now, out)
 		if err != nil {
 			return nil, err
 		}
-		cmds = append(cmds, c...)
+		out.cmds = append(out.cmds, c...)
 	}
-	return func() {
-		for _, c := range cmds {
-			e.pd.Send(c)
-		}
-	}, nil
+	return out.send(e), nil
 }
 
 // Ingest folds events that do not come through the intake queue (rules) in a transaction of
@@ -156,12 +191,40 @@ func (e *Engine) Ingest(ctx context.Context, events []Incoming) error {
 	return err
 }
 
-func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now time.Time) ([]Command, error) {
-	ci := w.resolve(in.CI, in.Labels)
-	name := strings.TrimSpace(in.CI)
-	if v := strings.TrimSpace(in.Labels["ci"]); v != "" {
-		name = v
+// handover is what a transaction hands to PagerDuty and the notifier once it is committed.
+type handover struct {
+	cmds      []Command
+	fallbacks []Alert
+	followUps []Alert
+}
+
+// note remembers the backup notification and the follow-up of an alert the transaction made due.
+func (h *handover) note(fallback, followUp bool, a *Alert) {
+	if fallback {
+		h.fallbacks = append(h.fallbacks, a.Clone())
 	}
+	if followUp {
+		h.followUps = append(h.followUps, a.Clone())
+	}
+}
+
+func (h *handover) send(e *Engine) func() {
+	return func() {
+		for _, c := range h.cmds {
+			e.pd.Send(c)
+		}
+		for _, a := range h.fallbacks {
+			e.notify.Fallback(a)
+		}
+		for _, a := range h.followUps {
+			e.notify.FollowUp(a)
+		}
+	}
+}
+
+func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now time.Time, out *handover) ([]Command, error) {
+	ci, excluded := w.resolveCI(in.CI, in.Labels)
+	name := eventCIName(in.CI, in.Labels)
 	signal := in.Signal
 	if strings.TrimSpace(signal) == "" {
 		signal = in.Title
@@ -217,7 +280,7 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 		c.log(now, KindEvent, "event", eventArgs, "")
 		a.Severity = firingSeverity(a, a.Severity)
 		if allResolved(a) {
-			e.resolve(c, now, "sources_resolved", "")
+			out.note(false, e.resolve(c, now, "sources_resolved", ""), a)
 			add(e.pdCmd(a, PDResolve, now))
 		}
 		return cmds, c.save(ctx, tx)
@@ -235,6 +298,7 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 		if a.Method == "" {
 			a.Method = "other"
 		}
+		a.EventCI = name
 		c.a = a
 		c.log(now, KindStatus, "opened", nil, "")
 		if ci != nil {
@@ -250,7 +314,8 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 	} else if !Active(a.Status) {
 		a.Status, a.ResolvedAt, a.ResolvedBy, a.AckedBy, a.AckedAt = StatusOpen, nil, "", "", nil
 		a.OpenedAt, a.Fallback, a.FallbackAt, a.FallbackState, a.FallbackTry = now, false, nil, "", nil
-		a.PD.State, a.PD.Error, a.PD.Retry, a.PD.AttemptAt = PDPending, "", "", nil
+		a.Notified, a.FollowUp, a.FollowUpTry = nil, "", nil
+		a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry, a.PD.AttemptAt = PDPending, "", "", "", nil
 		// PagerDuty opens a new incident for the trigger after a resolve: it goes by the current
 		// route, and the old incident is remembered so that its late webhooks are ignored.
 		a.PD.Route, a.PD.RouteID = "", ""
@@ -290,23 +355,33 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 		c.log(now, KindStatus, "severity_raised", map[string]string{"from": prev, "to": a.Severity}, "")
 	}
 
+	if e.exclude(c, excluded, now) {
+		return nil, c.save(ctx, tx)
+	}
 	if m := w.maintenanceFor(a, now); m != nil {
 		if !a.Suppressed {
 			c.log(now, KindMaintenance, "suppressed", map[string]string{"window": m.Title, "id": m.ID}, "")
 		}
 		a.Suppressed, a.MaintenanceID = true, m.ID
-		if a.PD.State != PDAccepted && a.PD.State != PDAcked {
+		if !pdHas(a) && a.PD.State != PDOff {
 			a.PD.State = PDSkipped
 		}
 		return nil, c.save(ctx, tx)
 	}
 	wasSuppressed := a.Suppressed
 	a.Suppressed, a.MaintenanceID = false, ""
-	if opened || reopened || raised || wasSuppressed || a.PD.State == PDSkipped || a.PD.State == PDFailed {
-		if a.PD.State == PDSkipped {
+	if opened || reopened || raised || wasSuppressed || a.PD.State == PDSkipped || a.PD.State == PDFailed || a.PD.State == PDOff {
+		wasTest := a.PD.State == PDSkipped && a.PD.ErrorCode == "test"
+		if a.PD.State == PDSkipped || a.PD.State == PDOff {
 			a.PD.State = PDPending
 		}
 		add(e.pdCmd(a, PDTrigger, now))
+		if a.PD.ErrorCode == "test" && !wasTest {
+			c.log(now, KindPagerDuty, "pd_skipped", map[string]string{"code": "test"}, "")
+		}
+	}
+	if e.fallbackDue(c, e.policy(), now) {
+		out.note(true, false, a)
 	}
 	return cmds, c.save(ctx, tx)
 }
@@ -389,12 +464,66 @@ func (e *Engine) link(ctx context.Context, tx pgx.Tx, c *change, now time.Time) 
 	return oc.save(ctx, tx)
 }
 
-func (e *Engine) resolve(c *change, now time.Time, why, actor string) {
+func (e *Engine) resolve(c *change, now time.Time, why, actor string) (followUp bool) {
 	a := c.a
 	a.Status = StatusResolved
 	t := now
 	a.ResolvedAt, a.ResolvedBy = &t, actor
 	c.log(now, KindStatus, "resolved", map[string]string{"why": why}, actor)
+	return e.taken(c, now)
+}
+
+// acknowledge marks the alert taken by actor.
+func (e *Engine) acknowledge(c *change, now time.Time, actor string) (followUp bool) {
+	a := c.a
+	t := now
+	a.Status, a.AckedBy, a.AckedAt = StatusAcknowledged, actor, &t
+	return e.taken(c, now)
+}
+
+// taken is called when the alert stops being open (acknowledged or resolved). Backup
+// notification still waiting is not sent any more; the addresses it reached get a follow-up.
+// It reports whether a follow-up is to be handed to the notifier now.
+func (e *Engine) taken(c *change, now time.Time) bool {
+	a := c.a
+	if a.FallbackState == FallbackPending {
+		a.Fallback, a.FallbackAt, a.FallbackState, a.FallbackTry = false, nil, "", nil
+		c.log(now, KindFallback, "fallback_cancelled", map[string]string{"status": a.Status}, "")
+	}
+	if a.FallbackState != FallbackSent || len(a.Notified) == 0 {
+		return false
+	}
+	a.FollowUp = a.Status
+	t := now
+	a.FollowUpTry = &t
+	return true
+}
+
+// fallbackDue starts backup notification of an open alert nobody has taken: PagerDuty is off,
+// did not take it in time, or skipped it (below its threshold), and the alert is severe enough.
+// Acknowledged and resolved alerts, alerts in maintenance and test alerts never go out. It
+// reports whether the notification is to be handed to the notifier now.
+func (e *Engine) fallbackDue(c *change, p policy, now time.Time) bool {
+	a := c.a
+	switch {
+	case a.Fallback, a.Status != StatusOpen, a.Suppressed, a.IsTest(),
+		SeverityRank(a.Severity) < SeverityRank(p.minSeverity),
+		pdHas(a) || (p.pdOn && a.PD.State == PDOff),
+		now.Sub(a.OpenedAt) < p.delay:
+		return false
+	}
+	reason := "pd_not_taken"
+	switch a.PD.State {
+	case PDOff:
+		reason = "pd_off"
+	case PDSkipped:
+		reason = "pd_skipped"
+	}
+	t := now
+	a.Fallback, a.FallbackAt, a.FallbackState, a.FallbackTry = true, &t, FallbackPending, &t
+	c.log(now, KindFallback, "fallback", map[string]string{"after": p.delay.String(), "after_s": fmt.Sprint(int(p.delay.Seconds())),
+		"reason": reason, "people": fmt.Sprint(len(a.Route.Recipients()))}, "")
+	return true
 }
 
 // pdCmd makes a PagerDuty command and stamps the attempt. A maintenance window holds back
@@ -402,8 +531,27 @@ func (e *Engine) resolve(c *change, now time.Time, why, actor string) {
 // otherwise it would stay open and keep escalating. A window that starts while the incident is
 // open in PagerDuty leaves it open there (nothing is resolved just because work began); the
 // acknowledgement or resolution made during the window is what closes it.
+//
+// While PagerDuty is off nothing is sent: an alert it does not have is "off", and the
+// acknowledgement or resolution of an incident it has waits in Retry until it is turned on
+// again. A test alert is never sent.
 func (e *Engine) pdCmd(a *Alert, action Action, now time.Time) *Command {
 	if a.Suppressed && (action == PDTrigger || !pdHas(a)) {
+		return nil
+	}
+	if a.IsTest() {
+		// A test event never reaches PagerDuty.
+		if !pdHas(a) {
+			a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry = PDSkipped, "", "test", ""
+		}
+		return nil
+	}
+	if !e.policy().pdOn {
+		if !pdHas(a) {
+			a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry = PDOff, "", "", ""
+		} else if action != PDTrigger {
+			a.PD.Retry = string(action)
+		}
 		return nil
 	}
 	t := now
@@ -429,7 +577,9 @@ func (e *Engine) ActIn(ctx context.Context, id, action, actor, text string, scop
 	now := e.now()
 	var out Alert
 	var cmd *Command
+	var followUp bool
 	err := pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
+		followUp = false
 		a, err := lockByID(ctx, tx, id)
 		if err != nil {
 			return err
@@ -443,15 +593,14 @@ func (e *Engine) ActIn(ctx context.Context, id, action, actor, text string, scop
 			if a.Status != StatusOpen {
 				return ErrNotOpen
 			}
-			t := now
-			a.Status, a.AckedBy, a.AckedAt = StatusAcknowledged, actor, &t
+			followUp = e.acknowledge(c, now, actor)
 			c.log(now, KindStatus, "acknowledged", nil, actor)
 			cmd = e.pdCmd(a, PDAcknowledge, now)
 		case "resolve":
 			if !Active(a.Status) {
 				return ErrNotActive
 			}
-			e.resolve(c, now, "manual", actor)
+			followUp = e.resolve(c, now, "manual", actor)
 			cmd = e.pdCmd(a, PDResolve, now)
 		case "comment":
 			text = strings.TrimSpace(text)
@@ -473,6 +622,9 @@ func (e *Engine) ActIn(ctx context.Context, id, action, actor, text string, scop
 	if cmd != nil {
 		e.pd.Send(*cmd)
 	}
+	if followUp {
+		e.notify.FollowUp(out)
+	}
 	return out, nil
 }
 
@@ -492,22 +644,35 @@ func (e *Engine) PDResult(ctx context.Context, alertID string, action Action, ro
 		}
 		delivered := a.PD.State == PDAccepted || a.PD.State == PDAcked
 		switch {
+		case errors.Is(deliveryErr, ErrPDOff):
+			// Turned off after the command was made: not a failure, nothing on the timeline.
+			a.PD.Error, a.PD.ErrorCode = "", ""
+			if !delivered {
+				a.PD.State, a.PD.Retry = PDOff, ""
+			} else if action != PDTrigger {
+				a.PD.Retry = string(action)
+			}
 		case errors.Is(deliveryErr, ErrPDSkipped):
 			if action == PDTrigger && !delivered {
+				code, min := DeliveryCode(deliveryErr)
+				if code == "error" {
+					code, min = "below_threshold", ""
+				}
 				a.PD.State = PDSkipped
-				c.log(now, KindPagerDuty, "pd_skipped", map[string]string{"reason": deliveryErr.Error()}, "")
+				c.log(now, KindPagerDuty, "pd_skipped", map[string]string{"code": code, "min": min}, "")
 			}
-			a.PD.Retry, a.PD.Error = "", ""
+			a.PD.Retry, a.PD.Error, a.PD.ErrorCode = "", "", ""
 		case deliveryErr != nil:
+			code, detail := DeliveryCode(deliveryErr)
 			if a.PD.Error != deliveryErr.Error() {
-				c.log(now, KindPagerDuty, "pd_failed", map[string]string{"action": string(action), "error": deliveryErr.Error()}, "")
+				c.log(now, KindPagerDuty, "pd_failed", map[string]string{"action": string(action), "code": code, "detail": detail}, "")
 			}
-			a.PD.Error, a.PD.Retry = deliveryErr.Error(), string(action)
+			a.PD.Error, a.PD.ErrorCode, a.PD.Retry = deliveryErr.Error(), code, string(action)
 			if action == PDTrigger && !delivered {
 				a.PD.State = PDFailed
 			}
 		default:
-			a.PD.Error, a.PD.Retry = "", ""
+			a.PD.Error, a.PD.ErrorCode, a.PD.Retry = "", "", ""
 			switch action {
 			case PDTrigger:
 				if a.PD.State != PDAcked {
@@ -567,7 +732,9 @@ func (e *Engine) PDKeys(ctx context.Context, incidentKey, incidentID string) ([]
 // incident there acknowledges or resolves the alert here.
 func (e *Engine) PDInbound(ctx context.Context, u PDUpdate) error {
 	now := e.now()
-	return pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
+	var followUp *Alert
+	err := pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
+		followUp = nil
 		a, err := scanAlert(tx.QueryRow(ctx, "SELECT doc FROM alerts WHERE pd_key = $1 ORDER BY last_seen DESC LIMIT 1 FOR UPDATE", u.DedupKey))
 		if err != nil {
 			return err
@@ -604,15 +771,20 @@ func (e *Engine) PDInbound(ctx context.Context, u PDUpdate) error {
 			}
 			add("pd_incident_triggered")
 		case "incident.acknowledged":
+			taken := false
 			if a.Status == StatusOpen {
-				t := now
-				a.Status, a.AckedBy, a.AckedAt = StatusAcknowledged, u.Actor, &t
+				taken = e.acknowledge(c, now, u.Actor)
 			}
 			a.PD.State = PDAcked
 			add("pd_incident_acknowledged")
+			if taken {
+				cp := a.Clone()
+				followUp = &cp
+			}
 		case "incident.resolved":
-			if Active(a.Status) {
-				e.resolve(c, now, "pagerduty", u.Actor)
+			if Active(a.Status) && e.resolve(c, now, "pagerduty", u.Actor) {
+				cp := a.Clone()
+				followUp = &cp
 			}
 		case "incident.unacknowledged", "incident.reopened":
 			if a.Status == StatusAcknowledged {
@@ -628,6 +800,10 @@ func (e *Engine) PDInbound(ctx context.Context, u PDUpdate) error {
 		}
 		return c.save(ctx, tx)
 	})
+	if err == nil && followUp != nil {
+		e.notify.FollowUp(*followUp)
+	}
+	return err
 }
 
 // Tick runs once in a while: backup notification for alerts PagerDuty has not taken, the
@@ -643,18 +819,20 @@ func (e *Engine) Tick(ctx context.Context) error {
 		return err
 	}
 	w := e.world()
+	p := e.policy()
 	for _, id := range ids {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		var cmds []Command
-		var notify *Alert
+		var out handover
 		err := pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
+			out = handover{}
 			a, err := lockByID(ctx, tx, id)
 			if err != nil || a == nil {
 				return err
 			}
 			c := &change{a: a}
+			pdBefore := a.PD.State + "|" + a.PD.Retry
 			if Active(a.Status) {
 				m := w.maintenanceFor(a, now)
 				switch {
@@ -664,32 +842,41 @@ func (e *Engine) Tick(ctx context.Context) error {
 						a.PD.State, a.PD.Retry = PDSkipped, ""
 					}
 					c.log(now, KindMaintenance, "suppressed", map[string]string{"window": m.Title, "id": m.ID}, "")
-				case m == nil && a.Suppressed:
+				case m == nil && a.Suppressed && !a.Excluded:
 					a.Suppressed, a.MaintenanceID = false, ""
 					if a.PD.State == PDSkipped {
 						a.PD.State, a.PD.AttemptAt = PDPending, nil
 					}
 					c.log(now, KindMaintenance, "maintenance_over", nil, "")
 				}
-				if !a.Fallback && !a.Suppressed && SeverityRank(a.Severity) >= SeverityRank("error") &&
-					(a.PD.State == PDPending || a.PD.State == PDFailed) && now.Sub(a.OpenedAt) >= e.FallbackAfter {
-					t := now
-					a.Fallback, a.FallbackAt, a.FallbackState = true, &t, FallbackPending
-					c.log(now, KindFallback, "fallback", map[string]string{"after": e.FallbackAfter.String(), "people": fmt.Sprint(len(a.Route.Recipients()))}, "")
-				}
-				// The pending state is saved with the hand-over, so a notification lost with the
-				// process or dropped by a full queue goes out on a later tick.
-				if a.FallbackState == FallbackPending && !a.Suppressed && (a.FallbackTry == nil || now.Sub(*a.FallbackTry) >= e.FallbackRetry) {
+				switch {
+				case e.fallbackDue(c, p, now):
+					out.note(true, false, a)
+				case a.FallbackState == FallbackPending && a.Status != StatusOpen:
+					// Acknowledged in between (an older version did not cancel it then).
+					e.taken(c, now)
+				case (a.FallbackState == FallbackPending || a.FallbackState == FallbackSending) && !a.Suppressed &&
+					(a.FallbackTry == nil || now.Sub(*a.FallbackTry) >= e.FallbackRetry):
+					// The pending state is saved with the hand-over, so a notification lost with
+					// the process or dropped by a full queue goes out on a later tick.
 					t := now
 					a.FallbackTry = &t
 					c.dirty = true
-					cp := a.Clone()
-					notify = &cp
+					out.note(true, false, a)
 				}
+			}
+			if a.FollowUp != "" && (a.FollowUpTry == nil || now.Sub(*a.FollowUpTry) >= e.FallbackRetry) {
+				t := now
+				a.FollowUpTry = &t
+				c.dirty = true
+				out.note(false, true, a)
 			}
 			if cmd := e.retry(a, now); cmd != nil {
 				c.dirty = true
-				cmds = append(cmds, *cmd)
+				out.cmds = append(out.cmds, *cmd)
+			}
+			if a.PD.State+"|"+a.PD.Retry != pdBefore {
+				c.dirty = true
 			}
 			if a.Status == StatusResolved && a.PD.Retry == "" {
 				c.dirty = true // clears the attention flag
@@ -700,12 +887,10 @@ func (e *Engine) Tick(ctx context.Context) error {
 			slog.Error("alert tick", "alert", id, "err", err)
 			continue
 		}
-		for _, cmd := range cmds {
-			e.pd.Send(cmd)
-		}
-		if notify != nil {
-			e.notify.Fallback(*notify)
-		}
+		out.send(e)()
+	}
+	if err := e.expireTests(ctx, now); err != nil && ctx.Err() == nil {
+		slog.Error("test alerts not resolved", "err", err)
 	}
 	if now.Sub(e.purgedAt) >= time.Hour {
 		e.purgedAt = now
@@ -732,8 +917,9 @@ func (e *Engine) retry(a *Alert, now time.Time) *Command {
 		}
 		return e.pdCmd(a, PDResolve, now)
 	case !delivered:
-		// In a window the trigger waits for its end (Tick turns skipped back to pending).
-		if a.Suppressed || (a.PD.State != PDPending && a.PD.State != PDFailed) {
+		// In a window the trigger waits for its end (Tick turns skipped back to pending). An
+		// alert that was not sent while PagerDuty was off is sent once it is turned on.
+		if a.Suppressed || (a.PD.State != PDPending && a.PD.State != PDFailed && a.PD.State != PDOff) {
 			return nil
 		}
 		return e.pdCmd(a, PDTrigger, now)
@@ -783,11 +969,117 @@ func (e *Engine) Reroute(ctx context.Context) error {
 	return nil
 }
 
+// mergeInto folds an alert into another active alert of the same item and signal: the sources
+// move there and the alert is resolved. Two active alerts may not share a dedup key, so an
+// alert that waited for its item (or moves to another item) joins the alert the item has.
+func (e *Engine) mergeInto(ctx context.Context, tx pgx.Tx, c *change, other *Alert, ciName, actor string, now time.Time) (*Command, error) {
+	a := c.a
+	oc := &change{a: other}
+	for k, src := range a.Sources {
+		if _, ok := other.Sources[k]; !ok {
+			other.Sources[k] = src
+		}
+	}
+	other.Count += a.Count
+	if a.FirstSeen.Before(other.FirstSeen) {
+		other.FirstSeen = a.FirstSeen
+	}
+	if a.LastSeen.After(other.LastSeen) {
+		other.LastSeen = a.LastSeen
+	}
+	other.Severity = firingSeverity(other, other.Severity)
+	oc.log(now, KindRoute, "merged_from", map[string]string{"alert": a.ID, "ci": ciName}, actor)
+	if err := oc.save(ctx, tx); err != nil {
+		return nil, err
+	}
+	c.log(now, KindRoute, "merged_into", map[string]string{"alert": other.ID, "ci": ciName}, actor)
+	e.resolve(c, now, "merged", actor)
+	return e.pdCmd(a, PDResolve, now), nil
+}
+
+// BindUnknown binds the active alerts whose item was not in the catalog to the item their
+// event names now resolve to (an item was created, or got the name as an alias), routes them
+// and returns the IDs of the alerts bound. An alert whose item and signal already have another
+// active alert is merged into it: its sources move there and it is resolved.
+func (e *Engine) BindUnknown(ctx context.Context, actor string) ([]string, error) {
+	w := e.world()
+	now := e.now()
+	bound := []string{}
+	var cmds []Command
+	err := pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(lockKey)); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, "SELECT id FROM alerts WHERE status <> 'resolved' AND ci_id = '' ORDER BY seq")
+		if err != nil {
+			return err
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			a, err := lockByID(ctx, tx, id)
+			if err != nil {
+				return err
+			}
+			if a == nil || !Active(a.Status) || a.CIID != "" {
+				continue
+			}
+			name := firstNonEmpty(a.EventCI, a.CIName)
+			ci, excluded := w.resolveCI(name, a.Labels)
+			if ci == nil || excluded {
+				continue
+			}
+			key := dedupKey(ci, name, a.Signal)
+			other, err := activeByKey(ctx, tx, key)
+			if err != nil {
+				return err
+			}
+			c := &change{a: a}
+			if other != nil {
+				cmd, err := e.mergeInto(ctx, tx, c, other, ci.Name, actor, now)
+				if err != nil {
+					return err
+				}
+				if cmd != nil {
+					cmds = append(cmds, *cmd)
+				}
+			} else {
+				a.DedupKey = key
+				e.bind(c, w, ci, now)
+				if a.RelatedID == "" {
+					if err := e.link(ctx, tx, c, now); err != nil {
+						return err
+					}
+				}
+			}
+			if err := c.save(ctx, tx); err != nil {
+				return err
+			}
+			bound = append(bound, a.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range cmds {
+		e.pd.Send(c)
+	}
+	return bound, nil
+}
+
+func sameRef(a, b *Ref) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+
 func sameRoute(a, b Route) bool {
 	if a.Via != b.Via || len(a.Services) != len(b.Services) || len(a.People) != len(b.People) || len(a.Owners) != len(b.Owners) {
 		return false
 	}
-	if (a.Team == nil) != (b.Team == nil) || (a.Team != nil && *a.Team != *b.Team) {
+	if !sameRef(a.Team, b.Team) || !sameRef(a.Service, b.Service) {
+		return false
+	}
+	if (a.Channel == nil) != (b.Channel == nil) || (a.Channel != nil && *a.Channel != *b.Channel) {
 		return false
 	}
 	for i := range a.Services {
@@ -808,9 +1100,75 @@ func sameRoute(a, b Route) bool {
 	return true
 }
 
-// FallbackDone records that backup notification of an alert was attempted; the notifier calls it
-// once the outcome is on the timeline.
-func (e *Engine) FallbackDone(ctx context.Context, id string) error {
+// FallbackDue tells the notifier, right before it sends backup notification of an alert,
+// whether it is still due: an alert acknowledged or resolved since it was queued is not sent
+// (and its backup notification is cancelled), one in a maintenance window waits.
+func (e *Engine) FallbackDue(ctx context.Context, id string) (bool, error) {
+	now := e.now()
+	due := false
+	err := pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
+		due = false
+		a, err := lockByID(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if a == nil {
+			return ErrNotFound
+		}
+		if (a.FallbackState != FallbackPending && a.FallbackState != FallbackSending) || a.Suppressed {
+			return nil
+		}
+		c := &change{a: a, dirty: true}
+		if a.Status != StatusOpen {
+			// A sending one left by a stopped process is cancelled the same way.
+			a.FallbackState = FallbackPending
+			e.taken(c, now)
+			return c.save(ctx, tx)
+		}
+		a.FallbackState = FallbackSending
+		due = true
+		return c.save(ctx, tx)
+	})
+	return due, err
+}
+
+// FallbackDone records that backup notification of an alert was attempted and the addresses
+// it reached; the notifier calls it once the outcome is on the timeline. When the alert was
+// acknowledged or resolved while the messages were going out, those addresses get the
+// follow-up.
+func (e *Engine) FallbackDone(ctx context.Context, id string, sent []Notified) error {
+	var followUp *Alert
+	err := pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
+		followUp = nil
+		a, err := lockByID(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if a == nil {
+			return ErrNotFound
+		}
+		if a.FallbackState != FallbackPending && a.FallbackState != FallbackSending {
+			return nil
+		}
+		a.FallbackState, a.Notified = FallbackSent, sent
+		if a.Status != StatusOpen && len(sent) > 0 {
+			a.FollowUp = a.Status
+			t := e.now()
+			a.FollowUpTry = &t
+			cp := a.Clone()
+			followUp = &cp
+		}
+		return save(ctx, tx, a, nil)
+	})
+	if err == nil && followUp != nil {
+		e.notify.FollowUp(*followUp)
+	}
+	return err
+}
+
+// FollowUpDone records that the follow-up about event (acknowledged or resolved) was attempted.
+// A follow-up about a later event that became due meanwhile stays pending.
+func (e *Engine) FollowUpDone(ctx context.Context, id, event string) error {
 	return pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
 		a, err := lockByID(ctx, tx, id)
 		if err != nil {
@@ -819,10 +1177,10 @@ func (e *Engine) FallbackDone(ctx context.Context, id string) error {
 		if a == nil {
 			return ErrNotFound
 		}
-		if a.FallbackState != FallbackPending {
+		if a.FollowUp != event {
 			return nil
 		}
-		a.FallbackState = FallbackSent
+		a.FollowUp, a.FollowUpTry = "", nil
 		return save(ctx, tx, a, nil)
 	})
 }
@@ -833,14 +1191,18 @@ func (e *Engine) Note(ctx context.Context, id, kind, code string, args map[strin
 	return note(ctx, e.db, id, []Entry{{At: e.now(), Kind: kind, Code: code, Args: args}})
 }
 
-func (e *Engine) List(ctx context.Context, f Filter) (Page, error) { return list(ctx, e.db, f) }
+func (e *Engine) List(ctx context.Context, f Filter) (Page, error) {
+	p, err := list(ctx, e.db, f)
+	p.Counts.PDEnabled = e.policy().pdOn
+	return p, err
+}
 
 func (e *Engine) Get(ctx context.Context, id string) (Alert, []Entry, error) {
 	return get(ctx, e.db, id)
 }
 
-// Run ticks every 15 seconds until ctx ends. When the catalog changed, the active alerts are
-// routed again.
+// Run ticks every 15 seconds until ctx ends. When the catalog changed, the alerts that waited
+// for an item are bound to it and the active alerts are routed again.
 func (e *Engine) Run(ctx context.Context) {
 	t := time.NewTicker(15 * time.Second)
 	defer t.Stop()
@@ -854,6 +1216,9 @@ func (e *Engine) Run(ctx context.Context) {
 				slog.Error("alert engine tick failed", "err", err)
 			}
 			if v := e.st.Version(); v != routed {
+				if err := e.Reresolve(ctx); err != nil && ctx.Err() == nil {
+					slog.Error("alerts not resolved again", "err", err)
+				}
 				if err := e.Reroute(ctx); err != nil && ctx.Err() == nil {
 					slog.Error("alerts not routed again", "err", err)
 				} else {

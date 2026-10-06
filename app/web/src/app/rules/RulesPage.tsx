@@ -6,6 +6,8 @@ import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Banner, Button, Field, formatDate, Input, Modal, Segmented, Select, Switch, Textarea } from '../../ui'
 import { useSession } from '../session'
+import { Link } from '../../router'
+import { SourcesExplainer } from '../connectors/QuickConnect'
 import { strings } from './strings'
 import '../connectors/connectors.css'
 import './rules.css'
@@ -33,7 +35,7 @@ type Rule = {
   source_name?: string
   last_eval_at?: string
 }
-type Source = { id: string; name: string; url: string; credential_id?: string; credential_name?: string; skip_verify: boolean; rules: number }
+type Source = { id: string; name: string; url: string; credential_id?: string; credential_name?: string; skip_verify: boolean; rules: number; system: boolean; system_id?: string }
 type View = { rules: Rule[]; sources: Source[]; templates: Rule[]; ops: string[] }
 type Preview = { series: { ci: string; labels: Record<string, string>; value: number; match: boolean; title: string }[]; total: number; matched: number; error?: string }
 type Credential = { id: string; name: string; type: string }
@@ -44,7 +46,7 @@ export function RulesPage() {
   const t = useT(strings)
   const { can } = useSession()
   const editor = can('rules:edit')
-  const [tab, setTab] = useState<'rules' | 'sources'>('rules')
+  const [tab, setTab] = useState<'rules' | 'sources'>(() => (new URLSearchParams(window.location.search).get('tab') === 'sources' ? 'sources' : 'rules'))
   const [epoch, setEpoch] = useState(0)
   const view = useResource<View>('/api/rules', epoch)
   const [rule, setRule] = useState<Rule | 'new' | null>(null)
@@ -57,6 +59,7 @@ export function RulesPage() {
   const v = view.data
   return (
     <div className="stack">
+      <SourcesExplainer />
       <div className="row rl-head">
         <Segmented
           label={t('rl.tab.rules')}
@@ -82,7 +85,7 @@ export function RulesPage() {
       </div>
       <ErrorBanner error={view.error} strings={strings} />
       {v && tab === 'rules' && <RulesTable v={v} editor={editor} onOpen={setRule} onSources={() => setTab('sources')} />}
-      {v && tab === 'sources' && <SourcesTable v={v} editor={editor} onOpen={setSource} />}
+      {v && tab === 'sources' && <SourcesTable v={v} editor={editor} onOpen={setSource} onChanged={reload} />}
       {v && <RuleEditor value={rule} v={v} onClose={() => setRule(null)} onSaved={() => (setRule(null), reload())} />}
       <SourceEditor value={source} onClose={() => setSource(null)} onSaved={() => (setSource(null), reload())} />
     </div>
@@ -166,42 +169,70 @@ function RulesTable({ v, editor, onOpen, onSources }: { v: View; editor: boolean
   )
 }
 
-function SourcesTable({ v, editor, onOpen }: { v: View; editor: boolean; onOpen: (s: Source) => void }) {
+function SourcesTable({ v, editor, onOpen, onChanged }: { v: View; editor: boolean; onOpen: (s: Source) => void; onChanged: () => void }) {
   const t = useT(strings)
+  const { can } = useSession()
+  const merge = useAction()
+  const canMerge = editor && can('monitoring:edit')
+  const doMerge = (s: Source) =>
+    window.confirm(t(s.system_id ? 'ms.merge.confirm' : 'ms.merge.confirm.new', { name: s.name, n: s.rules })) &&
+    void merge.run(async () => {
+      await api('POST', `/api/metric-sources/${s.id}/merge`)
+      onChanged()
+    })
   if (v.sources.length === 0) return <p className="muted card rl-empty">{t('rl.empty.sources')}</p>
   return (
-    <div className="card cn-table-card">
-      <table className="cn-table rl-table">
-        <thead>
-          <tr>
-            <th>{t('ms.name')}</th>
-            <th>{t('ms.url')}</th>
-            <th>{t('ms.cred')}</th>
-            <th className="num">{t('ms.rules')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {v.sources.map((s) => (
-            <tr key={s.id}>
-              <td className="rl-name">
-                {editor ? (
-                  <button type="button" className="cn-link cn-name" onClick={() => onOpen(s)}>
-                    {s.name}
-                  </button>
-                ) : (
-                  <span className="cn-name">{s.name}</span>
-                )}
-              </td>
-              <td>
-                <code>{s.url}</code>
-              </td>
-              <td>{s.credential_name ?? <span className="muted">{t('ms.cred.none')}</span>}</td>
-              <td className="num">{s.rules}</td>
+    <>
+      <p className="muted">{t('ms.systems.hint')}</p>
+      <ErrorBanner error={merge.error} strings={strings} />
+      <div className="card cn-table-card">
+        <table className="cn-table rl-table">
+          <thead>
+            <tr>
+              <th>{t('ms.name')}</th>
+              <th>{t('ms.url')}</th>
+              <th>{t('ms.cred')}</th>
+              <th className="num">{t('ms.rules')}</th>
+              <th />
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {v.sources.map((s) => (
+              <tr key={s.id}>
+                <td className="rl-name">
+                  {s.system ? (
+                    <Link to={`/monitoring?system=${encodeURIComponent(s.id)}`} className="cn-name">
+                      {s.name}
+                    </Link>
+                  ) : editor ? (
+                    <button type="button" className="cn-link cn-name" onClick={() => onOpen(s)}>
+                      {s.name}
+                    </button>
+                  ) : (
+                    <span className="cn-name">{s.name}</span>
+                  )}
+                  <div className="rl-sub">
+                    <span className={`pill ${s.system ? 'pill-ok' : 'pill-off'}`}>{t(s.system ? 'ms.kind.system' : 'ms.kind.source')}</span>
+                  </div>
+                </td>
+                <td>
+                  <code>{s.url}</code>
+                </td>
+                <td>{s.credential_name ?? <span className="muted">{t('ms.cred.none')}</span>}</td>
+                <td className="num">{s.rules}</td>
+                <td className="num">
+                  {!s.system && canMerge && (
+                    <Button variant="ghost" busy={merge.busy} title={t('ms.merge.hint')} onClick={() => doMerge(s)}>
+                      {t(s.system_id ? 'ms.merge' : 'ms.merge.new')}
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   )
 }
 
@@ -339,7 +370,7 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
             <Select id={id} value={d.source_id} onChange={(e) => set({ source_id: e.target.value })}>
               {v.sources.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name}
+                  {s.system ? `${s.name} (${t('ms.kind.system')})` : s.name}
                 </option>
               ))}
             </Select>

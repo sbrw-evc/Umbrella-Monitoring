@@ -236,6 +236,7 @@ func (f CIFilter) matches(v CIView, q string) bool {
 	}
 	fields := []string{v.Name, v.Description, v.ID, v.Attrs.Site, v.Attrs.Tenant, v.Attrs.Parent, v.Attrs.Role, v.Attrs.Platform, v.Attrs.Serial}
 	fields = append(fields, v.IPs...)
+	fields = append(fields, v.Aliases...)
 	fields = append(fields, v.Tags...)
 	for _, o := range v.Owners {
 		fields = append(fields, o.Name, o.Username, o.Email)

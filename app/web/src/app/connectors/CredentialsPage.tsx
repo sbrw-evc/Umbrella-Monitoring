@@ -8,7 +8,7 @@ import { Link } from '../../router'
 import { Button, Field, formatDate, Input, Modal, Password, Select, Textarea } from '../../ui'
 import { useSession } from '../session'
 import { strings } from './strings'
-import { CREDENTIAL_KINDS, type Credential, type CredentialType } from './types'
+import { CREDENTIAL_KINDS, credentialUseLink, type Credential, type CredentialType, type CredentialUse } from './types'
 import './connectors.css'
 
 type Editing = { credential: Credential | null } | null
@@ -60,14 +60,7 @@ export function CredentialsPage() {
                   </td>
                   <td>{t(`cred.type.${c.type}`)}</td>
                   <td>
-                    {c.used_by.length === 0
-                      ? '—'
-                      : c.used_by.map((u, i) => (
-                          <span key={u.id}>
-                            {i > 0 && ', '}
-                            <Link to={`/connectors/${encodeURIComponent(u.id)}`}>{u.name}</Link>
-                          </span>
-                        ))}
+                    {c.used_by.length === 0 ? '—' : <UsedBy uses={c.used_by} />}
                   </td>
                   <td className="muted">
                     {formatDate(c.updated_at, locale, timezone)} · {c.updated_by}
@@ -88,6 +81,20 @@ export function CredentialsPage() {
         }}
       />
     </div>
+  )
+}
+
+function UsedBy({ uses }: { uses: CredentialUse[] }) {
+  const t = useT(strings)
+  return (
+    <>
+      {uses.map((u, i) => (
+        <span key={u.kind + u.id}>
+          {i > 0 && ', '}
+          <span className="muted">{t(`cred.use.${u.kind}`)}</span> <Link to={credentialUseLink(u)}>{u.name}</Link>
+        </span>
+      ))}
+    </>
   )
 }
 
@@ -193,7 +200,11 @@ function CredentialDialog({ editing, editable, onClose, onSaved }: { editing: Ed
           )}
         </Field>
       ))}
-      {existing && existing.used_by.length > 0 && <p className="hint">{t('cred.inUse')}</p>}
+      {existing && existing.used_by.length > 0 && (
+        <p className="hint">
+          {t('cred.inUse')} <UsedBy uses={existing.used_by} />
+        </p>
+      )}
       <ErrorBanner error={action.error} strings={strings} />
     </Modal>
   )

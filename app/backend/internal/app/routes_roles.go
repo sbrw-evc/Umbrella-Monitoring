@@ -21,6 +21,7 @@ func (a *App) registerRoles(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/roles/{id}", a.authed(a.can("roles:edit", a.updateRole)))
 	mux.HandleFunc("DELETE /api/roles/{id}", a.authed(a.can("roles:edit", a.deleteRole)))
 	mux.HandleFunc("PUT /api/roles/{id}/members", a.authed(a.can("roles:edit", a.addRoleMembers)))
+	mux.HandleFunc("PUT /api/roles/{id}/new-users", a.authed(a.can("roles:edit", a.setNewUserRole)))
 }
 
 func (a *App) listRoles(w http.ResponseWriter, r *http.Request) {
@@ -68,5 +69,10 @@ func (a *App) addRoleMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v, err := a.roles.AddMembers(current(r).user, r.PathValue("id"), in.UserIDs)
+	orgRespond(w, http.StatusOK, v, err)
+}
+
+func (a *App) setNewUserRole(w http.ResponseWriter, r *http.Request) {
+	v, err := a.roles.SetNewUserRole(current(r).user.Username, r.PathValue("id"))
 	orgRespond(w, http.StatusOK, v, err)
 }

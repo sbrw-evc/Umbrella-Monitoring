@@ -54,6 +54,8 @@ type WallboardView struct {
 	Services []TargetRef `json:"services"`
 	Teams    []TargetRef `json:"teams"`
 	Path     string      `json:"path"`
+	// InScope: the viewer may change the wallboard (its targets are within their scope).
+	InScope bool `json:"in_scope"`
 }
 
 type WallboardInput struct {
@@ -120,11 +122,13 @@ func nonNil(s []string) []string {
 	return s
 }
 
-func (s *WallboardService) List() []WallboardView {
+func (s *WallboardService) List(sc viewScope) []WallboardView {
 	out := []WallboardView{}
 	s.st.Read(func(d *store.Data) {
 		for _, w := range d.Wallboards {
-			out = append(out, s.view(d, w))
+			v := s.view(d, w)
+			v.InScope = sc.checkTargets(d, w.CIIDs, w.ServiceIDs, w.TeamIDs) == nil
+			out = append(out, v)
 		}
 	})
 	slices.SortFunc(out, func(a, b WallboardView) int {
@@ -259,7 +263,7 @@ func (in WallboardInput) apply(w *model.Wallboard) {
 	w.AllowedNetworks = in.AllowedNetworks
 }
 
-func (s *WallboardService) Create(actor string, in WallboardInput) (WallboardView, error) {
+func (s *WallboardService) Create(actor string, sc viewScope, in WallboardInput) (WallboardView, error) {
 	now := s.now()
 	var out WallboardView
 	var err error
@@ -267,16 +271,20 @@ func (s *WallboardService) Create(actor string, in WallboardInput) (WallboardVie
 		if err = s.check(d, "", &in); err != nil {
 			return
 		}
+		if err = sc.checkTargets(d, in.CIIDs, in.ServiceIDs, in.TeamIDs); err != nil {
+			return
+		}
 		w := &model.Wallboard{ID: d.NextID("TV"), CreatedBy: actor, CreatedAt: now, UpdatedBy: actor, UpdatedAt: now}
 		in.apply(w)
 		d.Wallboards[w.ID] = w
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "wallboard.create", Object: w.ID, Detail: w.Title})
 		out = s.view(d, w)
+		out.InScope = true
 	})
 	return out, err
 }
 
-func (s *WallboardService) Update(actor, id string, in WallboardInput) (WallboardView, error) {
+func (s *WallboardService) Update(actor string, sc viewScope, id string, in WallboardInput) (WallboardView, error) {
 	now := s.now()
 	var out WallboardView
 	err := ErrNotFound
@@ -288,18 +296,28 @@ func (s *WallboardService) Update(actor, id string, in WallboardInput) (Wallboar
 		if err = s.check(d, id, &in); err != nil {
 			return
 		}
+		if err = sc.covers(d, w.CIIDs, w.ServiceIDs, w.TeamIDs); err != nil {
+			return
+		}
+		if err = sc.checkTargets(d, in.CIIDs, in.ServiceIDs, in.TeamIDs); err != nil {
+			return
+		}
 		in.apply(w)
 		w.UpdatedBy, w.UpdatedAt = actor, now
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "wallboard.update", Object: w.ID, Detail: w.Title})
 		out = s.view(d, w)
+		out.InScope = true
 	})
 	return out, err
 }
 
-func (s *WallboardService) Delete(actor, id string) error {
+func (s *WallboardService) Delete(actor string, sc viewScope, id string) error {
 	err := ErrNotFound
 	s.st.Write(func(d *store.Data) {
 		if w := d.Wallboards[id]; w != nil {
+			if err = sc.covers(d, w.CIIDs, w.ServiceIDs, w.TeamIDs); err != nil {
+				return
+			}
 			delete(d.Wallboards, id)
 			d.AddAudit(store.AuditEntry{Actor: actor, Action: "wallboard.delete", Object: id, Detail: w.Title})
 			err = nil
@@ -309,13 +327,13 @@ func (s *WallboardService) Delete(actor, id string) error {
 }
 
 // Targets finds configuration items, services and teams by name for the wallboard editor.
-func (s *WallboardService) Targets(q string) map[string][]TargetRef {
-	out := (&MaintenanceService{st: s.st}).Targets(q)
+func (s *WallboardService) Targets(q string, sc viewScope) map[string][]TargetRef {
+	out := (&MaintenanceService{st: s.st}).Targets(q, sc)
 	q = strings.ToLower(strings.TrimSpace(q))
 	teams := []TargetRef{}
 	s.st.Read(func(d *store.Data) {
 		for _, t := range d.Teams {
-			if q == "" || strings.Contains(strings.ToLower(t.Name), q) {
+			if (q == "" || strings.Contains(strings.ToLower(t.Name), q)) && sc.hasTeam(d, t.ID) {
 				teams = append(teams, TargetRef{ID: t.ID, Name: t.Name})
 			}
 		}
@@ -413,8 +431,18 @@ type TVPayload struct {
 	More          bool         `json:"more"`
 }
 
-func boardFilter(w *model.Wallboard) alert.BoardFilter {
-	return alert.BoardFilter{CIIDs: w.CIIDs, ServiceIDs: w.ServiceIDs, TeamIDs: w.TeamIDs, Severities: w.Severities, Methods: w.Methods,
+// boardFilter: a team target matches the incidents routed to the team and the incidents of every
+// service the team owns or supports.
+func boardFilter(d *store.Data, w *model.Wallboard) alert.BoardFilter {
+	services := slices.Clone(w.ServiceIDs)
+	if len(w.TeamIDs) > 0 {
+		for _, id := range teamServiceIDs(d, w.TeamIDs) {
+			if !slices.Contains(services, id) {
+				services = append(services, id)
+			}
+		}
+	}
+	return alert.BoardFilter{CIIDs: w.CIIDs, ServiceIDs: services, TeamIDs: w.TeamIDs, Severities: w.Severities, Methods: w.Methods,
 		ShowAcknowledged: w.ShowAcknowledged, ShowSuppressed: w.ShowSuppressed, ResolvedMinutes: w.ResolvedMinutes,
 		Oldest: w.Sort == model.WallboardSortOldest}
 }
@@ -447,7 +475,9 @@ func (a *App) wallboardPayload(ctx context.Context, w *model.Wallboard) (TVPaylo
 	if a.alerts == nil || !a.ingestReady() {
 		return out, nil
 	}
-	page, err := a.alerts.Board(ctx, boardFilter(w))
+	var f alert.BoardFilter
+	a.deps.Store.Read(func(d *store.Data) { f = boardFilter(d, w) })
+	page, err := a.alerts.Board(ctx, f)
 	if err != nil {
 		return out, err
 	}
@@ -488,7 +518,7 @@ func addrString(ip netip.Addr) string {
 }
 
 func (a *App) listWallboards(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, wallboardList{Wallboards: a.wallboards.List(), ClientIP: addrString(a.proxies.ClientIP(r))})
+	httpx.JSON(w, http.StatusOK, wallboardList{Wallboards: a.wallboards.List(a.userScope(current(r).user)), ClientIP: addrString(a.proxies.ClientIP(r))})
 }
 
 func (a *App) getWallboard(w http.ResponseWriter, r *http.Request) {
@@ -497,7 +527,7 @@ func (a *App) getWallboard(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) wallboardTargets(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, a.wallboards.Targets(r.URL.Query().Get("q")))
+	httpx.JSON(w, http.StatusOK, a.wallboards.Targets(r.URL.Query().Get("q"), a.userScope(current(r).user)))
 }
 
 func (a *App) createWallboard(w http.ResponseWriter, r *http.Request) {
@@ -505,7 +535,7 @@ func (a *App) createWallboard(w http.ResponseWriter, r *http.Request) {
 	if !httpx.Decode(w, r, &in) {
 		return
 	}
-	out, err := a.wallboards.Create(current(r).user.Username, in)
+	out, err := a.wallboards.Create(current(r).user.Username, a.userScope(current(r).user), in)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -518,12 +548,12 @@ func (a *App) updateWallboard(w http.ResponseWriter, r *http.Request) {
 	if !httpx.Decode(w, r, &in) {
 		return
 	}
-	out, err := a.wallboards.Update(current(r).user.Username, r.PathValue("id"), in)
+	out, err := a.wallboards.Update(current(r).user.Username, a.userScope(current(r).user), r.PathValue("id"), in)
 	settingsRespond(w, out, err)
 }
 
 func (a *App) deleteWallboard(w http.ResponseWriter, r *http.Request) {
-	if err := a.wallboards.Delete(current(r).user.Username, r.PathValue("id")); err != nil {
+	if err := a.wallboards.Delete(current(r).user.Username, a.userScope(current(r).user), r.PathValue("id")); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -636,4 +666,20 @@ func (a *App) tvAsset(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(body)
+}
+
+// teamServiceIDs are the services the teams own or support, sorted.
+func teamServiceIDs(d *store.Data, teamIDs []string) []string {
+	in := map[string]bool{}
+	for _, id := range teamIDs {
+		in[id] = true
+	}
+	var out []string
+	for _, s := range d.Services {
+		if s.Involves(in) {
+			out = append(out, s.ID)
+		}
+	}
+	slices.Sort(out)
+	return out
 }

@@ -22,10 +22,11 @@ export type Person = { user_id: string; name: string; email?: string; telegram?:
 export type Route = { services: Ref[]; team?: Ref; people: Person[]; owners: Person[]; via: 'service' | 'ci_owners' | 'none'; at: string }
 
 export type PD = {
-  state: 'pending' | 'accepted' | 'acked' | 'failed' | 'skipped'
+  state: 'pending' | 'accepted' | 'acked' | 'failed' | 'skipped' | 'off'
   key: string
   route?: string
   error?: string
+  error_code?: string
   retry?: string
   attempt_at?: string
   incident_id?: string
@@ -54,10 +55,14 @@ export type Incident = {
   acked_at?: string
   suppressed: boolean
   maintenance_id?: string
+  // excluded: the host is marked «Не является КЕ» on the monitoring systems page.
+  excluded?: boolean
   route: Route
   pd: PD
   fallback: boolean
   fallback_at?: string
+  fallback_state?: 'pending' | 'sending' | 'sent'
+  follow_up?: 'acknowledged' | 'resolved'
   related_id?: string
 }
 
@@ -70,13 +75,36 @@ export type Counts = {
   fallback: number
   suppressed: number
   unbound: number
+  // PagerDuty is turned on; while it is off its tile and column are hidden.
+  pd_enabled: boolean
 }
 
 export type Page = { alerts: Incident[]; counts: Counts; more: boolean }
 
 export type Entry = { id: number; at: string; kind: string; code: string; args?: Record<string, string>; author?: string }
 
-export type Detail = { alert: Incident; timeline: Entry[]; grafana_url?: string; connectors: Record<string, string> }
+export type CardCI = { id: string; name: string; kind: string; imported: boolean; netbox_url?: string; aliases: string[] }
+
+export type CardService = { id: string; name: string; links: { title: string; url: string }[] }
+
+export type CardMaintenance = { id: string; title: string; start: string; end: string }
+
+export type Detail = {
+  alert: Incident
+  timeline: Entry[]
+  grafana_url?: string
+  connectors: Record<string, string>
+  // What the catalog has on the item, the services and the maintenance window of the incident.
+  ci?: CardCI
+  services?: CardService[]
+  maintenance?: CardMaintenance
+}
+
+// firing counts the sources of an incident that still fire: resolving it by hand while they do
+// opens it again when the next event comes within the reopen window.
+export function firing(a: Incident) {
+  return Object.values(a.sources).filter((s) => s.status === 'firing').length
+}
 
 export type Flag = '' | 'pd' | 'fallback' | 'suppressed'
 

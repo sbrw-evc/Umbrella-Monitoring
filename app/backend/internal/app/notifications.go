@@ -21,6 +21,8 @@ import (
 const (
 	notifySecretPath = "notify"
 	maxExtraTargets  = 50
+	// maxFallbackDelay bounds the wait of backup notification: an hour.
+	maxFallbackDelay = 3600
 )
 
 // NotificationsService keeps the settings of backup notification; the SMTP password and the
@@ -43,17 +45,27 @@ type NotifyView struct {
 	// Links: acknowledgement links are put in messages (the public address is set and the
 	// signing key is ready).
 	Links bool `json:"links"`
+	// PDEnabled: PagerDuty is on; AutoDelaySeconds is the wait of backup notification when no
+	// delay is set (DelaySeconds is null): 2 minutes with PagerDuty, none without it.
+	PDEnabled        bool `json:"pd_enabled"`
+	AutoDelaySeconds int  `json:"auto_delay_seconds"`
 }
 
 func (s *NotificationsService) View() NotifyView {
 	var n model.Notify
 	var pub string
+	var pdOn bool
 	s.st.Read(func(d *store.Data) {
 		n = d.Settings.Alerting.Notify
 		n.ExtraEmails = slices.Clone(n.ExtraEmails)
 		n.ExtraTelegram = slices.Clone(n.ExtraTelegram)
 		pub = d.Settings.Alerting.PublicURL
+		pdOn = d.Settings.Alerting.PagerDuty.Enabled
 	})
+	auto := 0
+	if pdOn {
+		auto = int(alert.DefaultFallbackAfter.Seconds())
+	}
 	if n.ExtraEmails == nil {
 		n.ExtraEmails = []string{}
 	}
@@ -63,8 +75,11 @@ func (s *NotificationsService) View() NotifyView {
 	if n.Email.Security == "" {
 		n.Email.Security = model.SMTPStartTLS
 	}
+	if n.MinSeverity == "" {
+		n.MinSeverity = alert.DefaultFallbackSeverity
+	}
 	return NotifyView{Notify: n, HasPassword: n.Email.PasswordRef != "", HasToken: n.Telegram.TokenRef != "", PublicURL: pub,
-		Links: pub != "" && s.n.Links() != nil}
+		Links: pub != "" && s.n.Links() != nil, PDEnabled: pdOn, AutoDelaySeconds: auto}
 }
 
 type EmailInput struct {
@@ -90,6 +105,10 @@ type NotifyInput struct {
 	Telegram      TelegramInput `json:"telegram"`
 	ExtraEmails   []string      `json:"extra_emails"`
 	ExtraTelegram []string      `json:"extra_telegram"`
+	// DelaySeconds: null is automatic (2 minutes with PagerDuty, at once without it), 0 at once.
+	DelaySeconds *int `json:"delay_seconds"`
+	// MinSeverity: empty is error.
+	MinSeverity string `json:"min_severity"`
 }
 
 func cleanList(in []string, valid func(string) bool, code string) ([]string, error) {
@@ -145,6 +164,12 @@ func (s *NotificationsService) Save(ctx context.Context, actor string, in Notify
 	if err != nil {
 		return NotifyView{}, err
 	}
+	if in.DelaySeconds != nil && (*in.DelaySeconds < 0 || *in.DelaySeconds > maxFallbackDelay) {
+		return NotifyView{}, invalid("delay_invalid", nil)
+	}
+	if in.MinSeverity != "" && alert.SeverityRank(in.MinSeverity) == 0 {
+		return NotifyView{}, invalid("severity_invalid", nil)
+	}
 	token := strings.TrimSpace(in.Telegram.Token)
 	if in.Telegram.Enabled && token == "" && n.Telegram.TokenRef == "" {
 		return NotifyView{}, invalid("token_required", nil)
@@ -170,13 +195,21 @@ func (s *NotificationsService) Save(ctx context.Context, actor string, in Notify
 	}
 	n.Telegram = model.TelegramChannel{Enabled: in.Telegram.Enabled, TokenRef: tokenRef, APIURL: api}
 	n.ExtraEmails, n.ExtraTelegram = extraEmails, extraTelegram
+	n.DelaySeconds, n.MinSeverity = in.DelaySeconds, in.MinSeverity
 	now := time.Now().UTC()
 	n.UpdatedAt, n.UpdatedBy = &now, actor
 	s.st.Write(func(d *store.Data) {
 		d.Settings.Alerting.Notify = n
-		d.AddAudit(store.AuditEntry{Actor: actor, Action: "settings.notify", Detail: fmt.Sprintf("email=%v telegram=%v", n.Email.Enabled, n.Telegram.Enabled)})
+		d.AddAudit(store.AuditEntry{Actor: actor, Action: "settings.notify", Detail: fmt.Sprintf("email=%v telegram=%v delay=%s min_severity=%s", n.Email.Enabled, n.Telegram.Enabled, delayText(n.DelaySeconds), n.MinSeverity)})
 	})
 	return s.View(), nil
+}
+
+func delayText(v *int) string {
+	if v == nil {
+		return "auto"
+	}
+	return fmt.Sprintf("%ds", *v)
 }
 
 func validFrom(v string) bool {

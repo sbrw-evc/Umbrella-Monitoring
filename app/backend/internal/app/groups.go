@@ -46,8 +46,9 @@ func NewGroupsService(st *store.Store, secrets Secrets, dir Directory) *GroupsSe
 }
 
 type GroupMappedUsers struct {
-	Roles int `json:"roles"`
-	Teams int `json:"teams"`
+	Roles  int `json:"roles"`
+	Teams  int `json:"teams"`
+	Scopes int `json:"scopes"`
 }
 
 type GroupsView struct {
@@ -80,8 +81,11 @@ func groupsView(d *store.Data) GroupsView {
 		if u.MappedRole != "" && u.Role == u.MappedRole {
 			out.Mapped.Roles++
 		}
-		if u.MappedTeam != "" && u.TeamID == u.MappedTeam {
+		if slices.ContainsFunc(u.MappedTeams, u.InTeam) {
 			out.Mapped.Teams++
+		}
+		if u.MappedScope != "" && u.ScopeMode == u.MappedScope {
+			out.Mapped.Scopes++
 		}
 	}
 	return out
@@ -158,8 +162,11 @@ func normalMapping(d *store.Data, m model.GroupMapping) (model.GroupMapping, err
 	if len([]rune(m.Label)) > maxMappingLabel || strings.ContainsFunc(m.Label, unicode.IsControl) {
 		return m, errors.New("the label is too long")
 	}
-	if m.RoleID == "" && m.TeamID == "" {
-		return m, errors.New("choose a role, a team or both")
+	if m.Scope != "" && m.Scope != model.ScopeAll && m.Scope != model.ScopeTeams {
+		return m, errors.New("the scope must be all or teams")
+	}
+	if m.RoleID == "" && m.TeamID == "" && m.Scope == "" {
+		return m, errors.New("choose a role, a team, a scope or several")
 	}
 	if m.RoleID != "" && d.Roles[m.RoleID] == nil {
 		return m, fmt.Errorf("unknown role %q", m.RoleID)
@@ -180,16 +187,17 @@ func dropMappingRefs(d *store.Data, roleID, teamID string) {
 		if teamID != "" && m.TeamID == teamID {
 			m.TeamID = ""
 		}
-		if m.RoleID != "" || m.TeamID != "" {
+		if m.RoleID != "" || m.TeamID != "" || m.Scope != "" {
 			rows = append(rows, m)
 		}
 	}
 	d.Settings.Groups.Mappings = rows
 }
 
-// matchMappings finds the role and the team the table gives to members of groups. For each, the
-// first matching row in table order wins; rows naming a role or team that no longer exists are skipped.
-func matchMappings(d *store.Data, source string, groups []string) (role, team string) {
+// matchMappings finds the role and the teams the table gives to members of groups. For the role
+// the first matching row in table order wins; every matching row adds its team. Rows naming a
+// role or team that no longer exists are skipped.
+func matchMappings(d *store.Data, source string, groups []string) (role string, teams []string, scope string) {
 	in := make(map[string]bool, len(groups))
 	for _, g := range groups {
 		if source == model.SourceLDAP {
@@ -204,42 +212,61 @@ func matchMappings(d *store.Data, source string, groups []string) (role, team st
 		if role == "" && m.RoleID != "" && d.Roles[m.RoleID] != nil {
 			role = m.RoleID
 		}
-		if team == "" && m.TeamID != "" && d.Teams[m.TeamID] != nil {
-			team = m.TeamID
+		if m.TeamID != "" && d.Teams[m.TeamID] != nil && !slices.Contains(teams, m.TeamID) {
+			teams = append(teams, m.TeamID)
+		}
+		if scope == "" && m.Scope != "" {
+			scope = m.Scope
 		}
 	}
-	return role, team
+	slices.Sort(teams)
+	return role, teams, scope
 }
 
-// assignFromGroups sets the role and the team of a directory user from the administrators group and
-// the mapping table and describes what changed. The administrators group wins over the table.
-// A mapped value replaces whatever was set by hand; when no row matches any more, a value the
-// table gave is withdrawn unless it was changed by hand since. When the groups are unknown (the
-// directory could not list them) only the administrators group is applied.
+// assignFromGroups sets the role and the teams of a directory user from the administrators group
+// and the mapping table and describes what changed. The administrators group wins over the table.
+// A mapped role replaces whatever was set by hand; when no row gives it any more, it is withdrawn
+// unless it was changed by hand since. Mapped teams are added to the teams set by hand; a team
+// the table gave and gives no more is withdrawn. When the groups are unknown (the directory
+// could not list them) only the administrators group is applied.
 func assignFromGroups(d *store.Data, u *model.User, source string, admin bool, groups []string, known bool) []string {
-	var mRole, mTeam string
+	var mRole, mScope string
+	var mTeams []string
 	if known {
-		mRole, mTeam = matchMappings(d, source, groups)
+		mRole, mTeams, mScope = matchMappings(d, source, groups)
 	}
-	role, team := u.Role, u.TeamID
+	scope := u.ScopeMode
+	switch {
+	case mScope != "":
+		scope = mScope
+	case known && u.MappedScope != "" && scope == u.MappedScope:
+		scope = model.ScopeAll
+	}
+	role := u.Role
 	switch {
 	case admin:
 		role = model.RoleAdmin
 	case mRole != "":
 		role = mRole
 	case role == "" || role == model.RoleAdmin || d.Roles[role] == nil:
-		role = model.RoleUser
+		role = d.NewUserRole()
 	case known && u.MappedRole != "" && role == u.MappedRole:
-		role = model.RoleUser
+		role = d.NewUserRole()
 	}
-	switch {
-	case mTeam != "":
-		team = mTeam
-	case known && u.MappedTeam != "" && team == u.MappedTeam:
-		team = ""
+	var teams []string
+	for _, t := range u.TeamIDs {
+		if !known || slices.Contains(mTeams, t) || !slices.Contains(u.MappedTeams, t) {
+			teams = append(teams, t)
+		}
 	}
+	for _, t := range mTeams {
+		if !slices.Contains(teams, t) {
+			teams = append(teams, t)
+		}
+	}
+	slices.Sort(teams)
 	if known {
-		u.MappedRole, u.MappedTeam = "", mTeam
+		u.MappedRole, u.MappedTeams, u.MappedScope = "", mTeams, mScope
 		if !admin {
 			u.MappedRole = mRole
 		}
@@ -249,9 +276,13 @@ func assignFromGroups(d *store.Data, u *model.User, source string, admin bool, g
 		changes = append(changes, "role "+userOr(u.Role, "none")+" → "+role)
 		u.Role = role
 	}
-	if team != u.TeamID {
-		changes = append(changes, "team "+userOr(u.TeamID, "none")+" → "+userOr(team, "none"))
-		u.TeamID = team
+	if scope != u.ScopeMode && !(scope == model.ScopeAll && u.ScopeMode == "") {
+		changes = append(changes, "scope "+userOr(u.ScopeMode, model.ScopeAll)+" → "+scope)
+		u.ScopeMode = scope
+	}
+	if !slices.Equal(teams, u.TeamIDs) && (len(teams) > 0 || len(u.TeamIDs) > 0) {
+		changes = append(changes, "teams "+userOr(strings.Join(u.TeamIDs, " "), "none")+" → "+userOr(strings.Join(teams, " "), "none"))
+		u.TeamIDs = teams
 	}
 	return changes
 }

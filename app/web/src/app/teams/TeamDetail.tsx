@@ -173,7 +173,10 @@ export function TeamDetail({
         title={t('teams.members.addTo', { team: team.name })}
         users={candidates}
         exclude={current}
-        note={(u) => (u.team_id && index.byId.has(u.team_id) ? t('teams.members.from', { team: index.path(u.team_id) }) : undefined)}
+        note={(u) => {
+          const other = (u.team_ids ?? []).filter((id) => index.byId.has(id)).map((id) => index.path(id))
+          return other.length ? t('teams.members.from', { team: other.join(', ') }) : undefined
+        }}
         action={members}
         confirmLabel={t('teams.members.confirm')}
         onClose={() => setPicking(false)}

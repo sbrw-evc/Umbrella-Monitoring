@@ -37,9 +37,11 @@ type RoleInput struct {
 
 type RoleView struct {
 	model.Role
-	AllPermissions bool        `json:"all_permissions"`
-	MemberCount    int         `json:"member_count"`
-	Members        []OrgMember `json:"members"`
+	AllPermissions bool `json:"all_permissions"`
+	// NewUsers: accounts created by a directory or NetBox without a mapped role get this role.
+	NewUsers    bool        `json:"new_users"`
+	MemberCount int         `json:"member_count"`
+	Members     []OrgMember `json:"members"`
 }
 
 type RolesService struct {
@@ -57,7 +59,7 @@ func (s *RolesService) List() []RoleView {
 		members := roleMembers(d)
 		out = make([]RoleView, 0, len(d.Roles))
 		for _, r := range d.Roles {
-			out = append(out, roleView(r, members[r.ID]))
+			out = append(out, roleView(d, r, members[r.ID]))
 		}
 	})
 	slices.SortFunc(out, func(x, y RoleView) int {
@@ -80,7 +82,7 @@ func (s *RolesService) Get(id string) (RoleView, error) {
 	err := ErrNotFound
 	s.st.Read(func(d *store.Data) {
 		if r := d.Roles[id]; r != nil {
-			out, err = roleView(r, roleMembers(d)[id]), nil
+			out, err = roleView(d, r, roleMembers(d)[id]), nil
 		}
 	})
 	return out, err
@@ -108,7 +110,7 @@ func (s *RolesService) Create(actor string, in RoleInput) (RoleView, error) {
 		r.CreatedAt, r.UpdatedAt = s.now(), s.now()
 		d.Roles[r.ID] = r
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "role.create", Object: r.ID, Detail: describeRole(r)})
-		out = roleView(r, nil)
+		out = roleView(d, r, nil)
 	})
 	return out, err
 }
@@ -141,7 +143,7 @@ func (s *RolesService) Update(actor, id string, in RoleInput) (RoleView, error) 
 			*cur = next
 			d.AddAudit(store.AuditEntry{Actor: actor, Action: "role.update", Object: id, Detail: detail})
 		}
-		out, err = roleView(cur, roleMembers(d)[id]), nil
+		out, err = roleView(d, cur, roleMembers(d)[id]), nil
 	})
 	return out, err
 }
@@ -177,6 +179,9 @@ func (s *RolesService) Delete(actor model.User, id, reassignTo string) error {
 		}
 		delete(d.Roles, id)
 		dropMappingRefs(d, id, "")
+		if d.Settings.NewUserRole == id {
+			d.Settings.NewUserRole = ""
+		}
 		detail := r.Name
 		if len(members) > 0 {
 			detail = fmt.Sprintf("%s; %d member(s) moved to %s", r.Name, len(members), target.Name)
@@ -212,7 +217,7 @@ func (s *RolesService) AddMembers(actor model.User, id string, userIDs []string)
 		if len(moved) > 0 {
 			d.AddAudit(store.AuditEntry{Actor: actor.Username, Action: "role.members", Object: id, Detail: r.Name + ": " + usernames(moved)})
 		}
-		out = roleView(r, roleMembers(d)[id])
+		out = roleView(d, r, roleMembers(d)[id])
 	})
 	return out, err
 }
@@ -306,8 +311,8 @@ func roleMembers(d *store.Data) map[string][]OrgMember {
 	return out
 }
 
-func roleView(r *model.Role, members []OrgMember) RoleView {
-	v := RoleView{Role: *r, Members: slices.Clone(members), MemberCount: len(members)}
+func roleView(d *store.Data, r *model.Role, members []OrgMember) RoleView {
+	v := RoleView{Role: *r, Members: slices.Clone(members), MemberCount: len(members), NewUsers: d.NewUserRole() == r.ID}
 	if v.Members == nil {
 		v.Members = []OrgMember{}
 	}
@@ -358,4 +363,29 @@ func diffRole(cur, next *model.Role) string {
 		parts = append(parts, "revoked "+strings.Join(removed, ", "))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// SetNewUserRole chooses the role of accounts a directory sign-in or synchronization or NetBox
+// creates without a mapped role. The administrator role cannot be chosen; existing users keep
+// their roles.
+func (s *RolesService) SetNewUserRole(actor, id string) (RoleView, error) {
+	var out RoleView
+	err := ErrNotFound
+	s.st.Write(func(d *store.Data) {
+		r := d.Roles[id]
+		if r == nil {
+			return
+		}
+		if id == model.RoleAdmin {
+			err = invalid("new_user_role_admin", errors.New("new users cannot be administrators"))
+			return
+		}
+		err = nil
+		if d.Settings.NewUserRole != id {
+			d.Settings.NewUserRole = id
+			d.AddAudit(store.AuditEntry{Actor: actor, Action: "roles.new_users", Object: id, Detail: r.Name})
+		}
+		out = roleView(d, r, roleMembers(d)[id])
+	})
+	return out, err
 }

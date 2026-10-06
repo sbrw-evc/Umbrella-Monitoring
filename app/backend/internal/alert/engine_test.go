@@ -21,6 +21,13 @@ type recorder struct {
 	mu       sync.Mutex
 	cmds     []alert.Command
 	fallback []alert.Alert
+	followUp []alert.Alert
+}
+
+func (r *recorder) FollowUp(a alert.Alert) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.followUp = append(r.followUp, a)
 }
 
 func (r *recorder) Send(c alert.Command) {
@@ -51,10 +58,10 @@ func (c *clock) advance(d time.Duration) { c.t = c.t.Add(d) }
 func catalog() *store.Store {
 	st := store.New()
 	st.Write(func(d *store.Data) {
-		d.Users["U-1"] = &model.User{ID: "U-1", Username: "lead", Name: "Lead One", TeamID: "T-2", Profile: model.Profile{Email: "lead@example.com"}, Telegram: "1001"}
-		d.Users["U-2"] = &model.User{ID: "U-2", Username: "eng", Name: "Engineer Two", TeamID: "T-2", Profile: model.Profile{Email: "eng@example.com"}}
+		d.Users["U-1"] = &model.User{ID: "U-1", Username: "lead", Name: "Lead One", TeamIDs: []string{"T-2"}, Profile: model.Profile{Email: "lead@example.com"}, Telegram: "1001"}
+		d.Users["U-2"] = &model.User{ID: "U-2", Username: "eng", Name: "Engineer Two", TeamIDs: []string{"T-2"}, Profile: model.Profile{Email: "eng@example.com"}}
 		d.Users["U-3"] = &model.User{ID: "U-3", Username: "owner", Name: "Owner Three", Profile: model.Profile{Email: "owner@example.com"}}
-		d.Users["U-4"] = &model.User{ID: "U-4", Username: "gone", Name: "Gone", TeamID: "T-2", Disabled: true}
+		d.Users["U-4"] = &model.User{ID: "U-4", Username: "gone", Name: "Gone", TeamIDs: []string{"T-2"}, Disabled: true}
 		d.Teams["T-1"] = &model.Team{ID: "T-1", Name: "Platform"}
 		d.Teams["T-2"] = &model.Team{ID: "T-2", Name: "Payments SRE", ParentID: "T-1", LeadID: "U-1"}
 		d.Teams["T-3"] = &model.Team{ID: "T-3", Name: "Empty", ParentID: "T-2"}
@@ -68,6 +75,7 @@ func catalog() *store.Store {
 			Status: model.ServiceActive, CIIDs: []string{"CI-1", "CI-2"}}
 		d.Services["S-2"] = &model.Service{ID: "S-2", Name: "Reports", OwnerTeamID: "T-3", Criticality: model.CriticalityLow,
 			Status: model.ServiceActive, CIIDs: []string{"CI-1"}}
+		d.Settings.Alerting.PagerDuty.Enabled = true
 	})
 	return st
 }
@@ -244,6 +252,68 @@ func TestUnknownItemIsBoundLater(t *testing.T) {
 	list := active(t, e)
 	if len(list) != 1 || list[0].ID != a.ID || list[0].CIID != "CI-9" || list[0].Route.Team == nil {
 		t.Fatalf("the same alert is bound to the item: %+v", list)
+	}
+}
+
+func TestBindUnknownNow(t *testing.T) {
+	ctx := context.Background()
+	e, st, rec, _ := setup(t)
+	e.Ingest(ctx, []alert.Incoming{
+		ev("CON-1", "a", "edge-07:9100", "ping", "critical", "firing"),
+		ev("CON-1", "b", "edge-07:9100", "disk", "warning", "firing"),
+		ev("CON-1", "c", "other-host", "ping", "critical", "firing"),
+	})
+	rec.take()
+	if bound, err := e.BindUnknown(ctx, "admin"); err != nil || len(bound) != 0 {
+		t.Fatalf("nothing to bind yet: %v %v", bound, err)
+	}
+
+	// The event name becomes an alias of an item already in a service: both alerts of the name
+	// are bound and routed at once, without waiting for another event.
+	st.Write(func(d *store.Data) { d.ConfigItems["CI-2"].Aliases = []string{"edge-07:9100"} })
+	bound, err := e.BindUnknown(ctx, "admin")
+	if err != nil || len(bound) != 2 {
+		t.Fatalf("bound = %v, %v", bound, err)
+	}
+	p, _ := e.List(ctx, alert.Filter{Status: "active", CIID: "CI-2"})
+	if len(p.Alerts) != 2 || p.Alerts[0].Route.Team == nil || p.Alerts[0].Route.Team.ID != "T-2" || p.Alerts[0].CIName != "app-01" {
+		t.Fatalf("bound alerts = %+v", p.Alerts)
+	}
+	_, entries, _ := e.Get(ctx, p.Alerts[0].ID)
+	codes := map[string]int{}
+	for _, en := range entries {
+		codes[en.Code]++
+	}
+	if codes["ci_bound"] != 1 || codes["routed"] != 1 {
+		t.Errorf("timeline = %v", codes)
+	}
+
+	// Later events under the alias fold into the same alert.
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "edge-07:9100", "ping", "critical", "firing")})
+	if p2, _ := e.List(ctx, alert.Filter{Status: "active", CIID: "CI-2"}); len(p2.Alerts) != 2 {
+		t.Errorf("future events match the alias: %+v", p2.Alerts)
+	}
+	if list := active(t, e); len(list) != 3 {
+		t.Errorf("no new alert: %d", len(list))
+	}
+
+	// An alert of a name that turns out to be an item that already has an alert of the signal
+	// is merged into it.
+	e.Ingest(ctx, []alert.Incoming{ev("CON-2", "x", "lonely", "ping", "error", "firing")})
+	rec.take()
+	st.Write(func(d *store.Data) { d.ConfigItems["CI-3"].Aliases = []string{"other-host"} })
+	if bound, err = e.BindUnknown(ctx, ""); err != nil || len(bound) != 1 {
+		t.Fatalf("merge = %v %v", bound, err)
+	}
+	p, _ = e.List(ctx, alert.Filter{Status: "active", CIID: "CI-3"})
+	if len(p.Alerts) != 1 || len(p.Alerts[0].Sources) != 2 || p.Alerts[0].Severity != "critical" {
+		t.Fatalf("merged = %+v", p.Alerts)
+	}
+	if list := active(t, e); len(list) != 3 {
+		t.Errorf("the merged alert is resolved: %d", len(list))
+	}
+	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDResolve {
+		t.Errorf("the merged alert is resolved in PagerDuty: %+v", cmds)
 	}
 }
 
@@ -572,7 +642,7 @@ func TestFallbackSurvivesRestart(t *testing.T) {
 	if len(rec.fallback) != 1 || rec.fallback[0].ID != a.ID {
 		t.Fatalf("handed over again after the restart: %+v", rec.fallback)
 	}
-	if err := e2.FallbackDone(ctx, a.ID); err != nil {
+	if err := e2.FallbackDone(ctx, a.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	c.advance(2 * alert.DefaultFallbackRetry)

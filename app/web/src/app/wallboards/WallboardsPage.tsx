@@ -88,9 +88,9 @@ export function WallboardsPage() {
             <BoardCard
               key={w.id}
               w={w}
-              editor={editor}
+              editor={editor && w.in_scope !== false}
               busy={act.busy}
-              onEdit={() => (editor ? setEditing(w) : setViewing(w))}
+              onEdit={() => (editor && w.in_scope !== false ? setEditing(w) : setViewing(w))}
               onPreview={() => setPreview(w)}
               onCopy={() => void copy(w)}
               onDelete={() => remove(w)}

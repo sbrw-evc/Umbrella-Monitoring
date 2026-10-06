@@ -40,6 +40,7 @@ export type CI = {
   description: string
   source: 'netbox' | 'local'
   ips: string[]
+  aliases?: string[]
   tags: string[]
   attrs: Attrs
   netbox?: NetBoxRef

@@ -185,3 +185,66 @@
   text-align: left;
   white-space: normal;
 }
+
+/* The incident card leads to the catalog: actions, the forms it switches to, service links. */
+.inc-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.inc-form h3 {
+  margin: 0;
+}
+
+.inc-form-actions {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.inc-pick {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.inc-pick-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.inc-pick-item:hover,
+.inc-pick-item.on {
+  background: var(--accent-soft);
+}
+
+.inc-pick-item.on .cn-name {
+  font-weight: 600;
+}
+
+.inc-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.inc-links a svg,
+.inc-detail a svg {
+  margin-left: 3px;
+  vertical-align: -2px;
+}
+
+.inc-bulk-list {
+  margin: 0;
+  padding-left: 18px;
+}

@@ -59,6 +59,18 @@ CREATE TABLE IF NOT EXISTS alert_keys (
 );
 `
 
+// pdOffMigration: earlier versions marked every alert "failed" while PagerDuty was turned off
+// and put the English error on the timeline. Such alerts were never meant for PagerDuty: they
+// are "off", and the false failures are taken off the timeline. It runs at every start and
+// finds nothing once done.
+const pdOffMigration = `
+UPDATE alerts SET pd_state = 'off', attention = (status <> 'resolved'),
+	doc = jsonb_set(doc, '{pd}', ((doc->'pd') - 'error' - 'retry') || '{"state": "off"}'::jsonb)
+WHERE pd_state = 'failed' AND doc->'pd'->>'error' = 'PagerDuty is not enabled';
+DELETE FROM alert_timeline WHERE kind = 'pagerduty' AND code = 'pd_failed'
+	AND 'PagerDuty is not enabled' IN (args->>'error', args->>'detail');
+`
+
 // lockKey serializes folding events into alerts between workers and Umbrella instances, so
 // two events of the same item and signal never open two alerts.
 const lockKey = 0x756d622d616c7274
@@ -70,6 +82,9 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 		if _, err := tx.Exec(ctx, schema); err != nil {
 			return fmt.Errorf("create alert tables: %w", err)
+		}
+		if _, err := tx.Exec(ctx, pdOffMigration); err != nil {
+			return fmt.Errorf("mark alerts not sent to a disabled PagerDuty: %w", err)
 		}
 		return nil
 	})
@@ -166,7 +181,7 @@ func searchText(a *Alert) string {
 	return strings.ToLower(strings.Join(parts, " "))
 }
 
-func attention(a *Alert) bool { return Active(a.Status) || a.PD.Retry != "" }
+func attention(a *Alert) bool { return Active(a.Status) || a.PD.Retry != "" || a.FollowUp != "" }
 
 // save writes the alert and appends the timeline entries.
 func save(ctx context.Context, tx pgx.Tx, a *Alert, entries []Entry) error {
@@ -235,6 +250,8 @@ type Counts struct {
 	Fallback     int            `json:"fallback"`
 	Suppressed   int            `json:"suppressed"`
 	Unbound      int            `json:"unbound"`
+	// PDEnabled: PagerDuty is turned on; while it is off the interface hides what is about it.
+	PDEnabled bool `json:"pd_enabled"`
 }
 
 type Page struct {

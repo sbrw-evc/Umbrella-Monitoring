@@ -93,6 +93,11 @@ export function RolesPage() {
                   {dirty(r) && <span className="roles-dot" title={t('roles.unsaved')} />}
                 </span>
                 <span className="roles-item-meta">
+                  {r.new_users && (
+                    <span className="pill pill-ok" title={t('roles.newUsers.on')}>
+                      {t('roles.newUsers.short')}
+                    </span>
+                  )}
                   {r.system && <span className="pill pill-off">{t('roles.system')}</span>}
                   <span className="org-count" title={t('roles.members.count')}>
                     <Users size={13} aria-hidden />
@@ -129,6 +134,7 @@ export function RolesPage() {
                 onMoved={(target, ids) => afterChange(target === user.role || ids.includes(user.id))}
                 onDuplicate={() => setCreating({ source: role.id })}
                 onDelete={() => setDeleting(role)}
+                onNewUsers={reload}
               />
             </motion.div>
           )}
