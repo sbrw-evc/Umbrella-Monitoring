@@ -119,6 +119,13 @@
   font-size: 12.5px;
 }
 
+.usr-names .usr-scope {
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .usr-pill-ok {
   background: var(--ok-soft);
   color: var(--ok);

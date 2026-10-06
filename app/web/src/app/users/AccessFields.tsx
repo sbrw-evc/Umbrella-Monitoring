@@ -1,10 +1,12 @@
 import { useMemo } from 'react'
 import { useT } from '../../i18n'
 import { Field, Select } from '../../ui'
+import { MultiPicker } from '../services/Pickers'
 import { useSession } from '../session'
 import { roleLabel } from '../types'
-import { adminOf, teamOptions, type Refs } from './model'
+import { adminOf, teamOptions, type Refs, type ScopeService } from './model'
 import { strings } from './strings'
+import '../services/services.css'
 
 export type Access = { role_id: string; team_id: string }
 
@@ -88,5 +90,34 @@ export function AccessFields({
         {(id) => <TeamSelect id={id} refs={refs} value={value.team_id} onChange={(team_id) => onChange({ ...value, team_id })} emptyLabel={t('usr.noTeam')} />}
       </Field>
     </div>
+  )
+}
+
+/** ScopeField picks the business services whose incidents the user sees; none means all. */
+export function ScopeField({
+  refs,
+  value,
+  known,
+  admin,
+  onChange,
+}: {
+  refs: Refs
+  value: string[]
+  known?: ScopeService[]
+  admin: boolean
+  onChange: (ids: string[]) => void
+}) {
+  const t = useT(strings)
+  const names = useMemo(() => new Map(refs.services.map((s) => [s.id, s.name])), [refs.services])
+  const options = useMemo(() => refs.services.map((s) => ({ id: s.id, label: s.name })), [refs.services])
+  const labelOf = (id: string) => {
+    const name = names.get(id) ?? known?.find((s) => s.id === id)?.name ?? id
+    const missing = !names.has(id)
+    return { key: id, label: missing ? t('usr.scope.missing', { name }) : name, title: name, muted: missing }
+  }
+  return (
+    <Field label={t('usr.field.scope')} hint={admin ? t('usr.scope.admin') : t('usr.scope.hint')}>
+      {(id) => <MultiPicker id={id} selected={value} options={options} labelOf={labelOf} placeholder={t('usr.scope.add')} onChange={onChange} />}
+    </Field>
   )
 }

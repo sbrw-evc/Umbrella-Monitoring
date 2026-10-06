@@ -17,6 +17,8 @@ export type User = ProfileFields & {
   role_name?: string
   permissions?: string[]
   team_id?: string
+  /** Business services whose incidents the user sees; empty or absent: all. Ignored for administrators. */
+  service_ids?: string[]
   must_change_password?: boolean
   timezone: string
   telegram?: string

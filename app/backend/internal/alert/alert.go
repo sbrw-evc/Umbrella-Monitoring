@@ -93,6 +93,20 @@ func (r Route) ServiceIDs() []string {
 	return out
 }
 
+// InScope reports whether the alert belongs to one of the business services; an empty scope
+// takes every alert, an alert without services is in no other scope.
+func (a *Alert) InScope(scope []string) bool {
+	if len(scope) == 0 {
+		return true
+	}
+	for _, s := range a.Route.Services {
+		if slices.Contains(scope, s.ID) {
+			return true
+		}
+	}
+	return false
+}
+
 // PD is the PagerDuty side of an alert.
 type PD struct {
 	State string `json:"state"`

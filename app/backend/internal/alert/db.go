@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -220,6 +221,9 @@ type Filter struct {
 	Suppressed bool
 	Since      time.Time
 	Limit      int
+	// ScopeServiceIDs limits everything, counts included, to alerts of these business services;
+	// empty means no limit.
+	ScopeServiceIDs []string
 }
 
 type Counts struct {
@@ -265,6 +269,12 @@ func (f Filter) where() (string, []any) {
 	}
 	if f.ServiceID != "" {
 		conds = append(conds, arg(f.ServiceID)+" = ANY(service_ids)")
+	}
+	if len(f.ScopeServiceIDs) > 0 {
+		if f.ServiceID != "" && !slices.Contains(f.ScopeServiceIDs, f.ServiceID) {
+			conds = append(conds, "FALSE")
+		}
+		conds = append(conds, "service_ids && "+arg(f.ScopeServiceIDs)+"::text[]")
 	}
 	if f.CIID != "" {
 		conds = append(conds, "ci_id = "+arg(f.CIID))

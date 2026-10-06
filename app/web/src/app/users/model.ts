@@ -1,9 +1,12 @@
 import { TreeIndex } from '../org/treeIndex'
 import type { User } from '../types'
 
+export type ScopeService = { id: string; name: string; missing?: boolean }
+
 export type ManagedUser = User & {
   display_name: string
   team_name?: string
+  services?: ScopeService[]
   disabled: boolean
   created_at: string
   password_changed_at?: string
@@ -11,7 +14,8 @@ export type ManagedUser = User & {
 
 export type RoleRef = { id: string; name: string; system: boolean }
 export type TeamRef = { id: string; name: string; parent_id: string }
-export type Refs = { roles: RoleRef[]; teams: TeamRef[] }
+export type ServiceRef = { id: string; name: string }
+export type Refs = { roles: RoleRef[]; teams: TeamRef[]; services: ServiceRef[] }
 
 export type Filters = { q: string; source: string; role: string; team: string; status: string }
 
@@ -42,4 +46,9 @@ export function teamOptions(teams: TeamRef[]): TeamOption[] {
 
 export function adminOf(u: { role: string }) {
   return u.role === 'admin'
+}
+
+/** scopedOf: the user sees incidents of some business services only. */
+export function scopedOf(u: { role: string; service_ids?: string[] }) {
+  return !adminOf(u) && (u.service_ids?.length ?? 0) > 0
 }

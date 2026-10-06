@@ -153,7 +153,7 @@ func (a *App) grafanaRedirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	al, _, err := a.alerts.Get(r.Context(), id)
-	if err != nil {
+	if err != nil || !al.InScope(a.incidentScope(*u)) {
 		http.Redirect(w, r, fallback, http.StatusFound)
 		return
 	}

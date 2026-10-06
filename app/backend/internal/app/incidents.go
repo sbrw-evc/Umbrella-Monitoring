@@ -13,6 +13,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/flow"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/rules"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
@@ -45,6 +46,14 @@ func (a *App) alertsReady(w http.ResponseWriter) bool {
 	return true
 }
 
+// incidentScope is the business services whose incidents the user sees; nil means all of them.
+func (a *App) incidentScope(u model.User) []string {
+	if len(u.ServiceIDs) == 0 || a.access.Grant(u).RoleID == model.RoleAdmin {
+		return nil
+	}
+	return u.ServiceIDs
+}
+
 func incidentFilter(r *http.Request) alert.Filter {
 	q := r.URL.Query()
 	f := alert.Filter{Status: q.Get("status"), Method: q.Get("method"), TeamID: q.Get("team"), ServiceID: q.Get("service"),
@@ -67,7 +76,9 @@ func (a *App) listIncidents(w http.ResponseWriter, r *http.Request) {
 	if !a.alertsReady(w) {
 		return
 	}
-	page, err := a.alerts.List(r.Context(), incidentFilter(r))
+	f := incidentFilter(r)
+	f.ScopeServiceIDs = a.incidentScope(current(r).user)
+	page, err := a.alerts.List(r.Context(), f)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -88,6 +99,9 @@ func (a *App) getIncident(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	al, entries, err := a.alerts.Get(r.Context(), r.PathValue("id"))
+	if err == nil && !al.InScope(a.incidentScope(current(r).user)) {
+		err = alert.ErrNotFound
+	}
 	if err != nil {
 		alertError(w, err)
 		return
@@ -117,7 +131,8 @@ func (a *App) actIncident(w http.ResponseWriter, r *http.Request) {
 	if r.ContentLength != 0 && !httpx.Decode(w, r, &in) {
 		return
 	}
-	out, err := a.alerts.Act(r.Context(), r.PathValue("id"), r.PathValue("action"), current(r).user.Username, in.Text)
+	u := current(r).user
+	out, err := a.alerts.ActIn(r.Context(), r.PathValue("id"), r.PathValue("action"), u.Username, in.Text, a.incidentScope(u))
 	if err != nil {
 		alertError(w, err)
 		return
@@ -151,9 +166,11 @@ func (a *App) bulkIncidents(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "too_many", nil)
 		return
 	}
+	u := current(r).user
+	scope := a.incidentScope(u)
 	out := bulkResult{Done: []string{}, Failed: map[string]string{}}
 	for _, id := range in.IDs {
-		if _, err := a.alerts.Act(r.Context(), id, in.Action, current(r).user.Username, ""); err != nil {
+		if _, err := a.alerts.ActIn(r.Context(), id, in.Action, u.Username, "", scope); err != nil {
 			out.Failed[id] = alertCode(err)
 			continue
 		}

@@ -102,6 +102,9 @@ type MapEventsInfo struct {
 	Available   bool   `json:"available"`
 	WindowHours int    `json:"window_hours"`
 	Error       string `json:"error,omitempty"`
+	// Scoped: the viewer sees incidents of some business services only, so events count only
+	// for the items of those services.
+	Scoped bool `json:"scoped,omitempty"`
 }
 
 type CMDBMap struct {
@@ -132,12 +135,15 @@ func (a *App) registerCMDB(mux *http.ServeMux) {
 }
 
 func (a *App) cmdbMap(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, a.cmdb.Map(r.Context()))
+	httpx.JSON(w, http.StatusOK, a.cmdb.Map(r.Context(), a.incidentScope(current(r).user)...))
 }
 
-func (s *CMDBService) Map(ctx context.Context) CMDBMap {
+// Map builds the map. With scope (business service ids) given, events are taken into account
+// only for the items of those services, as the viewer sees only their incidents.
+func (s *CMDBService) Map(ctx context.Context, scope ...string) CMDBMap {
 	now := s.now()
-	out := CMDBMap{Services: []MapService{}, CIs: []MapCI{}, GeneratedAt: now, Events: MapEventsInfo{WindowHours: int(eventWindow / time.Hour)}}
+	out := CMDBMap{Services: []MapService{}, CIs: []MapCI{}, GeneratedAt: now,
+		Events: MapEventsInfo{WindowHours: int(eventWindow / time.Hour), Scoped: len(scope) > 0}}
 	var events []ingest.FiringEvent
 	if s.firing != nil {
 		var err error
@@ -174,7 +180,7 @@ func (s *CMDBService) Map(ctx context.Context) CMDBMap {
 			}
 			cis[id] = m
 		}
-		attachEvents(d, cis, events)
+		attachEvents(d, cis, events, scope)
 		for _, m := range cis {
 			m.Health = ciHealth(m)
 			out.CIs = append(out.CIs, *m)
@@ -209,15 +215,19 @@ func (s *CMDBService) Map(ctx context.Context) CMDBMap {
 func eventKeys(v string) []string { return alert.EventKeys(v) }
 
 // attachEvents matches firing events to configuration items by name, short name, IP address
-// or the DNS name the domain controller has for the item.
-func attachEvents(d *store.Data, cis map[string]*MapCI, events []ingest.FiringEvent) {
+// or the DNS name the domain controller has for the item. With a scope, only items of those
+// services get events.
+func attachEvents(d *store.Data, cis map[string]*MapCI, events []ingest.FiringEvent, scope []string) {
 	index := map[string][]string{}
 	add := func(key, id string) {
 		if key = strings.ToLower(strings.TrimSpace(key)); key != "" && !slices.Contains(index[key], id) {
 			index[key] = append(index[key], id)
 		}
 	}
-	for id := range cis {
+	for id, m := range cis {
+		if len(scope) > 0 && !slices.ContainsFunc(m.Services, func(s string) bool { return slices.Contains(scope, s) }) {
+			continue
+		}
 		for _, k := range alert.CIKeys(d.ConfigItems[id]) {
 			add(k, id)
 		}
