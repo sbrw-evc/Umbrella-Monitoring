@@ -11,7 +11,7 @@ import { strings } from './strings'
 
 type Source = 'ldap' | 'entra'
 
-type Mapping = { id: string; source: Source; group: string; label: string; role_id: string; team_id: string }
+type Mapping = { id: string; source: Source; group: string; label: string; role_id: string; team_id: string; scope?: '' | 'all' | 'teams' }
 
 type GroupConfig = { mappings: Mapping[]; sync_off: boolean; sync_minutes: number }
 
@@ -22,7 +22,7 @@ type GroupsView = {
   sync: { started_at: string; finished_at: string; actor: string; ok: boolean; ldap: SourceState; entra: SourceState }
   ldap_enabled: boolean
   entra_enabled: boolean
-  mapped: { roles: number; teams: number }
+  mapped: { roles: number; teams: number; scopes?: number }
 }
 
 type Row = Mapping & { key: number }
@@ -53,7 +53,7 @@ function groupKey(m: Mapping) {
 function rowProblem(m: Mapping, rows: Mapping[]): string | null {
   const g = m.group.trim()
   if (m.source === 'ldap' ? !DN.test(g) : !GUID.test(g)) return `gm.group.invalid.${m.source}`
-  if (!m.role_id && !m.team_id) return 'gm.need'
+  if (!m.role_id && !m.team_id && !m.scope) return 'gm.need'
   if (rows.find((x) => groupKey(x) === groupKey(m)) !== m) return 'gm.duplicate'
   return null
 }
@@ -135,7 +135,7 @@ export function GroupMappingSettings() {
   const add = () =>
     setDraft({
       ...draft,
-      rows: [...draft.rows, { key: nextKey++, id: '', source: ldapEnabled ? 'ldap' : 'entra', group: '', label: '', role_id: '', team_id: '' }],
+      rows: [...draft.rows, { key: nextKey++, id: '', source: ldapEnabled ? 'ldap' : 'entra', group: '', label: '', role_id: '', team_id: '', scope: '' }],
     })
 
   const save = () =>
@@ -206,7 +206,7 @@ export function GroupMappingSettings() {
             ],
             result(s.ldap, t('gm.source.ldap')),
             result(s.entra, t('gm.source.entra')),
-            [t('gm.state.mapped'), t('gm.state.mapped.value', { roles: view.mapped.roles, teams: view.mapped.teams })],
+            [t('gm.state.mapped'), t('gm.state.mapped.value', { roles: view.mapped.roles, teams: view.mapped.teams, scopes: view.mapped.scopes ?? 0 })],
           ].filter(Boolean) as [ReactNode, ReactNode][]
         }
       />
@@ -277,6 +277,14 @@ export function GroupMappingSettings() {
                             {x.name}
                           </option>
                         ))}
+                      </Select>
+                    </label>
+                    <label className="gm-field">
+                      <span className="hint">{t('gm.scope')}</span>
+                      <Select value={r.scope ?? ''} onChange={(e) => setRow(r.key, { scope: e.target.value as Mapping['scope'] })} aria-label={t('gm.scope')}>
+                        <option value="">{t('gm.keep')}</option>
+                        <option value="all">{t('gm.scope.all')}</option>
+                        <option value="teams">{t('gm.scope.teams')}</option>
                       </Select>
                     </label>
                   </div>

@@ -9,9 +9,9 @@ import { ProfileFieldsGrid } from '../profile/ProfileFieldsGrid'
 import { useAction, type Action } from '../profile/useAction'
 import { useSession } from '../session'
 import { profileChanged, profileOf, type ProfileFields } from '../types'
-import { AccessFields, ScopeField, type Access } from './AccessFields'
+import { AccessFields, ScopeField, type Access, type ScopeMode } from './AccessFields'
 import { SourcePill, StatusPill } from './Badges'
-import { adminOf, type ManagedUser, type Refs } from './model'
+import { adminOf, scopeModeOf, type ManagedUser, type Refs } from './model'
 import { freshPassword, NewPasswordFields, usePasswordValid, type NewPassword } from './NewPasswordFields'
 import { strings } from './strings'
 
@@ -178,22 +178,24 @@ function EditView({
   const [profile, setProfile] = useState<ProfileFields>(() => profileOf(user))
   const [access, setAccess] = useState<Access>(() => accessOf(user))
   const [scope, setScope] = useState<string[]>(() => user.service_ids ?? [])
+  const [mode, setMode] = useState<ScopeMode>(() => scopeModeOf(user))
 
   useEffect(() => {
     setProfile(profileOf(user))
     setAccess(accessOf(user))
     setScope(user.service_ids ?? [])
+    setMode(scopeModeOf(user))
   }, [user])
 
   const saved = accessOf(user)
   const savedScope = user.service_ids ?? []
-  const scopeChanged = scope.length !== savedScope.length || scope.some((id) => !savedScope.includes(id))
+  const scopeChanged = mode !== scopeModeOf(user) || scope.length !== savedScope.length || scope.some((id) => !savedScope.includes(id))
   const dirty =
     (local && profileChanged(profile, profileOf(user))) || access.role_id !== saved.role_id || !sameIds(access.team_ids, saved.team_ids) || scopeChanged
 
   const save = () =>
     action.run(async () => {
-      const body = { ...(local ? { profile } : {}), role_id: access.role_id, team_ids: access.team_ids, service_ids: scope }
+      const body = { ...(local ? { profile } : {}), role_id: access.role_id, team_ids: access.team_ids, scope_mode: mode, service_ids: scope }
       onChanged(await api<ManagedUser>('PUT', `/api/users/${encodeURIComponent(user.id)}`, body))
       return t('usr.saved')
     })
@@ -220,7 +222,15 @@ function EditView({
         <h3>{t('usr.section.access')}</h3>
         <fieldset className="plain-fieldset stack" disabled={!rights.edit}>
           <AccessFields refs={refs} value={access} onChange={setAccess} roleLocked={rights.self} roleHint={roleHint} />
-          <ScopeField refs={refs} value={scope} known={user.services} admin={access.role_id === 'admin'} onChange={setScope} />
+          <ScopeField
+            refs={refs}
+            mode={mode}
+            value={scope}
+            known={user.services}
+            admin={access.role_id === 'admin'}
+            onMode={setMode}
+            onChange={setScope}
+          />
         </fieldset>
       </section>
       {(rights.lock || rights.password || rights.remove) && (

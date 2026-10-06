@@ -50,7 +50,13 @@ export function adminOf(u: { role: string }) {
   return u.role === 'admin'
 }
 
+/** scopeModeOf: the scope mode, also for accounts saved before modes existed. */
+export function scopeModeOf(u: { scope_mode?: string; service_ids?: string[] }): 'all' | 'teams' | 'services' {
+  if (u.scope_mode === 'teams' || u.scope_mode === 'services' || u.scope_mode === 'all') return u.scope_mode
+  return (u.service_ids?.length ?? 0) > 0 ? 'services' : 'all'
+}
+
 /** scopedOf: the user sees incidents of some business services only. */
-export function scopedOf(u: { role: string; service_ids?: string[] }) {
-  return !adminOf(u) && (u.service_ids?.length ?? 0) > 0
+export function scopedOf(u: { role: string; scope_mode?: string; service_ids?: string[] }) {
+  return !adminOf(u) && scopeModeOf(u) !== 'all'
 }

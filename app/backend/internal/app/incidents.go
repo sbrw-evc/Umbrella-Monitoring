@@ -48,10 +48,7 @@ func (a *App) alertsReady(w http.ResponseWriter) bool {
 
 // incidentScope is the business services whose incidents the user sees; nil means all of them.
 func (a *App) incidentScope(u model.User) []string {
-	if len(u.ServiceIDs) == 0 || a.access.Grant(u).RoleID == model.RoleAdmin {
-		return nil
-	}
-	return u.ServiceIDs
+	return a.userScope(u).ids()
 }
 
 func incidentFilter(r *http.Request) alert.Filter {

@@ -107,6 +107,7 @@ func (d *Data) init() {
 	for _, u := range d.Users {
 		if u != nil {
 			u.MigrateTeams()
+			u.MigrateScope()
 		}
 	}
 	if d.NetBoxContacts == nil {

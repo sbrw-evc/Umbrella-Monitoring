@@ -62,6 +62,7 @@ type NewUser struct {
 	Password           string   `json:"password"`
 	RoleID             string   `json:"role_id"`
 	TeamIDs            []string `json:"team_ids"`
+	ScopeMode          string   `json:"scope_mode"`
 	MustChangePassword *bool    `json:"must_change_password"`
 }
 
@@ -70,7 +71,10 @@ type UserChanges struct {
 	RoleID  *string        `json:"role_id"`
 	// TeamIDs replaces the teams of the user.
 	TeamIDs *[]string `json:"team_ids"`
-	// ServiceIDs replaces the business services whose incidents the user sees; empty: all.
+	// ScopeMode: all, teams (services of the user's teams) or services (ServiceIDs).
+	ScopeMode *string `json:"scope_mode"`
+	// ServiceIDs replaces the chosen services. Given without ScopeMode, a non-empty list means
+	// the services mode and an empty one all services, as before scope modes existed.
 	ServiceIDs *[]string `json:"service_ids"`
 }
 
@@ -172,8 +176,12 @@ func (s *UsersService) Create(ctx context.Context, actor Actor, in NewUser) (mod
 	if role == "" {
 		s.st.Read(func(d *store.Data) { role = d.NewUserRole() })
 	}
+	scope := userOr(in.ScopeMode, model.ScopeAll)
+	if scope != model.ScopeAll && scope != model.ScopeTeams {
+		return model.User{}, invalid("invalid_scope", nil)
+	}
 	draft := model.User{Username: username, Name: profile.DisplayName(username), Profile: profile, Source: model.SourceLocal,
-		Role: role, TeamIDs: in.TeamIDs, MustChangePassword: in.MustChangePassword == nil || *in.MustChangePassword}
+		Role: role, TeamIDs: in.TeamIDs, ScopeMode: scope, MustChangePassword: in.MustChangePassword == nil || *in.MustChangePassword}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -275,6 +283,13 @@ func (s *UsersService) Update(actor Actor, id string, in UserChanges) (model.Use
 			u.TeamIDs = teams
 			changes = append(changes, "teams "+userOr(strings.Join(teams, " "), "none"))
 		}
+		mode := u.ScopeMode
+		if mode == "" {
+			mode = model.ScopeAll
+			if len(u.ServiceIDs) > 0 {
+				mode = model.ScopeServices
+			}
+		}
 		if in.ServiceIDs != nil {
 			scope, err := userServiceScope(d, *in.ServiceIDs)
 			if err != nil {
@@ -282,8 +297,27 @@ func (s *UsersService) Update(actor Actor, id string, in UserChanges) (model.Use
 			}
 			if !slices.Equal(scope, u.ServiceIDs) {
 				u.ServiceIDs = scope
-				changes = append(changes, "services "+userOr(strings.Join(scope, " "), "all"))
+				changes = append(changes, "services "+userOr(strings.Join(scope, " "), "none"))
 			}
+			if in.ScopeMode == nil {
+				mode = model.ScopeAll
+				if len(scope) > 0 {
+					mode = model.ScopeServices
+				}
+			}
+		}
+		if in.ScopeMode != nil {
+			if !model.ValidScope(*in.ScopeMode) {
+				return "", invalid("invalid_scope", nil)
+			}
+			mode = *in.ScopeMode
+		}
+		if mode == model.ScopeServices && len(u.ServiceIDs) == 0 {
+			return "", invalid("scope_services_required", nil)
+		}
+		if mode != u.ScopeMode {
+			u.ScopeMode = mode
+			changes = append(changes, "scope "+mode)
 		}
 		return strings.Join(changes, ", "), nil
 	})

@@ -114,18 +114,24 @@ export function AccessFields({
   )
 }
 
-/** ScopeField picks the business services whose incidents the user sees; none means all. */
+export type ScopeMode = 'all' | 'teams' | 'services'
+
+/** ScopeField picks what the user sees: everything, the services of their teams or chosen services. */
 export function ScopeField({
   refs,
+  mode,
   value,
   known,
   admin,
+  onMode,
   onChange,
 }: {
   refs: Refs
+  mode: ScopeMode
   value: string[]
   known?: ScopeService[]
   admin: boolean
+  onMode: (m: ScopeMode) => void
   onChange: (ids: string[]) => void
 }) {
   const t = useT(strings)
@@ -137,8 +143,21 @@ export function ScopeField({
     return { key: id, label: missing ? t('usr.scope.missing', { name }) : name, title: name, muted: missing }
   }
   return (
-    <Field label={t('usr.field.scope')} hint={admin ? t('usr.scope.admin') : t('usr.scope.hint')}>
-      {(id) => <MultiPicker id={id} selected={value} options={options} labelOf={labelOf} placeholder={t('usr.scope.add')} onChange={onChange} />}
-    </Field>
+    <>
+      <Field label={t('usr.field.scope')} hint={admin ? t('usr.scope.admin') : t(`usr.scope.mode.${mode}.hint`)}>
+        {(id) => (
+          <Select id={id} value={mode} onChange={(e) => onMode(e.target.value as ScopeMode)}>
+            <option value="all">{t('usr.scope.mode.all')}</option>
+            <option value="teams">{t('usr.scope.mode.teams')}</option>
+            <option value="services">{t('usr.scope.mode.services')}</option>
+          </Select>
+        )}
+      </Field>
+      {mode === 'services' && (
+        <Field label={t('usr.field.scope.services')} hint={value.length === 0 ? t('usr.scope.services.need') : undefined}>
+          {(id) => <MultiPicker id={id} selected={value} options={options} labelOf={labelOf} placeholder={t('usr.scope.add')} onChange={onChange} />}
+        </Field>
+      )}
+    </>
   )
 }

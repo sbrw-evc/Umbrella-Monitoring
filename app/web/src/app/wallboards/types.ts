@@ -10,6 +10,8 @@ export type Method = 'red' | 'use' | 'other'
 // Wallboard is WallboardView of the admin API: the stored board, names of its targets and its public path.
 export type Wallboard = {
   id: string
+  /** The viewer may change the wallboard: its targets are within their visibility scope. */
+  in_scope?: boolean
   slug: string
   title: string
   description: string

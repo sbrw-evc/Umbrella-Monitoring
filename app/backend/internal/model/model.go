@@ -18,6 +18,10 @@ const (
 	SourceLDAP  = "ldap"
 	SourceEntra = "entra"
 
+	ScopeAll      = "all"
+	ScopeTeams    = "teams"
+	ScopeServices = "services"
+
 	RoleAdmin = "admin"
 	RoleUser  = "user"
 
@@ -110,9 +114,13 @@ type User struct {
 	// withdrawn; a role changed by hand since then is kept.
 	MappedRole  string   `json:"mapped_role,omitempty"`
 	MappedTeams []string `json:"mapped_teams,omitempty"`
-	// ServiceIDs are the business services whose incidents the user sees; empty means all.
-	// Administrators always see every incident.
+	// ScopeMode is what the user sees and may act on: every service (ScopeAll), the services
+	// their teams own or support (ScopeTeams), or the chosen ServiceIDs (ScopeServices).
+	// Administrators are never limited.
+	ScopeMode  string   `json:"scope_mode"`
 	ServiceIDs []string `json:"service_ids,omitempty"`
+	// MappedScope is the scope mode a group mapping last gave the user.
+	MappedScope string `json:"mapped_scope,omitempty"`
 	// Telegram is the chat ID backup notification sends to.
 	Telegram           string     `json:"telegram"`
 	MustChangePassword bool       `json:"must_change_password"`
@@ -167,4 +175,18 @@ func (u *User) MigrateTeams() bool {
 		u.MappedTeam, changed = "", true
 	}
 	return changed
+}
+
+func ValidScope(v string) bool { return v == ScopeAll || v == ScopeTeams || v == ScopeServices }
+
+// MigrateScope sets the scope mode of users from versions where a service list was the only scope.
+func (u *User) MigrateScope() bool {
+	if u.ScopeMode != "" {
+		return false
+	}
+	u.ScopeMode = ScopeAll
+	if len(u.ServiceIDs) > 0 {
+		u.ScopeMode = ScopeServices
+	}
+	return true
 }

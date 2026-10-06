@@ -8,6 +8,8 @@ export type ProfileFields = {
   email: string
 }
 
+export type ScopeMode = 'all' | 'teams' | 'services'
+
 export type User = ProfileFields & {
   id: string
   username: string
@@ -19,7 +21,9 @@ export type User = ProfileFields & {
   /** Active administrators; sent only to a user without any permission. */
   admins?: { name: string; email?: string }[]
   team_ids?: string[]
-  /** Business services whose incidents the user sees; empty or absent: all. Ignored for administrators. */
+  /** What the user sees: all services, the services of their teams, or the chosen services. Ignored for administrators. */
+  scope_mode?: ScopeMode
+  /** The chosen services of the services mode. */
   service_ids?: string[]
   must_change_password?: boolean
   timezone: string

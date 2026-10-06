@@ -15,6 +15,8 @@ type Ref = { id: string; name: string; missing?: boolean }
 type State = 'active' | 'planned' | 'finished'
 type Window = {
   id: string
+  /** The viewer may change the window: its targets are within their visibility scope. */
+  in_scope?: boolean
   title: string
   comment: string
   ci_ids: string[]
@@ -95,7 +97,7 @@ export function MaintenancePage() {
             </thead>
             <tbody>
               {shown.map((w) => (
-                <Row key={w.id} w={w} editor={editor} busy={act.busy} onEdit={() => setEditing(w)} run={run} />
+                <Row key={w.id} w={w} editor={editor && w.in_scope !== false} busy={act.busy} onEdit={() => setEditing(w)} run={run} />
               ))}
             </tbody>
           </table>

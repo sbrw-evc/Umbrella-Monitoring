@@ -6,7 +6,7 @@ import { formatDate } from '../../ui'
 import { useSession } from '../session'
 import { roleLabel } from '../types'
 import { SourcePill, StatusPill } from './Badges'
-import { scopedOf, teamOptions, type ManagedUser, type Refs } from './model'
+import { scopedOf, scopeModeOf, teamOptions, type ManagedUser, type Refs } from './model'
 import { strings } from './strings'
 
 export function UsersList({ users, refs, onOpen }: { users: ManagedUser[]; refs: Refs; onOpen: (u: ManagedUser) => void }) {
@@ -45,7 +45,7 @@ export function UsersList({ users, refs, onOpen }: { users: ManagedUser[]; refs:
                 <small className="muted">{u.username}</small>
                 {scopedOf(u) && (
                   <small className="usr-scope" title={t('usr.field.scope')}>
-                    {t('usr.scope.short', { names: (u.services ?? []).map((s) => s.name).join(', ') })}
+                    {scopeModeOf(u) === 'teams' ? t('usr.scope.teams.short') : t('usr.scope.short', { names: (u.services ?? []).map((s) => s.name).join(', ') })}
                   </small>
                 )}
               </span>
