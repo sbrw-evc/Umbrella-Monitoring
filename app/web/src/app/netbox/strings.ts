@@ -72,6 +72,12 @@ export const strings: Dict = {
     'nb.sync.directory.off': 'Not checked',
     'nb.sync.done': 'Synchronization finished.',
     'nb.sync.by': 'by {actor}',
+    'nb.sync.held': 'Items missing from NetBox were kept: {count}',
+    'nb.sync.held.empty':
+      'NetBox returned no objects at all. This usually means the API token lost its permissions or a filter is wrong, so nothing was deleted or unlinked. Check NetBox and synchronize again.',
+    'nb.sync.held.share':
+      'More than half of the items linked to NetBox are missing from its answer. To keep the catalog safe from an incomplete answer they were not deleted or unlinked. If they were really removed in NetBox, confirm the removal.',
+    'nb.sync.held.confirm': 'Remove {count} missing items',
     'err.netbox_token_required': 'Enter the NetBox API token.',
     'err.netbox_invalid': 'NetBox settings are incomplete.',
     'err.netbox_unavailable': 'Umbrella cannot work with NetBox using these settings.',
@@ -151,6 +157,12 @@ export const strings: Dict = {
     'nb.sync.directory.off': 'Не проверялся',
     'nb.sync.done': 'Синхронизация завершена.',
     'nb.sync.by': '{actor}',
+    'nb.sync.held': 'Объекты, которых нет в ответе NetBox, сохранены: {count}',
+    'nb.sync.held.empty':
+      'NetBox не вернул ни одного объекта. Обычно это значит, что API-токен потерял права или фильтр задан неверно, поэтому ничего не удалено и не отвязано. Проверьте NetBox и запустите синхронизацию снова.',
+    'nb.sync.held.share':
+      'В ответе NetBox нет больше половины связанных с ним объектов. Чтобы неполный ответ не опустошил каталог, они не удалены и не отвязаны. Если они действительно удалены в NetBox, подтвердите удаление.',
+    'nb.sync.held.confirm': 'Удалить отсутствующие объекты: {count}',
     'err.netbox_token_required': 'Введите API-токен NetBox.',
     'err.netbox_invalid': 'Настройки NetBox заполнены не полностью.',
     'err.netbox_unavailable': 'С этими настройками Umbrella не может работать с NetBox.',

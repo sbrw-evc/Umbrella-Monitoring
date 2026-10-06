@@ -515,17 +515,19 @@ func (s *MonitoringService) Sync(ctx context.Context, actor, id string) (model.M
 func (s *MonitoringService) Run(ctx context.Context) {
 	tk := time.NewTicker(time.Minute)
 	defer tk.Stop()
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tk.C:
 			for _, id := range s.due() {
-				go func() {
+				wg.Go(func() {
 					if _, err := s.Sync(ctx, monitoringActor, id); err != nil && !errors.Is(err, ErrMonitoringRunning) {
 						slog.Error("monitoring: reading hosts failed", "source", id, "err", err)
 					}
-				}()
+				})
 			}
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -213,11 +214,14 @@ func (a *App) Handler() http.Handler {
 
 // Run synchronizes NetBox, directory groups and monitoring hosts on their schedules, prepares the ingest and alert
 // tables, processes received requests and runs the alert engine until ctx ends. Without PostgreSQL
-// (tests) the intake answers 503.
+// (tests) the intake answers 503. Run returns only after every worker it started has stopped, so
+// a runtime switch of the database copies data nobody writes any more.
 func (a *App) Run(ctx context.Context) {
-	go a.netbox.Run(ctx)
-	go a.groups.Run(ctx)
-	go a.monitoring.Run(ctx)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() { a.netbox.Run(ctx) })
+	wg.Go(func() { a.groups.Run(ctx) })
+	wg.Go(func() { a.monitoring.Run(ctx) })
 	if a.queue == nil {
 		return
 	}
@@ -242,10 +246,10 @@ func (a *App) Run(ctx context.Context) {
 		a.notifier.SetLinks(notify.NewLinks(key))
 	}
 	a.ready.Store(true)
-	go a.alerts.Run(ctx)
-	go a.pdGateway.Run(ctx)
-	go a.notifier.Run(ctx)
-	go a.ruleEngine.Run(ctx)
+	wg.Go(func() { a.alerts.Run(ctx) })
+	wg.Go(func() { a.pdGateway.Run(ctx) })
+	wg.Go(func() { a.notifier.Run(ctx) })
+	wg.Go(func() { a.ruleEngine.Run(ctx) })
 	a.queue.Run(ctx, 2, a.process)
 }
 

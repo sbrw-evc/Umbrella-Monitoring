@@ -281,6 +281,16 @@ func (s *NetBoxService) due() bool {
 // Sync reads NetBox and updates configuration items and user accounts. A failure to reach
 // NetBox is recorded in the returned state; the error is only for a sync that cannot start.
 func (s *NetBoxService) Sync(ctx context.Context, actor string) (model.SyncState, error) {
+	return s.sync(ctx, actor, false)
+}
+
+// SyncConfirmed is Sync where the person confirmed that the items missing from NetBox are to be
+// removed even when the answer looks incomplete (see holdMissing).
+func (s *NetBoxService) SyncConfirmed(ctx context.Context, actor string) (model.SyncState, error) {
+	return s.sync(ctx, actor, true)
+}
+
+func (s *NetBoxService) sync(ctx context.Context, actor string, confirmed bool) (model.SyncState, error) {
 	if !s.running.CompareAndSwap(false, true) {
 		return model.SyncState{}, ErrSyncRunning
 	}
@@ -297,7 +307,11 @@ func (s *NetBoxService) Sync(ctx context.Context, actor string) (model.SyncState
 		inv, err = c.Fetch(ctx)
 	}
 	if err == nil {
-		s.st.Write(func(d *store.Data) { state.Stats = applyInventory(d, cfg, inv, s.now()) })
+		s.st.Write(func(d *store.Data) { state.Stats = applyInventory(d, cfg, inv, s.now(), confirmed) })
+		if st := state.Stats; st.Held > 0 {
+			slog.Warn("netbox: items missing from the answer are kept, the answer looks incomplete",
+				"objects", st.Objects, "missing", st.Held, "reason", st.HeldReason)
+		}
 		s.syncDirectory(cfg, &state.Stats)
 		state.OK = true
 	} else {
@@ -307,10 +321,16 @@ func (s *NetBoxService) Sync(ctx context.Context, actor string) (model.SyncState
 	s.st.Write(func(d *store.Data) {
 		d.NetBoxSync = state
 		st := state.Stats
-		changed := st.Created+st.Updated+st.Deleted+st.Unlinked+st.UsersCreated+st.UsersUpdated+st.UsersLinked > 0
+		changed := st.Created+st.Updated+st.Deleted+st.Unlinked+st.UsersCreated+st.UsersUpdated+st.UsersLinked+st.Held > 0
 		if actor != netboxActor || changed || !state.OK {
 			detail := fmt.Sprintf("%d objects: %d created, %d updated, %d deleted, %d unlinked; users: %d created, %d updated, %d linked",
 				st.Objects, st.Created, st.Updated, st.Deleted, st.Unlinked, st.UsersCreated, st.UsersUpdated, st.UsersLinked)
+			if st.Held > 0 {
+				detail += fmt.Sprintf("; %d missing items kept (%s)", st.Held, st.HeldReason)
+			}
+			if confirmed {
+				detail += "; removal of missing items confirmed"
+			}
 			if !state.OK {
 				detail = "failed: " + state.Error
 			}
@@ -350,9 +370,32 @@ var ciKindOf = map[string]string{netbox.KindDevice: model.CIKindDevice, netbox.K
 
 func refKey(kind string, id int) string { return kind + ":" + strconv.Itoa(id) }
 
+// Reasons a synchronization keeps the items missing from NetBox's answer.
+const (
+	heldEmpty = "empty" // NetBox returned no objects at all
+	heldShare = "share" // more than half of the linked items are missing
+)
+
+// holdMissing decides whether the items missing from the answer are kept instead of being
+// deleted or unlinked: an empty answer or one without most of the known objects is far more
+// likely a lost permission or a broken filter than a real cleanup, and removing the items loses
+// their service bindings and IDs for good. A person can confirm the removal.
+func holdMissing(objects, linked, missing int) string {
+	switch {
+	case missing == 0:
+		return ""
+	case objects == 0:
+		return heldEmpty
+	case 2*missing > linked:
+		return heldShare
+	}
+	return ""
+}
+
 // applyInventory brings configuration items and the accounts of their responsible people in
-// line with what was read from NetBox.
-func applyInventory(d *store.Data, cfg netbox.Config, inv netbox.Inventory, now time.Time) model.SyncStats {
+// line with what was read from NetBox. Unless confirmed, items missing from a suspicious answer
+// are kept (see holdMissing).
+func applyInventory(d *store.Data, cfg netbox.Config, inv netbox.Inventory, now time.Time, confirmed bool) model.SyncStats {
 	stats := model.SyncStats{Objects: len(inv.Objects)}
 	users := map[int]string{}
 	if cfg.SyncContacts {
@@ -373,8 +416,23 @@ func applyInventory(d *store.Data, cfg netbox.Config, inv netbox.Inventory, now 
 	}
 	seen := map[string]bool{}
 	for _, o := range inv.Objects {
+		seen[refKey(o.Kind, o.ID)] = true
+	}
+	linked, missing := 0, 0
+	for k, ci := range byRef {
+		if cfg.Imports(ci.NetBox.Kind) {
+			linked++
+			if !seen[k] {
+				missing++
+			}
+		}
+	}
+	hold := ""
+	if !confirmed {
+		hold = holdMissing(len(inv.Objects), linked, missing)
+	}
+	for _, o := range inv.Objects {
 		k := refKey(o.Kind, o.ID)
-		seen[k] = true
 		ci := byRef[k]
 		created := ci == nil
 		if created {
@@ -398,19 +456,24 @@ func applyInventory(d *store.Data, cfg netbox.Config, inv netbox.Inventory, now 
 		synced := now
 		ci.SyncedAt = &synced
 	}
+	if hold != "" {
+		stats.Held, stats.HeldReason = missing, hold
+	}
 	for id, ci := range d.ConfigItems {
-		if ci.NetBox == nil || seen[refKey(ci.NetBox.Kind, ci.NetBox.ID)] || !cfg.Imports(ci.NetBox.Kind) {
+		if hold != "" || ci.NetBox == nil || seen[refKey(ci.NetBox.Kind, ci.NetBox.ID)] || !cfg.Imports(ci.NetBox.Kind) {
 			continue
 		}
 		if ci.Imported() {
+			// The same cleanup as a manual deletion: services and monitoring hosts drop the item.
 			delete(d.ConfigItems, id)
+			dropCI(d, id)
 			stats.Deleted++
 			continue
 		}
 		ci.NetBox, ci.UpdatedAt, ci.UpdatedBy = nil, now, netboxActor
 		stats.Unlinked++
 	}
-	applyServiceTags(d, cfg, inv.Tags, seen, now, &stats)
+	applyServiceTags(d, cfg, inv.Tags, seen, now, &stats, hold != "")
 	return stats
 }
 

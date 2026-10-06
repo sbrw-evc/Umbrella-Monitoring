@@ -75,7 +75,7 @@ export function PostgresCheckResult({
             {!postgresUsable(r.probe) && <p>{t('pg.nocreate')}</p>}
           </Banner>
           {r.probe.has_state && (
-            <Banner kind="warn" title={t('pg.state', { at: formatDate(r.probe.saved_at, locale) })}>
+            <Banner kind="warn" title={r.probe.saved_at ? t('pg.state', { at: formatDate(r.probe.saved_at, locale) }) : t('pg.state.data')}>
               {state}
             </Banner>
           )}

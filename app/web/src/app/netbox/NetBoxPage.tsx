@@ -48,6 +48,8 @@ type SyncState = {
     directory_matched: number
     directory_missing: number
     directory_error?: string
+    held?: number
+    held_reason?: 'empty' | 'share'
   }
 }
 
@@ -251,9 +253,9 @@ function SyncCard({ view, onSynced }: { view: NetBoxView; onSynced: (v: NetBoxVi
   const s = sync.stats
   const on = view.config.enabled && view.token_set
 
-  const run = () =>
+  const run = (confirm = false) =>
     syncer.run(async () => {
-      const st = await api<SyncState>('POST', '/api/netbox/sync')
+      const st = await api<SyncState>('POST', confirm ? '/api/netbox/sync?confirm=removal' : '/api/netbox/sync')
       onSynced(await api<NetBoxView>('GET', '/api/netbox'))
       return st.ok ? t('nb.sync.done') : undefined
     })
@@ -307,7 +309,7 @@ function SyncCard({ view, onSynced }: { view: NetBoxView; onSynced: (v: NetBoxVi
       footer={
         on &&
         can('netbox:sync') && (
-          <Button variant="primary" onClick={run} busy={syncer.busy || view.running}>
+          <Button variant="primary" onClick={() => run()} busy={syncer.busy || view.running}>
             <RefreshCw size={15} />
             {syncer.busy || view.running ? t('nb.sync.running') : t('nb.sync.now')}
           </Button>
@@ -316,6 +318,20 @@ function SyncCard({ view, onSynced }: { view: NetBoxView; onSynced: (v: NetBoxVi
     >
       {!ran(sync.started_at) && on && <p className="hint">{t('nb.sync.never')}</p>}
       {ran(sync.started_at) && !sync.ok && sync.error && <Banner kind="error" title={t('nb.sync.failed')}>{sync.error}</Banner>}
+      {ran(sync.started_at) && sync.ok && (s.held ?? 0) > 0 && (
+        <Banner kind="warn" title={t('nb.sync.held', { count: s.held ?? 0 })}>
+          <div className="stack">
+            <p>{t(s.held_reason === 'empty' ? 'nb.sync.held.empty' : 'nb.sync.held.share')}</p>
+            {on && can('netbox:sync') && (
+              <div>
+                <Button variant="secondary" onClick={() => run(true)} busy={syncer.busy || view.running}>
+                  {t('nb.sync.held.confirm', { count: s.held ?? 0 })}
+                </Button>
+              </div>
+            )}
+          </div>
+        </Banner>
+      )}
     </SummaryCard>
   )
 }
