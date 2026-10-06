@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 )
@@ -22,7 +23,21 @@ func (a *App) registerMonitoring(mux *http.ServeMux) {
 }
 
 func (a *App) monitoringView(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, a.monitoring.View())
+	v := a.monitoring.View()
+	if a.ingestReady() {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		sums, err := a.queue.Summaries(ctx)
+		cancel()
+		if err == nil {
+			for i := range v.Sources {
+				if c := v.Sources[i].Connector; c != nil {
+					s := sums[c.ID]
+					c.LastReceived, c.Received = s.LastReceived, s.Received
+				}
+			}
+		}
+	}
+	httpx.JSON(w, http.StatusOK, v)
 }
 
 func (a *App) createMonitoringSource(w http.ResponseWriter, r *http.Request) {
