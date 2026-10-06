@@ -11,7 +11,7 @@ docker compose up -d
 
 ## Алерты Grafana → Umbrella
 
-1. В Umbrella: **Автоматизация → Учётные данные** — создайте Bearer-токен. **Коннекторы** — создайте коннектор из пресета «Grafana Alerting», выберите токен в узле webhook и опубликуйте.
+1. В Umbrella: **Автоматизация → Учётные данные** — создайте Bearer-токен. **Коннекторы** — создайте коннектор из шаблона «Grafana Alerting», выберите токен в узле webhook и опубликуйте.
 2. В `.env` Grafana: `UMBRELLA_INGEST_URL` — адрес приёма коннектора (`http://umbrella:8080/api/ingest/<slug>`, если Umbrella запущена из `deploy/umbrella` на этом хосте), `UMBRELLA_INGEST_TOKEN` — токен. Затем `docker compose up -d`.
 3. Точка контакта «Umbrella» создаётся из [`provisioning/alerting/umbrella.yaml`](provisioning/alerting/umbrella.yaml) с заголовком `Authorization: Bearer <токен>`. Выберите её в **Alerting → Notification policies** (политика по умолчанию или вложенная). Проверить доставку можно кнопкой **Test** в **Alerting → Contact points**.
 

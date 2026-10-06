@@ -106,7 +106,7 @@ api() { curl -s -b $J -H "X-CSRF-Token: $CSRF" "$@"; }
 
 # учётные данные для приёма: секрет уходит в OpenBao
 CRED=$(api localhost:8080/api/credentials -d '{"name":"Мой источник","type":"bearer","secrets":{"token":"s3cr3t"}}' | jq -r .id)
-# коннектор из пресета «универсальный webhook» с этими учётными данными, затем публикация
+# коннектор из шаблона «универсальный webhook» с этими учётными данными, затем публикация
 CON=$(api localhost:8080/api/connectors -d '{"name":"Мой источник","slug":"my","preset":"webhook","credentials":{"webhook.credential":"'$CRED'"}}' | jq -r .id)
 api -X POST localhost:8080/api/connectors/$CON/publish -d '{}'
 
@@ -140,7 +140,7 @@ app/
     internal/netbox/       клиент NetBox: загрузка объектов и контактов, регистрация и изменение объектов
     internal/notify/       резервное оповещение: почта, Telegram, подписанные ссылки подтверждения
     internal/pagerduty/    PagerDuty Gateway: Events API v2, REST API, Webhooks v3
-    internal/presets/      пресеты коннекторов: Alertmanager, Grafana, Zabbix, универсальный webhook
+    internal/presets/      шаблоны коннекторов: Alertmanager, Grafana, Zabbix, универсальный webhook
     internal/rules/        Rule Engine RED/USE, запросы PromQL, шаблоны правил
     internal/secrets/      клиент OpenBao: KV v2, AppRole и токен, продление, кеш, перенос секретов
     internal/setup/        мастер первой настройки и его проверки
