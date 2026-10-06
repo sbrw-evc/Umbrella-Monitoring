@@ -130,7 +130,9 @@ func TestOnboardingStepsFollowState(t *testing.T) {
 	if _, s := f.onboarding(f.admin); s[app.StepDelivery].Done {
 		t.Fatal("PagerDuty without a key delivers nothing")
 	}
-	f.h.st.Write(func(d *store.Data) { d.Settings.Alerting.PagerDuty.RoutingKeyRef = "openbao://umbrella/pagerduty#routing_key" })
+	f.h.st.Write(func(d *store.Data) {
+		d.Settings.Alerting.PagerDuty.RoutingKeyRef = "openbao://umbrella/pagerduty#routing_key"
+	})
 	got, steps = f.onboarding(f.admin)
 	if !steps[app.StepDelivery].Done || got.Done {
 		t.Fatalf("PagerDuty with a key = %+v, done %v", steps[app.StepDelivery], got.Done)
@@ -185,7 +187,7 @@ func TestConnectorTokenFromDialog(t *testing.T) {
 
 	var made struct {
 		Credential struct{ ID, Name, Type string } `json:"credential"`
-		Token      string                           `json:"token"`
+		Token      string                          `json:"token"`
 	}
 	f.expect(f.admin, http.MethodPost, "/api/connectors/credentials/token", map[string]string{"name": " Zabbix token "}, http.StatusCreated, &made)
 	if made.Credential.ID == "" || made.Credential.Name != "Zabbix token" || made.Credential.Type != flow.CredBearer || !strings.HasPrefix(made.Token, "umb_") || len(made.Token) < 40 {
