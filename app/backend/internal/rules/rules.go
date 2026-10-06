@@ -102,7 +102,7 @@ func Normalize(r *model.Rule) error {
 	switch {
 	case r.Name == "" || len(r.Name) > 200:
 		return errors.New("name")
-	case r.Method != model.MethodRED && r.Method != model.MethodUSE:
+	case !slices.Contains(model.RuleMethods, r.Method):
 		return errors.New("method")
 	case r.SourceID == "":
 		return errors.New("source")

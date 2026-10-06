@@ -9,6 +9,8 @@ import (
 	"maps"
 	"slices"
 	"time"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 )
 
 const (
@@ -45,10 +47,8 @@ const (
 	ViaNone     = "none"
 )
 
-var severityRank = map[string]int{"critical": 4, "error": 3, "warning": 2, "info": 1}
-
-// SeverityRank orders severities; unknown ones rank 0.
-func SeverityRank(s string) int { return severityRank[s] }
+// SeverityRank orders severities by model.Severities; unknown ones rank 0.
+func SeverityRank(s string) int { return model.SeverityRank(s) }
 
 func Active(status string) bool { return status == StatusOpen || status == StatusAcknowledged }
 

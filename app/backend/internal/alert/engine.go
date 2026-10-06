@@ -296,7 +296,7 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 			Status: StatusOpen, Sources: map[string]*Source{}, Labels: map[string]string{}, FirstSeen: now, OpenedAt: now, LastSeen: now,
 			PD: PD{State: PDPending, Key: "umb-" + id}}
 		if a.Method == "" {
-			a.Method = "other"
+			a.Method = model.MethodOther
 		}
 		a.EventCI = name
 		c.a = a
@@ -441,14 +441,11 @@ func (e *Engine) reroute(c *change, w *world, ci *model.ConfigItem, now time.Tim
 // is the probable cause of the RED one.
 func (e *Engine) link(ctx context.Context, tx pgx.Tx, c *change, now time.Time) error {
 	a := c.a
-	if len(a.Route.Services) == 0 || (a.Method != "red" && a.Method != "use") {
+	other := model.MethodCounterpart(a.Method)
+	if len(a.Route.Services) == 0 || other == "" {
 		return nil
 	}
-	other := "use"
-	if a.Method == "use" {
-		other = "red"
-	}
-	o, err := scanAlert(tx.QueryRow(ctx, `SELECT doc FROM alerts WHERE status <> 'resolved' AND method = $1 AND service_ids && $2
+	o, err := scanAlert(tx.QueryRow(ctx, `SELECT doc FROM alerts WHERE status <> '`+StatusResolved+`' AND method = $1 AND service_ids && $2
 		AND first_seen >= $3 AND id <> $4 ORDER BY first_seen DESC LIMIT 1 FOR UPDATE`, other, a.Route.ServiceIDs(), now.Add(-e.Window), a.ID))
 	if err != nil || o == nil {
 		return err
@@ -456,7 +453,7 @@ func (e *Engine) link(ctx context.Context, tx pgx.Tx, c *change, now time.Time) 
 	oc := &change{a: o}
 	a.RelatedID, o.RelatedID = o.ID, a.ID
 	red, use, redC, useC := a, o, c, oc
-	if a.Method == "use" {
+	if a.Method == model.MethodUSE {
 		red, use, redC, useC = o, a, oc, c
 	}
 	redC.log(now, KindStatus, "probable_cause", map[string]string{"alert": use.ID, "ci": use.CIName}, "")

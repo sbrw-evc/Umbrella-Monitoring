@@ -9,10 +9,11 @@ import { useSession } from '../session'
 import { Link } from '../../router'
 import { SourcesExplainer } from '../connectors/QuickConnect'
 import { strings } from './strings'
+import { RULE_METHODS, SEVERITIES, type RuleMethod } from '../incidents/types'
 import '../connectors/connectors.css'
 import './rules.css'
 
-type Method = 'red' | 'use'
+type Method = RuleMethod
 type Rule = {
   id: string
   name: string
@@ -40,7 +41,8 @@ type View = { rules: Rule[]; sources: Source[]; templates: Rule[]; ops: string[]
 type Preview = { series: { ci: string; labels: Record<string, string>; value: number; match: boolean; title: string }[]; total: number; matched: number; error?: string }
 type Credential = { id: string; name: string; type: string }
 
-const SEVERITIES = ['info', 'warning', 'error', 'critical']
+// The rule editor lists severities from the mildest up.
+const SEVERITY_OPTIONS = [...SEVERITIES].reverse()
 
 export function RulesPage() {
   const t = useT(strings)
@@ -359,8 +361,9 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
           <Field label={t('rl.method')}>
             {(id) => (
               <Select id={id} value={d.method} onChange={(e) => set({ method: e.target.value as Method })}>
-                <option value="red">{`RED · ${t('rl.method.red.hint')}`}</option>
-                <option value="use">{`USE · ${t('rl.method.use.hint')}`}</option>
+                {RULE_METHODS.map((m) => (
+                  <option key={m} value={m}>{`${m.toUpperCase()} · ${t(`rl.method.${m}.hint`)}`}</option>
+                ))}
               </Select>
             )}
           </Field>
@@ -403,7 +406,7 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
           <Field label={t('rl.severity')}>
             {(id) => (
               <Select id={id} value={d.severity} onChange={(e) => set({ severity: e.target.value })}>
-                {SEVERITIES.map((s) => (
+                {SEVERITY_OPTIONS.map((s) => (
                   <option key={s} value={s}>
                     {t(`sev.${s}`)}
                   </option>

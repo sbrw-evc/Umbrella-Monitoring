@@ -8,27 +8,30 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/textx"
 )
 
+// The severities and methods of an event are those of the model; the names stay here so the
+// nodes read as before.
 const (
-	SeverityCritical = "critical"
-	SeverityError    = "error"
-	SeverityWarning  = "warning"
-	SeverityInfo     = "info"
+	SeverityCritical = model.SeverityCritical
+	SeverityError    = model.SeverityError
+	SeverityWarning  = model.SeverityWarning
+	SeverityInfo     = model.SeverityInfo
 
 	StatusFiring   = "firing"
 	StatusResolved = "resolved"
 
-	MethodRED   = "red"
-	MethodUSE   = "use"
-	MethodOther = "other"
+	MethodRED   = model.MethodRED
+	MethodUSE   = model.MethodUSE
+	MethodOther = model.MethodOther
 
 	maxEventField = 1000
 	maxLabels     = 64
 )
 
-var Severities = []string{SeverityCritical, SeverityError, SeverityWarning, SeverityInfo}
+var Severities = model.SeverityNames()
 
 // Event is the normalized output of a connector: the fixed target schema of map.event.
 type Event struct {
@@ -99,11 +102,9 @@ func EventFromData(d map[string]any) (Event, error) {
 		return e, fmt.Errorf("status %q is neither firing nor resolved", e.Status)
 	}
 	e.Status = st
-	switch e.Method {
-	case "":
+	if e.Method == "" {
 		e.Method = MethodOther
-	case MethodRED, MethodUSE, MethodOther:
-	default:
+	} else if !model.ValidMethod(e.Method) {
 		return e, fmt.Errorf("method %q is not red, use or other", e.Method)
 	}
 	for _, f := range []*string{&e.Title, &e.CI, &e.Signal, &e.ExternalID, &e.Value} {

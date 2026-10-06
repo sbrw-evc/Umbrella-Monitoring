@@ -1,11 +1,11 @@
-import type { Severity } from '../incidents/types'
+import type { Method, Severity } from '../incidents/types'
 
 export type Ref = { id: string; name: string; missing?: boolean }
 
 export type Sort = 'newest' | 'oldest'
 export type BoardTheme = 'dark' | 'light'
 export type BoardLocale = '' | 'ru' | 'en'
-export type Method = 'red' | 'use' | 'other'
+export type { Method }
 
 // Wallboard is WallboardView of the admin API: the stored board, names of its targets and its public path.
 export type Wallboard = {
