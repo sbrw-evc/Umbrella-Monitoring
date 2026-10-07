@@ -1,6 +1,7 @@
 // Package notify is backup notification: when nobody has taken a severe enough incident
 // (PagerDuty is off, or did not take it in time), the people of its route get it by e-mail and
-// from a Telegram bot, with a link that acknowledges the incident. Once the incident is
+// from a Telegram bot, team channels also in Microsoft Teams and Zoom, with a link that
+// acknowledges the incident. Once the incident is
 // acknowledged or resolved, the same addresses get a short follow-up.
 package notify
 
@@ -25,6 +26,8 @@ import (
 const (
 	ChannelEmail    = "email"
 	ChannelTelegram = "telegram"
+	ChannelTeams    = "teams"
+	ChannelZoom     = "zoom"
 )
 
 var (
@@ -173,6 +176,8 @@ func (s *Service) settings() config {
 		c.set = d.Settings.Alerting
 		c.set.Notify.ExtraEmails = slices.Clone(d.Settings.Alerting.Notify.ExtraEmails)
 		c.set.Notify.ExtraTelegram = slices.Clone(d.Settings.Alerting.Notify.ExtraTelegram)
+		c.set.Notify.ExtraTeams = slices.Clone(d.Settings.Alerting.Notify.ExtraTeams)
+		c.set.Notify.ExtraZoom = slices.Clone(d.Settings.Alerting.Notify.ExtraZoom)
 		c.set.Notify.Templates = maps.Clone(d.Settings.Alerting.Notify.Templates)
 		c.locale = d.Settings.DefaultLocale
 	})
@@ -270,7 +275,7 @@ func (s *Service) targets(c config, a alert.Alert) []target {
 	return out
 }
 
-// Target is an address backup notification goes to.
+// Target is an address backup notification goes to; a webhook URL is redacted.
 type Target struct {
 	Channel string `json:"channel"`
 	Address string `json:"address"`
@@ -281,7 +286,7 @@ type Target struct {
 func (s *Service) PreviewTargets(r alert.Route) []Target {
 	out := []Target{}
 	for _, t := range s.targets(s.settings(), alert.Alert{Route: r}) {
-		out = append(out, Target{Channel: t.channel, Address: t.address})
+		out = append(out, Target{Channel: t.channel, Address: ShowAddress(t.channel, t.address)})
 	}
 	return out
 }
@@ -333,12 +338,13 @@ func (s *Service) Deliver(ctx context.Context, a alert.Alert) {
 	sent := map[string][]string{}
 	for _, t := range targets {
 		err := s.send(ctx, c, s.compose(c, a, t), t)
+		shown := ShowAddress(t.channel, t.address)
 		if err != nil {
-			slog.Warn("backup notification not sent", "alert", a.ID, "channel", t.channel, "to", t.address, "err", err)
-			s.note(ctx, a.ID, "notify_failed", map[string]string{"channel": t.channel, "to": t.address, "error": err.Error()})
+			slog.Warn("backup notification not sent", "alert", a.ID, "channel", t.channel, "to", shown, "err", err)
+			s.note(ctx, a.ID, "notify_failed", map[string]string{"channel": t.channel, "to": shown, "error": err.Error()})
 			continue
 		}
-		sent[t.channel] = append(sent[t.channel], t.address)
+		sent[t.channel] = append(sent[t.channel], shown)
 		reached = append(reached, alert.Notified{Channel: t.channel, Address: t.address, Recipient: t.recipient})
 	}
 	for _, ch := range Channels() {
@@ -391,7 +397,24 @@ func (s *Service) send(ctx context.Context, c config, m composed, t target) erro
 	return err
 }
 
-type composed struct{ subject, text, html string }
+// composed is a message: the parts of its template and its links, which Teams shows as buttons.
+type composed struct {
+	subject, text, html string
+	links               []link
+}
+
+type link struct{ title, url string }
+
+// withLinks adds the links of a message in the language of the messages.
+func (c composed) withLinks(locale string, m Message) composed {
+	w := lang(locale)
+	for _, l := range []link{{w["ack"], m.Ack}, {w["open"], m.Open}, {"Grafana", m.Grafana}} {
+		if l.url != "" {
+			c.links = append(c.links, l)
+		}
+	}
+	return c
+}
 
 // messages of the config: the built-in templates of its language with the overrides.
 func (c config) messages() messages {
@@ -413,7 +436,7 @@ func (s *Service) compose(c config, a alert.Alert, t target) composed {
 			m.Ack = base + "/ack/" + l.Sign(a.ID, t.recipient, s.now().Add(LinkTTL))
 		}
 	}
-	return c.messages().render("fallback", m)
+	return c.messages().render("fallback", m).withLinks(c.locale, m)
 }
 
 // incidentMessage is what the templates see of an incident.
@@ -434,7 +457,7 @@ func (s *Service) composeFollowUp(c config, a alert.Alert, tz *time.Location) co
 	if base := strings.TrimRight(c.set.PublicURL, "/"); base != "" {
 		m.Open = model.IncidentURL(base, a.ID)
 	}
-	return c.messages().render("followup", m)
+	return c.messages().render("followup", m).withLinks(c.locale, m)
 }
 
 // DeliverFollowUp tells the addresses backup notification reached that the incident was
@@ -475,12 +498,13 @@ func (s *Service) DeliverFollowUp(ctx context.Context, a alert.Alert) {
 			loc = loadTZ(tz[n.Recipient])
 		}
 		t := target{channel: n.Channel, address: n.Address, recipient: n.Recipient, tz: loc}
+		shown := ShowAddress(t.channel, t.address)
 		if err := s.send(ctx, c, s.composeFollowUp(c, a, loc), t); err != nil {
-			slog.Warn("follow-up not sent", "alert", a.ID, "channel", t.channel, "to", t.address, "err", err)
-			s.note(ctx, a.ID, "notify_followup_failed", map[string]string{"channel": t.channel, "to": t.address, "event": a.FollowUp, "error": err.Error()})
+			slog.Warn("follow-up not sent", "alert", a.ID, "channel", t.channel, "to", shown, "err", err)
+			s.note(ctx, a.ID, "notify_followup_failed", map[string]string{"channel": t.channel, "to": shown, "event": a.FollowUp, "error": err.Error()})
 			continue
 		}
-		sent[t.channel] = append(sent[t.channel], t.address)
+		sent[t.channel] = append(sent[t.channel], shown)
 	}
 	for _, ch := range Channels() {
 		if len(sent[ch]) > 0 {

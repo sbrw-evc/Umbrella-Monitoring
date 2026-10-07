@@ -104,3 +104,35 @@ func TestTeamChannelRoute(t *testing.T) {
 		t.Fatalf("empty team with a channel = %+v", p)
 	}
 }
+
+// A team whose only channel is a Teams or Zoom webhook is a team with its own channel too; the
+// webhook URLs are redacted where the alert is shown.
+func TestWebhookOnlyTeamChannelRoute(t *testing.T) {
+	ctx := context.Background()
+	e, st, _, c := setup(t)
+	const hook = "https://example.webhook.office.com/webhookb2/x/IncomingWebhook/y/secret-a1b2"
+	st.Write(func(d *store.Data) {
+		d.Teams["T-2"].Teams = hook
+		d.Teams["T-3"].Zoom = "https://integrations.zoom.us/chat/webhooks/incomingwebhook/secret-c3d4"
+	})
+	if err := e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "db-01.example.com", "cpu", "critical", "firing")}); err != nil {
+		t.Fatal(err)
+	}
+	a := active(t, e)[0]
+	r := a.Route
+	if r.Channel == nil || r.Channel.Teams != hook || len(r.People) != 1 || r.People[0].UserID != "U-1" {
+		t.Fatalf("route = %+v", r)
+	}
+	a.Notified = []alert.Notified{{Channel: "teams", Address: hook}, {Channel: "email", Address: "lead@example.com"}}
+	red := a.Redacted()
+	if red.Route.Channel.Teams != model.RedactURL(hook) || red.Notified[0].Address != model.RedactURL(hook) || red.Notified[1].Address != "lead@example.com" {
+		t.Fatalf("redacted = %+v %+v", red.Route.Channel, red.Notified)
+	}
+	if a.Route.Channel.Teams != hook || a.Notified[0].Address != hook {
+		t.Fatal("redaction changed the alert")
+	}
+	p, _, _ := alert.PreviewService(st, "S-2", c.now())
+	if p.Channel == nil || p.Channel.Zoom == "" || len(p.People) != 0 {
+		t.Fatalf("zoom-only team = %+v", p)
+	}
+}

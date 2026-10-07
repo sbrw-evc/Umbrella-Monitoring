@@ -15,7 +15,8 @@ export type RoutePreviewData = {
   team?: Ref
   people: Person[]
   owners: Person[]
-  channel?: { email?: string; telegram?: string }
+  // teams and zoom: webhook URLs, redacted by the server.
+  channel?: { email?: string; telegram?: string; teams?: string; zoom?: string }
   via: 'service' | 'ci_owners' | 'none'
   pagerduty_route: { id: string; name: string; min_severity: string; no_key?: boolean } | null
   elsewhere?: { ci: Ref; service: Ref; team?: Ref }[]
@@ -55,6 +56,13 @@ export function RoutePreview({ kind, id, version }: { kind: 'cis' | 'services'; 
   )
 }
 
+// CHANNEL_NAMES label addresses that do not tell their channel themselves (an e-mail does).
+const CHANNEL_NAMES: Record<string, string> = { telegram: 'Telegram', teams: 'Teams', zoom: 'Zoom' }
+
+function targetLabel(channel: string, address: string) {
+  return CHANNEL_NAMES[channel] ? `${CHANNEL_NAMES[channel]} ${address}` : address
+}
+
 function names(ps: Person[], lead: string) {
   return ps.map((p) => (p.role === 'lead' ? `${p.name} (${lead})` : p.name)).join(', ')
 }
@@ -62,7 +70,10 @@ function names(ps: Person[], lead: string) {
 function RouteRows({ data }: { data: RoutePreviewData }) {
   const t = useT(strings)
   const others = data.services.filter((s) => s.id !== data.service?.id)
-  const channel = [data.channel?.email, data.channel?.telegram].filter(Boolean).join(', ')
+  const channel = (['email', 'telegram', 'teams', 'zoom'] as const)
+    .filter((c) => data.channel?.[c])
+    .map((c) => targetLabel(c, data.channel?.[c] ?? ''))
+    .join(', ')
   let receives: ReactNode
   if (data.via === 'service') {
     receives = (
@@ -91,7 +102,7 @@ function RouteRows({ data }: { data: RoutePreviewData }) {
   let backup: ReactNode = <span className="muted">{t('rt.backup.off')}</span>
   if (data.backup) {
     const b = data.backup
-    const shown = b.targets.slice(0, MAX_TARGETS).map((x) => (x.channel === 'telegram' ? `Telegram ${x.address}` : x.address))
+    const shown = b.targets.slice(0, MAX_TARGETS).map((x) => targetLabel(x.channel, x.address))
     const more = b.targets.length - shown.length
     const delay = b.delay_seconds === 0 ? t('rt.backup.now') : b.delay_seconds % 60 === 0 ? t('rt.backup.min', { n: b.delay_seconds / 60 }) : t('rt.backup.sec', { n: b.delay_seconds })
     backup = (

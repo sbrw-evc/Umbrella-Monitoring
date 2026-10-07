@@ -56,8 +56,15 @@ export type NotifyView = {
     from: string
   }
   telegram: { enabled: boolean; api_url?: string }
+  // Absent on an older server.
+  teams?: { enabled: boolean }
+  zoom?: { enabled: boolean }
   extra_emails: string[]
   extra_telegram: string[]
+  // Webhook URLs of Teams channels and Zoom chats.
+  extra_teams?: string[]
+  extra_zoom?: string[]
+  has_zoom_token?: boolean
   updated_at?: string
   updated_by?: string
   has_password: boolean

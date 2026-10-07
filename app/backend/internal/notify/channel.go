@@ -18,6 +18,11 @@ type channel interface {
 	Valid(addr string) bool
 	// Recipient is who an address of the channel is, for acknowledgement links.
 	Recipient(addr string) string
+	// Show is an address as records and logs show it: webhook URLs carry a secret and are
+	// redacted.
+	Show(addr string) string
+	// Ready: the channel is turned on and has what it needs to send.
+	Ready(n model.Notify) bool
 	// Addresses of a person, a team channel, a user and the extra recipients.
 	Person(p alert.Person) string
 	Team(ch alert.Channel) string
@@ -33,7 +38,7 @@ type channel interface {
 }
 
 // channels in the order addresses are collected and outcomes recorded.
-var channels = []channel{emailChannel{}, telegramChannel{}}
+var channels = []channel{emailChannel{}, telegramChannel{}, teamsChannel{}, zoomChannel{}}
 
 func channelOf(kind string) channel {
 	for _, ch := range channels {
@@ -62,6 +67,41 @@ func ValidAddress(kind, addr string) bool {
 	return ch != nil && ch.Valid(addr)
 }
 
+// ShowAddress is an address of a channel as records show it (webhook URLs redacted).
+func ShowAddress(kind, addr string) string {
+	if ch := channelOf(kind); ch != nil {
+		return ch.Show(addr)
+	}
+	return addr
+}
+
+// Reaches tells whether backup notification would reach somebody: a channel that is set up has
+// an extra recipient, an address of one of the users or one of the teams has it as its own
+// channel.
+func Reaches(n model.Notify, users []*model.User, teams []*model.Team) bool {
+	for _, ch := range channels {
+		if !ch.Ready(n) {
+			continue
+		}
+		for _, addr := range ch.Extra(n) {
+			if ch.Valid(addr) {
+				return true
+			}
+		}
+		for _, u := range users {
+			if ch.Valid(ch.User(*u)) {
+				return true
+			}
+		}
+		for _, t := range teams {
+			if ch.Valid(ch.Team(alert.TeamChannel(*t))) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // UserAddress is the address of a user in a channel (empty when it is not set or the channel
 // is unknown).
 func UserAddress(kind string, u model.User) string {
@@ -77,6 +117,8 @@ func (emailChannel) Kind() string                          { return ChannelEmail
 func (emailChannel) Enabled(n model.Notify) bool           { return n.Email.Enabled }
 func (emailChannel) Valid(addr string) bool                { return ValidEmail(addr) }
 func (emailChannel) Recipient(addr string) string          { return EmailRecipient(addr) }
+func (emailChannel) Show(addr string) string               { return addr }
+func (emailChannel) Ready(n model.Notify) bool             { return n.Email.Enabled && n.Email.Host != "" }
 func (emailChannel) Person(p alert.Person) string          { return p.Email }
 func (emailChannel) Team(ch alert.Channel) string          { return ch.Email }
 func (emailChannel) User(u model.User) string              { return u.Email }
@@ -93,10 +135,14 @@ func (c emailChannel) Test(ctx context.Context, s *Service, n model.Notify, secr
 
 type telegramChannel struct{}
 
-func (telegramChannel) Kind() string                  { return ChannelTelegram }
-func (telegramChannel) Enabled(n model.Notify) bool   { return n.Telegram.Enabled }
-func (telegramChannel) Valid(addr string) bool        { return ValidChat(addr) }
-func (telegramChannel) Recipient(addr string) string  { return TelegramRecipient(addr) }
+func (telegramChannel) Kind() string                 { return ChannelTelegram }
+func (telegramChannel) Enabled(n model.Notify) bool  { return n.Telegram.Enabled }
+func (telegramChannel) Valid(addr string) bool       { return ValidChat(addr) }
+func (telegramChannel) Recipient(addr string) string { return TelegramRecipient(addr) }
+func (telegramChannel) Show(addr string) string      { return addr }
+func (telegramChannel) Ready(n model.Notify) bool {
+	return n.Telegram.Enabled && n.Telegram.TokenRef != ""
+}
 func (telegramChannel) Person(p alert.Person) string  { return p.Telegram }
 func (telegramChannel) Team(ch alert.Channel) string  { return ch.Telegram }
 func (telegramChannel) User(u model.User) string      { return u.Telegram }
