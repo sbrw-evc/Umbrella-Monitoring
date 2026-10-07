@@ -206,6 +206,10 @@ type PD struct {
 	// Escalated: the incident left standby (or was sent by hand or by an escalation step), so a
 	// new trigger goes to PagerDuty whatever the mode says. Cleared when the alert reopens.
 	Escalated bool `json:"escalated,omitempty"`
+	// Queue is the PagerDuty service the incident is in, as PagerDuty last said; it changes when
+	// the incident is moved to another service there.
+	Queue     string `json:"queue,omitempty"`
+	QueueName string `json:"queue_name,omitempty"`
 }
 
 type Alert struct {

@@ -43,6 +43,9 @@ export type Route = { services: Ref[]; team?: Ref; people: Person[]; owners: Per
 export type PD = {
   state: 'pending' | 'accepted' | 'acked' | 'failed' | 'skipped' | 'off' | 'standby'
   escalated?: boolean
+  // The PagerDuty service (queue) the incident is in.
+  queue?: string
+  queue_name?: string
   key: string
   route?: string
   error?: string

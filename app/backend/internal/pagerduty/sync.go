@@ -20,7 +20,8 @@ import (
 //     in PagerDuty reaches Umbrella even when a webhook was lost or PagerDuty cannot reach it;
 //   - comments made in Umbrella become notes of the incident;
 //   - the response priority (P1–P5) is set on the incident;
-//   - who is on call is read, shown and given the notifications of Umbrella.
+//   - who is on call is read, shown and given the notifications of Umbrella;
+//   - the queues (services) are read and linked to the teams of Umbrella (queues.go).
 
 var (
 	ErrNoFrom       = errors.New("no PagerDuty user to write as (From e-mail) is set")
@@ -34,8 +35,8 @@ const (
 	// for one by one (resolved ones no longer in the open list).
 	syncBatch   = 500
 	lookupBatch = 50
-	// onCallEvery is how often the on-call people are read.
-	onCallEvery = 5 * time.Minute
+	// directoryEvery is how often the on-call people and the queues are read.
+	directoryEvery = 5 * time.Minute
 	// notePrefix marks the notes Umbrella writes, so their webhooks are not taken as news.
 	notePrefix = "[Umbrella] "
 )
@@ -48,6 +49,7 @@ type incident struct {
 	HTMLURL         string    `json:"html_url"`
 	LastStatusBy    *summary  `json:"last_status_change_by"`
 	Priority        *summary  `json:"priority"`
+	Service         summary   `json:"service"`
 	Acknowledgments []ackInfo `json:"acknowledgements"`
 }
 
@@ -276,7 +278,7 @@ func (g *Gateway) sync(ctx context.Context) (SyncResult, error) {
 // change is the update that brings an alert in line with its PagerDuty incident; false when
 // they agree.
 func change(a alert.Alert, in incident) (alert.PDUpdate, bool) {
-	u := alert.PDUpdate{DedupKey: a.PD.Key, IncidentID: in.ID, IncidentURL: in.HTMLURL, Detail: "sync"}
+	u := alert.PDUpdate{DedupKey: a.PD.Key, IncidentID: in.ID, IncidentURL: in.HTMLURL, Detail: "sync", Queue: in.Service.ID, QueueName: in.Service.Summary}
 	switch {
 	case in.Status == "resolved" && alert.Active(a.Status):
 		u.EventType = "incident.resolved"
@@ -289,6 +291,9 @@ func change(a alert.Alert, in incident) (alert.PDUpdate, bool) {
 		u.EventType = "incident.unacknowledged"
 	case a.PD.IncidentID == "" && in.ID != "":
 		u.EventType = "incident.triggered"
+	case in.Service.ID != "" && in.Service.ID != a.PD.Queue:
+		// Moved to another queue (service) in PagerDuty: no change of state.
+		u.EventType = ""
 	default:
 		return u, false
 	}
@@ -464,9 +469,10 @@ func (g *Gateway) OnCallPeople(a alert.Alert) []alert.Person {
 	return out
 }
 
-// RunSync reads incident states back and the on-call people on their schedules until ctx ends.
+// RunSync reads incident states back, the on-call people and the queues on their schedules
+// until ctx ends.
 func (g *Gateway) RunSync(ctx context.Context) {
-	var lastSync, lastOnCall time.Time
+	var lastSync, lastDirectory time.Time
 	tick := time.NewTicker(5 * time.Second)
 	defer tick.Stop()
 	for {
@@ -486,10 +492,13 @@ func (g *Gateway) RunSync(ctx context.Context) {
 				slog.Warn("pagerduty read-back failed", "err", err)
 			}
 		}
-		if now.Sub(lastOnCall) >= onCallEvery {
-			lastOnCall = now
+		if now.Sub(lastDirectory) >= directoryEvery {
+			lastDirectory = now
 			if err := g.RefreshOnCall(ctx); err != nil && ctx.Err() == nil {
 				slog.Warn("pagerduty on-call not read", "err", err)
+			}
+			if err := g.RefreshQueues(ctx); err != nil && ctx.Err() == nil {
+				slog.Warn("pagerduty queues not read", "err", err)
 			}
 		}
 	}

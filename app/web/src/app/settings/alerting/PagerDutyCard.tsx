@@ -9,6 +9,7 @@ import { ProfileCard } from '../../profile/ProfileCard'
 import { SummaryCard } from '../../profile/SummaryCard'
 import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
+import { PDQueues } from './PDQueues'
 import { strings } from './strings'
 import { severityText } from '../../incidents/types'
 import { PD_MODES, SEVERITIES, type PagerDutyView, type PDService, type PDSync, type Refs } from './types'
@@ -70,6 +71,7 @@ function draftOf(v: PagerDutyView): Draft {
       notes: !!v.sync?.notes,
       priority: !!v.sync?.priority,
       on_call: !!v.sync?.on_call,
+      queues: !!v.sync?.queues,
     },
   }
 }
@@ -104,6 +106,8 @@ export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void
   const [view, setView] = useState<PagerDutyView | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [services, setServices] = useState<PDService[] | null>(null)
+  // queuesKey reloads the queues after a synchronization.
+  const [queuesKey, setQueuesKey] = useState(0)
   const refs = useResource<Refs>('/api/refs', 0)
   const loader = useAction(strings)
   const saver = useAction(strings)
@@ -166,6 +170,7 @@ export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void
     other.run(async () => {
       const r = await api<{ applied: number }>('POST', '/api/pagerduty/sync')
       setView(await api<PagerDutyView>('GET', '/api/pagerduty'))
+      setQueuesKey((k) => k + 1)
       return t('pd.sync.done', { n: r.applied })
     })
 
@@ -443,6 +448,10 @@ export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void
                     </>
                   )}
                 </section>
+
+                {view.has_api_token && (
+                  <PDQueues view={view} queues={draft.sync.queues} onQueues={(queues) => setSync({ queues })} dirty={dirty} reloadKey={queuesKey + reloadKey} />
+                )}
 
                 <section className="al-section">
                   <h3 className="al-sub">{t('pd.webhook')}</h3>

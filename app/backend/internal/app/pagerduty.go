@@ -374,11 +374,13 @@ func (a *App) registerPagerDuty(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/pagerduty/subscription", a.authed(a.can("settings.alerting:edit", a.pdSubscribe)))
 	mux.HandleFunc("DELETE /api/pagerduty/subscription", a.authed(a.can("settings.alerting:edit", a.pdUnsubscribe)))
 	mux.HandleFunc("POST /api/pagerduty/sync", a.authed(a.can("settings.alerting:test", a.pdSync)))
+	mux.HandleFunc("GET /api/pagerduty/queues", a.authed(a.can("settings.alerting:view", a.pdQueues)))
+	mux.HandleFunc("POST /api/pagerduty/queues/link", a.authed(a.can("settings.alerting:edit", a.pdLinkQueues)))
 	mux.HandleFunc("POST /api/incidents/{id}/pagerduty", a.authed(a.can("incidents:ack", a.pdEscalate)))
 	mux.HandleFunc("POST "+pdWebhookPath, a.pdWebhook)
 }
 
-// pdSync reads incident states and the on-call people back from PagerDuty now.
+// pdSync reads incident states, the on-call people and the queues back from PagerDuty now.
 func (a *App) pdSync(w http.ResponseWriter, r *http.Request) {
 	if !a.alertsReady(w) {
 		return
@@ -386,6 +388,9 @@ func (a *App) pdSync(w http.ResponseWriter, r *http.Request) {
 	out, err := a.pdGateway.Sync(r.Context())
 	if err == nil {
 		err = a.pdGateway.RefreshOnCall(r.Context())
+	}
+	if err == nil {
+		err = a.pdGateway.RefreshQueues(r.Context())
 	}
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, "pagerduty_failed", err)
