@@ -226,11 +226,6 @@
   cursor: pointer;
 }
 
-.wb-check input {
-  accent-color: var(--accent);
-  margin: 0;
-}
-
 .wb-sev-dot {
   width: 9px;
   height: 9px;

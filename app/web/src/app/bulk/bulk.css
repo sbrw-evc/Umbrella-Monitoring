@@ -48,14 +48,22 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--input-border);
+  border-radius: var(--control-radius);
   cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+}
+
+.bulk-option:hover {
+  border-color: var(--input-border-hover);
 }
 
 .bulk-option.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
+  border-color: var(--chip-on-border);
+  background: var(--chip-on-bg);
+  box-shadow: 0 0 0 1px var(--chip-on-border);
 }
 
 .bulk-option .muted {

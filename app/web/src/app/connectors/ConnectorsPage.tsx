@@ -5,7 +5,7 @@ import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Link, useRouter } from '../../router'
-import { Banner, Button, Field, formatDate, Input, Modal, Select, Textarea } from '../../ui'
+import { Banner, Button, Field, FileInput, formatDate, Input, Modal, Select, Textarea } from '../../ui'
 import { useSession } from '../session'
 import { CreateToken, useCanCreateToken } from './CreateToken'
 import { ConnectorEditor } from './Editor'
@@ -405,7 +405,7 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
       }
     >
       <Field label={t('cn.import.file')} hint={t('cn.import.file.hint')}>
-        {(id) => <input id={id} type="file" accept="application/json,.json" onChange={(e) => void pick(e.target.files?.[0])} />}
+        {(id) => <FileInput id={id} accept="application/json,.json" onFile={(f) => void pick(f)} />}
       </Field>
       {fileError && <Flash kind="error" title={fileError} />}
       {check && (

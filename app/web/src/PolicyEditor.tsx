@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Choices } from './Choice'
 import { useT } from './i18n'
@@ -48,6 +48,7 @@ export function PolicyEditor({ value: policy, onChange }: { value: PasswordPolic
               max={64}
               value={Math.min(policy.min_length, 64)}
               onChange={(e) => set({ min_length: Number(e.target.value) })}
+              style={{ '--fill': `${((Math.min(policy.min_length, 64) - 8) / (64 - 8)) * 100}%` } as CSSProperties}
               aria-label={t('pol.length')}
             />
             <Stepper id={id} label={t('pol.length')} min={8} max={128} value={policy.min_length} onChange={(v) => set({ min_length: v })} />

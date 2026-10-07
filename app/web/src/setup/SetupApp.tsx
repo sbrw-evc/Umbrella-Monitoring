@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
-import { Check, CheckCircle2, Circle } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { AnimatePresence, motion, MotionConfig, type Variants } from 'motion/react'
 import { api, ApiError, type Locale, type Meta, type Theme } from '../api'
 import { errorText, useLocale, useT } from '../i18n'
@@ -10,7 +10,7 @@ import { PolicyChecklist } from '../PolicyChecklist'
 import { checkPassword, defaultPolicy, policyError, policyRows, type PasswordPolicy } from '../policy'
 import { policyEditorStrings } from '../policyEditorStrings'
 import { PolicyEditor } from '../PolicyEditor'
-import { Choice, Pop } from '../Choice'
+import { Choice, ChoiceMark, Pop } from '../Choice'
 import type { Check as Probe } from '../connections/CheckResult'
 import { LdapCheckResult, LdapForm } from '../connections/LdapForm'
 import { ldapCheckKey, ldapComplete, ldapConfig, ldapDraft, ldapTestBody, type LdapDraft, type LdapReport } from '../connections/ldap'
@@ -416,13 +416,7 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
                                 setLocale(l, false)
                               }}
                             >
-                              {defaults.locale === l ? (
-                                <Pop>
-                                  <CheckCircle2 size={18} color="var(--accent)" />
-                                </Pop>
-                              ) : (
-                                <Circle size={18} color="var(--muted)" />
-                              )}
+                              <ChoiceMark checked={defaults.locale === l} />
                               <span className="choice-title">{t(`lang.${l}`)}</span>
                             </Choice>
                           ))}

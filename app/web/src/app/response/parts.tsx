@@ -36,7 +36,7 @@ export function Toggles<T extends string>({
             type="button"
             aria-pressed={on}
             disabled={disabled}
-            className={`rs-toggle${on ? ' on' : ''}${on && off?.(v) ? ' warn' : ''}`}
+            className={`chip rs-toggle${on ? ' on' : ''}${on && off?.(v) ? ' warn' : ''}`}
             onClick={() => onChange(on ? selected.filter((x) => x !== v) : [...selected, v])}
           >
             {word(v)}

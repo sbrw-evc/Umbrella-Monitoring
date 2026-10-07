@@ -29,7 +29,7 @@ export function DeleteDialog({ service, onClose, onDeleted }: { service: Service
           <Button variant="ghost" onClick={close}>
             {t('svc.cancel')}
           </Button>
-          <Button variant="primary" className="svc-danger-solid" busy={remover.busy} onClick={confirm}>
+          <Button variant="danger" busy={remover.busy} onClick={confirm}>
             {t('svc.delete.confirm')}
           </Button>
         </>

@@ -192,20 +192,6 @@
   flex: 1 1 220px;
 }
 
-.usr-danger {
-  color: var(--error);
-}
-
-.usr-danger-solid {
-  background: var(--error);
-  border-color: var(--error);
-  color: var(--accent-text);
-}
-
-.usr-danger-solid:hover:not(:disabled) {
-  filter: brightness(1.08);
-}
-
 @media (max-width: 860px) {
   .usr-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));

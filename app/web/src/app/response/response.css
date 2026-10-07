@@ -122,39 +122,10 @@
   gap: 6px;
 }
 
-.rs-toggle {
-  padding: 5px 11px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    border-color 0.15s ease;
-}
-
-.rs-toggle:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-.rs-toggle.on {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
-}
-
 .rs-toggle.on.warn {
   border-color: var(--warn);
   background: var(--warn-soft);
   color: var(--text);
-}
-
-.rs-toggle:disabled {
-  cursor: default;
 }
 
 .rs-picks {
