@@ -29,6 +29,7 @@
             {"from": "critical", "to": "critical"},
             {"from": "error", "to": "error"},
             {"from": "warning", "to": "warning"},
+            {"from": "low", "to": "low"},
             {"from": "info", "to": "info"},
             {"from": "*", "to": "warning"}
           ]

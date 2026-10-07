@@ -124,3 +124,25 @@ func TestBoard(t *testing.T) {
 		t.Fatalf("default counts = %+v", p.Counts)
 	}
 }
+
+func TestBoardPriorityOrder(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	e := boardEngine(t, now, []boardAlert{
+		{id: "INC-5", sev: "info", method: "other", status: StatusOpen, opened: time.Minute},
+		{id: "INC-4", sev: "low", method: "other", status: StatusOpen, opened: time.Minute},
+		{id: "INC-3", sev: "warning", method: "other", status: StatusOpen, opened: time.Minute},
+		{id: "INC-2", sev: "error", method: "other", status: StatusOpen, opened: time.Minute},
+		{id: "INC-1", sev: "critical", method: "other", status: StatusOpen, opened: time.Minute},
+		{id: "INC-6", sev: "low", method: "other", status: StatusOpen, opened: 2 * time.Minute},
+	})
+	ids, p := boardIDs(t, e, BoardFilter{})
+	if want := []string{"INC-1", "INC-2", "INC-3", "INC-4", "INC-6", "INC-5"}; !slices.Equal(ids, want) {
+		t.Fatalf("P1..P5 order: got %v, want %v", ids, want)
+	}
+	if want := (model.SeverityCounts{Critical: 1, Error: 1, Warning: 1, Low: 2, Info: 1}); p.Counts.SeverityCounts != want {
+		t.Fatalf("counts = %+v, want %+v", p.Counts.SeverityCounts, want)
+	}
+	if ids, _ := boardIDs(t, e, BoardFilter{Severities: []string{"low"}}); !slices.Equal(ids, []string{"INC-4", "INC-6"}) {
+		t.Fatalf("low only: %v", ids)
+	}
+}
