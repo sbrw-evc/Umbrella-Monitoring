@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"io/fs"
 	"log/slog"
 	"slices"
@@ -114,14 +115,11 @@ func parseSet(locale string, overrides map[string]string) (*template.Template, e
 			}
 			return v
 		},
-		"include": func(name string, data any) (string, error) {
-			var b strings.Builder
-			err := root.ExecuteTemplate(&b, name, data)
-			return b.String(), err
-		},
-		"join":  strings.Join,
-		"upper": strings.ToUpper,
-		"lower": strings.ToLower,
+		// include is replaced for each run by execute, which bounds how deep it nests.
+		"include": func(string, any) (string, error) { return "", errors.New("include outside execute") },
+		"join":    strings.Join,
+		"upper":   strings.ToUpper,
+		"lower":   strings.ToLower,
 		// html escapes as the messages always did (html.EscapeString).
 		"html": func(v any) string { return html.EscapeString(fmt.Sprint(v)) },
 	})
@@ -199,17 +197,42 @@ func newMessages(locale string, overrides map[string]string) messages {
 	return m
 }
 
+// maxInclude bounds how deep include nests: a template that includes itself fails instead of
+// overflowing the stack.
+const maxInclude = 16
+
+// execute runs a template of a set. Each run works on its own clone, so the include depth is
+// counted per run even while messages render concurrently.
+func execute(set *template.Template, w io.Writer, name string, data any) error {
+	run, err := set.Clone()
+	if err != nil {
+		return err
+	}
+	depth := 0
+	run.Funcs(template.FuncMap{"include": func(name string, data any) (string, error) {
+		if depth >= maxInclude {
+			return "", fmt.Errorf("include %q: nested more than %d deep", name, maxInclude)
+		}
+		depth++
+		defer func() { depth-- }()
+		var b strings.Builder
+		err := run.ExecuteTemplate(&b, name, data)
+		return b.String(), err
+	}})
+	return run.ExecuteTemplate(w, name, data)
+}
+
 func (m messages) exec(name string, data any) string {
 	if m.custom != nil {
 		var b strings.Builder
-		err := m.custom.ExecuteTemplate(&b, name, data)
+		err := execute(m.custom, &b, name, data)
 		if err == nil {
 			return b.String()
 		}
 		slog.Warn("notification template failed: the built-in one is used", "template", name, "err", err)
 	}
 	var b strings.Builder
-	if err := m.builtin.ExecuteTemplate(&b, name, data); err != nil {
+	if err := execute(m.builtin, &b, name, data); err != nil {
 		slog.Error("built-in notification template failed", "template", name, "err", err)
 	}
 	return b.String()
@@ -262,7 +285,7 @@ func CheckTemplates(overrides map[string]string) error {
 				if _, ok := overrides[n]; !ok || !strings.HasPrefix(n, sample.message+".") {
 					continue
 				}
-				if err := set.ExecuteTemplate(&strings.Builder{}, n, sample.data); err != nil {
+				if err := execute(set, &strings.Builder{}, n, sample.data); err != nil {
 					return &TemplateError{Name: n, Err: err}
 				}
 			}
@@ -318,7 +341,7 @@ func PreviewTemplates(locale string, overrides map[string]string) ([]Preview, er
 		for _, part := range templateParts {
 			n := s.message + "." + part
 			if _, ok := overrides[n]; ok {
-				if err := m.custom.ExecuteTemplate(&strings.Builder{}, n, s.data); err != nil && p.Error == "" {
+				if err := execute(m.custom, &strings.Builder{}, n, s.data); err != nil && p.Error == "" {
 					p.Error = (&TemplateError{Name: n, Err: err}).Error()
 				}
 			}

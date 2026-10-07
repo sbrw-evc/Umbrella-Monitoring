@@ -54,6 +54,9 @@ func TestCleanTemplates(t *testing.T) {
 		"followup.subject": "{{template \"nowhere\" .}}",
 		"partials":         "x",
 		"nope.text":        "x",
+		"test.subject":     `{{include "test.subject" .}}`,
+		"test.text":        `{{define "loop"}}{{template "loop" .}}{{end}}{{template "loop" .}}`,
+		"test.html":        `{{define "loop2"}}{{include "loop2" .}}{{end}}{{include "loop2" .}}`,
 	} {
 		_, err := CleanTemplates(map[string]string{name: body})
 		var te *TemplateError
