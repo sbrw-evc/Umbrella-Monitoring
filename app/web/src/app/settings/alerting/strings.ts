@@ -168,7 +168,7 @@ export const strings: Dict = {
     'err.template_invalid': 'A message template has an error.',
     'nt.tpl': 'Message templates',
     'nt.tpl.hint':
-      'Go text/template. Fields: .ID, .Title, .Severity, .CI, .Signal, .Services, .Team.Name, .Opened, .PDState, .Ack, .Open, .Grafana; follow-ups also .Event, .AckedBy, .AckedAt, .ResolvedBy, .ResolvedAt. Words of the language: t "severity"; for Telegram escape values with html. Empty or unchanged: the built-in template.',
+      'Go text/template. Fields: .ID, .Title, .Severity, .CI, .Signal, .Services, .Team.Name, .Opened, .PDState, .Ack, .Open, .Grafana; follow-ups also .Event, .AckedBy, .AckedAt, .ResolvedBy, .ResolvedAt. Words of the language: t "severity". In Telegram (HTML) every value is escaped for you; add tags such as <b> and <a href> freely. Empty or unchanged: the built-in template.',
     'nt.tpl.builtin': 'Built-in',
     'nt.tpl.changed': 'changed: {n}',
     'nt.tpl.custom': 'Replaces the built-in template.',
@@ -353,7 +353,7 @@ export const strings: Dict = {
     'err.template_invalid': 'В шаблоне сообщения ошибка.',
     'nt.tpl': 'Шаблоны сообщений',
     'nt.tpl.hint':
-      'Go text/template. Поля: .ID, .Title, .Severity, .CI, .Signal, .Services, .Team.Name, .Opened, .PDState, .Ack, .Open, .Grafana; в сообщениях о ходе инцидента также .Event, .AckedBy, .AckedAt, .ResolvedBy, .ResolvedAt. Слова языка: t "severity"; для Telegram значения экранируются через html. Пусто или без изменений — встроенный шаблон.',
+      'Go text/template. Поля: .ID, .Title, .Severity, .CI, .Signal, .Services, .Team.Name, .Opened, .PDState, .Ack, .Open, .Grafana; в сообщениях о ходе инцидента также .Event, .AckedBy, .AckedAt, .ResolvedBy, .ResolvedAt. Слова языка: t "severity". В Telegram (HTML) значения экранируются автоматически; теги вроде <b> и <a href> можно писать как есть. Пусто или без изменений — встроенный шаблон.',
     'nt.tpl.builtin': 'Встроенные',
     'nt.tpl.changed': 'изменено: {n}',
     'nt.tpl.custom': 'Заменяет встроенный шаблон.',

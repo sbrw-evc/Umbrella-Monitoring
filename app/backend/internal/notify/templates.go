@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"reflect"
 	"slices"
 	"strings"
 	"text/template"
@@ -108,13 +109,7 @@ func parseSet(locale string, overrides map[string]string) (*template.Template, e
 	var root *template.Template
 	root = template.New("").Funcs(template.FuncMap{
 		// t is a word; pairs of arguments fill its {placeholders}.
-		"t": func(key string, kv ...string) string {
-			v := w[key]
-			for i := 0; i+1 < len(kv); i += 2 {
-				v = strings.ReplaceAll(v, "{"+kv[i]+"}", kv[i+1])
-			}
-			return v
-		},
+		"t": wordFunc(w, false),
 		// include is replaced for each run by execute, which bounds how deep it nests.
 		"include": func(string, any) (string, error) { return "", errors.New("include outside execute") },
 		"join":    strings.Join,
@@ -197,16 +192,103 @@ func newMessages(locale string, overrides map[string]string) messages {
 	return m
 }
 
+// wordFunc is the t of the templates: a word of w whose {placeholders} the pairs of arguments
+// fill. With escape the word is HTML-escaped first; the arguments are escaped already then.
+func wordFunc(w map[string]string, escape bool) func(key string, kv ...string) string {
+	return func(key string, kv ...string) string {
+		v := w[key]
+		if escape {
+			v = html.EscapeString(v)
+		}
+		for i := 0; i+1 < len(kv); i += 2 {
+			v = strings.ReplaceAll(v, "{"+kv[i]+"}", kv[i+1])
+		}
+		return v
+	}
+}
+
+// isHTML tells the parts sent as Telegram HTML: <message>.html.
+func isHTML(name string) bool { return strings.HasSuffix(name, ".html") }
+
+// escaped is a copy of data whose strings (in structs, pointers, slices and maps) are
+// HTML-escaped, so a template sees only text that is safe in Telegram HTML.
+func escaped(data any) any {
+	if data == nil {
+		return nil
+	}
+	return escapeValue(reflect.ValueOf(data)).Interface()
+}
+
+func escapeValue(v reflect.Value) reflect.Value {
+	switch v.Kind() {
+	case reflect.String:
+		return reflect.ValueOf(html.EscapeString(v.String())).Convert(v.Type())
+	case reflect.Pointer:
+		if v.IsNil() {
+			return v
+		}
+		p := reflect.New(v.Type().Elem())
+		p.Elem().Set(escapeValue(v.Elem()))
+		return p
+	case reflect.Interface:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.New(v.Type()).Elem()
+		out.Set(escapeValue(v.Elem()))
+		return out
+	case reflect.Struct:
+		out := reflect.New(v.Type()).Elem()
+		out.Set(v)
+		for i := range v.NumField() {
+			if out.Field(i).CanSet() {
+				out.Field(i).Set(escapeValue(v.Field(i)))
+			}
+		}
+		return out
+	case reflect.Slice:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+		for i := range v.Len() {
+			out.Index(i).Set(escapeValue(v.Index(i)))
+		}
+		return out
+	case reflect.Map:
+		if v.IsNil() {
+			return v
+		}
+		out := reflect.MakeMapWithSize(v.Type(), v.Len())
+		for it := v.MapRange(); it.Next(); {
+			out.SetMapIndex(it.Key(), escapeValue(it.Value()))
+		}
+		return out
+	}
+	return v
+}
+
 // maxInclude bounds how deep include nests: a template that includes itself fails instead of
 // overflowing the stack.
 const maxInclude = 16
 
-// execute runs a template of a set. Each run works on its own clone, so the include depth is
-// counted per run even while messages render concurrently.
-func execute(set *template.Template, w io.Writer, name string, data any) error {
+// execute runs a template of a set in a language. Each run works on its own clone, so the
+// include depth is counted per run even while messages render concurrently.
+//
+// A Telegram HTML part (<message>.html) sees escaped data and escaped words, and html returns
+// its argument as is: a template, an administrator's one too, cannot put unescaped text into
+// the message whether it calls html or not, and the built-in ones read as before.
+func execute(set *template.Template, locale string, w io.Writer, name string, data any) error {
 	run, err := set.Clone()
 	if err != nil {
 		return err
+	}
+	if isHTML(name) {
+		data = escaped(data)
+		run.Funcs(template.FuncMap{
+			"t":    wordFunc(lang(locale), true),
+			"html": func(v any) string { return fmt.Sprint(v) },
+		})
 	}
 	depth := 0
 	run.Funcs(template.FuncMap{"include": func(name string, data any) (string, error) {
@@ -225,14 +307,14 @@ func execute(set *template.Template, w io.Writer, name string, data any) error {
 func (m messages) exec(name string, data any) string {
 	if m.custom != nil {
 		var b strings.Builder
-		err := execute(m.custom, &b, name, data)
+		err := execute(m.custom, m.locale, &b, name, data)
 		if err == nil {
 			return b.String()
 		}
 		slog.Warn("notification template failed: the built-in one is used", "template", name, "err", err)
 	}
 	var b strings.Builder
-	if err := execute(m.builtin, &b, name, data); err != nil {
+	if err := execute(m.builtin, m.locale, &b, name, data); err != nil {
 		slog.Error("built-in notification template failed", "template", name, "err", err)
 	}
 	return b.String()
@@ -285,7 +367,7 @@ func CheckTemplates(overrides map[string]string) error {
 				if _, ok := overrides[n]; !ok || !strings.HasPrefix(n, sample.message+".") {
 					continue
 				}
-				if err := execute(set, &strings.Builder{}, n, sample.data); err != nil {
+				if err := execute(set, loc, &strings.Builder{}, n, sample.data); err != nil {
 					return &TemplateError{Name: n, Err: err}
 				}
 			}
@@ -341,7 +423,7 @@ func PreviewTemplates(locale string, overrides map[string]string) ([]Preview, er
 		for _, part := range templateParts {
 			n := s.message + "." + part
 			if _, ok := overrides[n]; ok {
-				if err := execute(m.custom, &strings.Builder{}, n, s.data); err != nil && p.Error == "" {
+				if err := execute(m.custom, m.locale, &strings.Builder{}, n, s.data); err != nil && p.Error == "" {
 					p.Error = (&TemplateError{Name: n, Err: err}).Error()
 				}
 			}

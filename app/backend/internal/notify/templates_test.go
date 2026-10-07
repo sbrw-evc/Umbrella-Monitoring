@@ -34,6 +34,34 @@ func TestTemplateOverrides(t *testing.T) {
 	}
 }
 
+// A Telegram HTML override that forgets html still sends escaped text, one that calls it does
+// not escape twice, and the other parts keep the text as it is.
+func TestHTMLOverridesEscape(t *testing.T) {
+	s := New(store.New(), nil)
+	a := goldenAlert()
+	a.Route.Team.Name = "Ops <&> SRE"
+	tgt := target{channel: ChannelTelegram, address: "1", recipient: UserRecipient("u1"), tz: time.UTC}
+	c := config{locale: "en", set: model.Alerting{PublicURL: "https://u.example"}}
+	want := "<b>HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b> Ops &lt;&amp;&gt; SRE"
+	for _, body := range []string{
+		"<b>{{.Title}}</b> {{.Team.Name}}",
+		"<b>{{html .Title}}</b> {{html .Team.Name}}",
+		`<b>{{include "title" .}}</b> {{with .Team}}{{.Name}}{{end}}{{define "title"}}{{.Title}}{{end}}`,
+	} {
+		c.msgs = newMessages(c.locale, map[string]string{"fallback.html": body, "fallback.text": "{{.Title}}"})
+		m := s.compose(c, a, tgt)
+		if m.html != want {
+			t.Errorf("%s:\n got %q\nwant %q", body, m.html, want)
+		}
+		if m.text != `HTTP 5xx <b>&"app"</b>` {
+			t.Errorf("text escaped: %q", m.text)
+		}
+	}
+	if a.Title != `HTTP 5xx <b>&"app"</b>` || a.Route.Team.Name != "Ops <&> SRE" {
+		t.Fatalf("the incident was changed: %q %q", a.Title, a.Route.Team.Name)
+	}
+}
+
 func TestCleanTemplates(t *testing.T) {
 	out, err := CleanTemplates(map[string]string{
 		"fallback.subject": "  ",
