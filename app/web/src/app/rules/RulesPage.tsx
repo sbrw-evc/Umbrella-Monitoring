@@ -9,7 +9,7 @@ import { useSession } from '../session'
 import { Link } from '../../router'
 import { SourcesExplainer } from '../connectors/QuickConnect'
 import { strings } from './strings'
-import { RULE_METHODS, SEVERITIES, type RuleMethod } from '../incidents/types'
+import { RULE_METHODS, SEVERITIES, severityText, type RuleMethod } from '../incidents/types'
 import '../connectors/connectors.css'
 import './rules.css'
 
@@ -151,7 +151,7 @@ function RulesTable({ v, editor, onOpen, onSources }: { v: View; editor: boolean
                   <span className="cn-name">{r.name}</span>
                 )}
                 <div className="muted rl-sub">
-                  <code>{r.signal}</code> · {t(`sev.${r.severity}`)}
+                  <code>{r.signal}</code> · {severityText(t, r.severity)}
                 </div>
               </td>
               <td className="rl-cond">
@@ -404,7 +404,7 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
               <Select id={id} value={d.severity} onChange={(e) => set({ severity: e.target.value })}>
                 {SEVERITY_OPTIONS.map((s) => (
                   <option key={s} value={s}>
-                    {t(`sev.${s}`)}
+                    {severityText(t, s)}
                   </option>
                 ))}
               </Select>

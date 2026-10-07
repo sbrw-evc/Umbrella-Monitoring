@@ -87,7 +87,7 @@ export type PreviewIncident = {
   team: string
 }
 
-export type PreviewCounts = { total: number; critical: number; error: number; warning: number; info: number; acknowledged: number; open: number }
+export type PreviewCounts = { total: number; acknowledged: number; open: number } & Record<Severity, number>
 
 export type Preview = {
   board: { slug: string; title: string; refresh_seconds: number; theme: BoardTheme; locale: BoardLocale; sort: Sort }

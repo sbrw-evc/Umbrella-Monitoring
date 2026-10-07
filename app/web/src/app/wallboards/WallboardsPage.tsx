@@ -6,7 +6,7 @@ import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Banner, Button, formatDate, Modal, Rows } from '../../ui'
 import { SeverityPill } from '../incidents/IncidentDetail'
-import { SEVERITIES } from '../incidents/types'
+import { SEVERITIES, severityText } from '../incidents/types'
 import { useSession } from '../session'
 import { copyText, publicURL } from './model'
 import { plural, strings } from './strings'
@@ -122,7 +122,7 @@ function summary(t: T, locale: string, w: Wallboard) {
   count('services', w.service_ids?.length ?? 0)
   count('teams', w.team_ids?.length ?? 0)
   if (parts.length === 0) parts.push(t('wb.scope.all'))
-  if (w.severities?.length) parts.push(w.severities.map((s) => t(`wb.sev.${s}`)).join(', '))
+  if (w.severities?.length) parts.push(w.severities.map((s) => severityText(t, s)).join(', '))
   if (w.methods?.length) parts.push(w.methods.map((m) => t(`wb.method.${m}`)).join(', '))
   if (!w.show_acknowledged) parts.push(t('wb.ack.hidden'))
   if (w.show_suppressed) parts.push(t('wb.suppressed.shown'))
@@ -255,7 +255,7 @@ function Details({ w, onClose }: { w: Wallboard | null; onClose: () => void }) {
         [t('wb.chosen.cis'), <Names refs={w.cis} />],
         [t('wb.chosen.services'), <Names refs={w.services} />],
         [t('wb.chosen.teams'), <Names refs={w.teams} />],
-        [t('wb.severities'), w.severities?.length ? w.severities.map((s) => t(`wb.sev.${s}`)).join(', ') : ''],
+        [t('wb.severities'), w.severities?.length ? w.severities.map((s) => severityText(t, s)).join(', ') : ''],
         [t('wb.methods'), w.methods?.length ? w.methods.map((m) => t(`wb.method.${m}`)).join(', ') : ''],
         [t('wb.show_acknowledged'), yes(w.show_acknowledged)],
         [t('wb.show_suppressed'), yes(w.show_suppressed)],
