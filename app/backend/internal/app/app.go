@@ -17,6 +17,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pagerduty"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/response"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/rules"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
@@ -90,13 +91,16 @@ type App struct {
 	pagerduty     *PagerDutyService
 	notifier      *notify.Service
 	notifications *NotificationsService
-	maintenance   *MaintenanceService
-	wallboards    *WallboardService
-	proxies       TrustedProxies
-	rules         *RulesService
-	ruleEngine    *rules.Engine
-	ready         atomic.Bool
-	rates         rates
+	response      *response.Service
+	// responseSettings keeps the settings of incident response; response runs it (PostgreSQL only).
+	responseSettings *ResponseService
+	maintenance      *MaintenanceService
+	wallboards       *WallboardService
+	proxies          TrustedProxies
+	rules            *RulesService
+	ruleEngine       *rules.Engine
+	ready            atomic.Bool
+	rates            rates
 }
 
 func New(opt Options, deps Deps) *App {
@@ -171,6 +175,7 @@ func New(opt Options, deps Deps) *App {
 	a.pagerduty = NewPagerDutyService(deps.Store, vault, a.pdGateway)
 	a.notifier = notify.New(deps.Store, resolver)
 	a.notifications = NewNotificationsService(deps.Store, vault, a.notifier)
+	a.responseSettings = NewResponseService(deps.Store, vault, a.notifier)
 	if queue != nil {
 		a.alerts = alert.New(deps.Backend.Pool(), deps.Store)
 		a.alerts.SetSender(a.pdGateway)
@@ -178,6 +183,11 @@ func New(opt Options, deps Deps) *App {
 		a.pdGateway.SetResults(a.alerts)
 		a.notifier.SetResults(a.alerts)
 		queue.SetSink(a.alertSink)
+		var sec response.Secrets
+		if vault != nil {
+			sec = vault
+		}
+		a.response = response.New(deps.Backend.Pool(), deps.Store, a.alerts, a.notifier, sec)
 	}
 	a.ruleEngine = rules.New(deps.Store, ruleCredentials(creds))
 	a.rules = NewRulesService(deps.Store, a.ruleEngine, creds)
@@ -207,7 +217,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerWallboards, a.registerRules, a.registerGrafana, a.registerOnboarding} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerWallboards, a.registerRules, a.registerGrafana, a.registerOnboarding, a.registerResponse} {
 		register(mux)
 	}
 	a.registerRoutePreview(mux)
@@ -235,6 +245,9 @@ func (a *App) Run(ctx context.Context) {
 			err = alert.EnsureSchema(ctx, a.deps.Backend.Pool())
 		}
 		if err == nil {
+			err = response.EnsureSchema(ctx, a.deps.Backend.Pool())
+		}
+		if err == nil {
 			break
 		}
 		slog.Error("ingest and alert tables are not ready", "err", err)
@@ -254,6 +267,7 @@ func (a *App) Run(ctx context.Context) {
 	wg.Go(func() { a.pdGateway.Run(ctx) })
 	wg.Go(func() { a.notifier.Run(ctx) })
 	wg.Go(func() { a.ruleEngine.Run(ctx) })
+	wg.Go(func() { a.response.Run(ctx) })
 	a.queue.Run(ctx, a.opt.Ingest.Workers, a.process)
 }
 

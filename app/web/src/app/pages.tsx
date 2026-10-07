@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import { Activity, BellRing, Boxes, CalendarClock, Briefcase, Cable, Database, Gauge, KeyRound, LockKeyhole, Network, Radar, Server, ShieldCheck, Siren, Tv, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
+import { Activity, BellRing, Boxes, CalendarClock, Briefcase, Cable, Database, Gauge, KeyRound, LockKeyhole, Megaphone, Network, Radar, Server, ShieldCheck, Siren, Tv, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
 import { CIsPage } from './cis/CIsPage'
 import { IncidentsPage } from './incidents/IncidentsPage'
 import { CMDBMapPage } from './cmdb/CMDBMapPage'
@@ -8,6 +8,7 @@ import { CredentialsPage } from './connectors/CredentialsPage'
 import { MaintenancePage } from './maintenance/MaintenancePage'
 import { MonitoringPage } from './monitoring/MonitoringPage'
 import { NetBoxPage } from './netbox/NetBoxPage'
+import { ResponsePage } from './response/ResponsePage'
 import { RulesPage } from './rules/RulesPage'
 import { RolesPage } from './roles/RolesPage'
 import { ServicesPage } from './services/ServicesPage'
@@ -47,6 +48,7 @@ export const PAGES: PageDef[] = [
   { id: 'maintenance', path: '/maintenance', icon: CalendarClock, Component: MaintenancePage, subtitle: 'page.maintenance.subtitle' },
   { id: 'wallboards', path: '/wallboards', icon: Tv, Component: WallboardsPage, subtitle: 'page.wallboards.subtitle' },
   { id: 'connectors', path: '/connectors', icon: Cable, Component: ConnectorsPage, nested: true },
+  { id: 'response', path: '/response', icon: Megaphone, Component: ResponsePage, subtitle: 'page.response.subtitle' },
   { id: 'rules', path: '/rules', icon: Gauge, Component: RulesPage, subtitle: 'page.rules.subtitle' },
   { id: 'netbox', path: '/netbox', icon: Server, Component: NetBoxPage, subtitle: 'page.netbox.subtitle' },
   { id: 'monitoring', path: '/monitoring', icon: Radar, Component: MonitoringPage, subtitle: 'page.monitoring.subtitle' },
