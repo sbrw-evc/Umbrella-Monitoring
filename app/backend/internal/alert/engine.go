@@ -494,7 +494,7 @@ func (a *Alert) reopen(now time.Time) {
 	a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry, a.PD.AttemptAt, a.PD.Escalated = PDPending, "", "", "", nil, false
 	// PagerDuty opens a new incident for the trigger after a resolve: it goes by the current
 	// route, and the old incident is remembered so that its late webhooks are ignored.
-	a.PD.Route, a.PD.RouteID = "", ""
+	a.PD.Route, a.PD.RouteID, a.PD.Queue, a.PD.QueueName = "", "", "", ""
 	if a.PD.IncidentID != "" && !slices.Contains(a.PD.OldIncidents, a.PD.IncidentID) {
 		a.PD.OldIncidents = append(a.PD.OldIncidents, a.PD.IncidentID)
 		if len(a.PD.OldIncidents) > maxOldIncidents {
@@ -854,6 +854,8 @@ type PDUpdate struct {
 	Detail      string
 	// OccurredAt is when the change happened in PagerDuty; zero when unknown.
 	OccurredAt time.Time
+	// Queue and QueueName are the PagerDuty service the incident is in; empty when unknown.
+	Queue, QueueName string
 }
 
 // PDKeys returns the dedup keys of the alerts bound to a PagerDuty incident or key.
@@ -914,12 +916,20 @@ func (e *Engine) PDInbound(ctx context.Context, u PDUpdate) error {
 		if u.IncidentURL != "" {
 			a.PD.IncidentURL = u.IncidentURL
 		}
+		if u.Queue != "" && u.Queue != a.PD.Queue {
+			if a.PD.Queue != "" {
+				c.log(now, KindPagerDuty, "pd_queue_moved", map[string]string{"from": cmp.Or(a.PD.QueueName, a.PD.Queue), "to": cmp.Or(u.QueueName, u.Queue)}, u.Actor)
+			}
+			a.PD.Queue, a.PD.QueueName = u.Queue, u.QueueName
+		}
 		args := map[string]string{}
 		if u.Detail != "" {
 			args["detail"] = u.Detail
 		}
 		add := func(code string) { c.log(now, KindPagerDuty, code, args, u.Actor) }
 		switch u.EventType {
+		case "":
+			// Only the queue or the incident changed (read back).
 		case "incident.triggered":
 			if a.PD.State == PDPending || a.PD.State == PDFailed {
 				a.PD.State = PDAccepted

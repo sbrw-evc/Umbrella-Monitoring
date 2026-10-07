@@ -121,6 +121,9 @@ type PDSync struct {
 	Priority bool `json:"priority"`
 	// OnCall: who is on call in PagerDuty also gets the notifications of Umbrella.
 	OnCall bool `json:"on_call"`
+	// Queues: a PagerDuty service (queue) owned by a PagerDuty team named like a team of
+	// Umbrella gets a route of that team as soon as it is read.
+	Queues bool `json:"queues"`
 }
 
 // DefaultPDSyncInterval is how often incident states are read back by default.

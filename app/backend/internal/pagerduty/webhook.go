@@ -55,7 +55,9 @@ type WebhookEvent struct {
 			Content     string    `json:"content"`
 			Assignees   []summary `json:"assignees"`
 			Priority    *summary  `json:"priority"`
-			Incident    *struct {
+			// Service is the queue the incident is in.
+			Service  *summary `json:"service"`
+			Incident *struct {
 				ID      string `json:"id"`
 				HTMLURL string `json:"html_url"`
 			} `json:"incident"`
@@ -133,8 +135,13 @@ func (g *Gateway) HandleWebhook(ctx context.Context, body []byte, signature stri
 	}
 	applied := 0
 	for _, k := range keys {
-		err := g.results.PDInbound(ctx, alert.PDUpdate{DedupKey: k, EventType: ev.Event.EventType, Actor: actor,
-			IncidentID: incID, IncidentURL: incURL, Detail: ev.detail(), OccurredAt: ev.Event.OccurredAt})
+		u := alert.PDUpdate{DedupKey: k, EventType: ev.Event.EventType, Actor: actor,
+			IncidentID: incID, IncidentURL: incURL, Detail: ev.detail(), OccurredAt: ev.Event.OccurredAt}
+		if sv := ev.Event.Data.Service; sv != nil && ev.Event.Data.Incident == nil {
+			// The service of the incident itself (an event about a note names the incident apart).
+			u.Queue, u.QueueName = sv.ID, sv.Summary
+		}
+		err := g.results.PDInbound(ctx, u)
 		switch {
 		case err == nil:
 			applied++

@@ -3,8 +3,10 @@ package app_test
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/app"
@@ -92,7 +94,7 @@ func TestPagerDutyRoundTrip(t *testing.T) {
 		t.Errorf("route = %q", view.Alert.PD.Route)
 	}
 
-	hook := fmt.Sprintf(`{"event":{"id":"E1","event_type":"incident.acknowledged","agent":{"summary":"Jane"},"data":{"id":"Q1","type":"incident","html_url":"https://pd/incidents/Q1","incident_key":%q}}}`, ev.DedupKey)
+	hook := fmt.Sprintf(`{"event":{"id":"E1","event_type":"incident.acknowledged","agent":{"summary":"Jane"},"data":{"id":"Q1","type":"incident","html_url":"https://pd/incidents/Q1","incident_key":%q,"service":{"id":"PSVC1","summary":"Payments"}}}}`, ev.DedupKey)
 	if code := f.post("/api/pagerduty/webhook", hook, map[string]string{"X-PagerDuty-Signature": "v1=bad"}); code != http.StatusUnauthorized {
 		t.Errorf("bad signature = %d", code)
 	}
@@ -102,6 +104,23 @@ func TestPagerDutyRoundTrip(t *testing.T) {
 	f.admin.call(http.MethodGet, "/api/incidents/"+id, nil, &view)
 	if view.Alert.Status != alert.StatusAcknowledged || view.Alert.AckedBy != "Jane" || view.Alert.PD.IncidentURL != "https://pd/incidents/Q1" {
 		t.Errorf("acknowledged in PagerDuty: %+v", view.Alert)
+	}
+
+	// Moved to another queue (service) in PagerDuty: the incident follows it, on the timeline too.
+	moved := fmt.Sprintf(`{"event":{"id":"E2","event_type":"incident.reassigned","agent":{"summary":"Jane"},"data":{"id":"Q1","type":"incident","incident_key":%q,"service":{"id":"PSVC2","summary":"Billing"}}}}`, ev.DedupKey)
+	if code := f.post("/api/pagerduty/webhook", moved, map[string]string{"X-PagerDuty-Signature": pdtest.Sign(pdtest.Secret, []byte(moved))}); code != http.StatusOK {
+		t.Fatalf("webhook = %d", code)
+	}
+	var detail struct {
+		Alert    alert.Alert   `json:"alert"`
+		Timeline []alert.Entry `json:"timeline"`
+	}
+	f.admin.call(http.MethodGet, "/api/incidents/"+id, nil, &detail)
+	if detail.Alert.PD.Queue != "PSVC2" || detail.Alert.PD.QueueName != "Billing" ||
+		!slices.ContainsFunc(detail.Timeline, func(e alert.Entry) bool {
+			return e.Code == "pd_queue_moved" && e.Args["from"] == "Payments" && e.Args["to"] == "Billing"
+		}) {
+		t.Errorf("queue = %+v, timeline = %+v", detail.Alert.PD, detail.Timeline)
 	}
 
 	f.expect(f.admin, http.MethodPost, "/api/incidents/"+id+"/resolve", nil, http.StatusOK, nil)
@@ -135,4 +154,54 @@ func TestPagerDutyRoute(t *testing.T) {
 	if name, ref := pagerduty.Route(set, alert.Alert{}); name != pagerduty.DefaultRoute || ref != "default" {
 		t.Errorf("default: %s %s", name, ref)
 	}
+}
+
+// The queues of PagerDuty are linked to the teams of Umbrella by the name of their PagerDuty
+// team: a queue no route sends to gets a route of that team, once; a disabled queue, one of a
+// team Umbrella does not have, and one already linked are left alone.
+func TestPagerDutyQueues(t *testing.T) {
+	f := newConnFixture(t, false)
+	pd := pdtest.New(t)
+	pd.Extra = []pdtest.Service{
+		{ID: "PSVC2", Name: "Billing API", Status: "active", TeamID: "PT2", Team: "sre"},
+		{ID: "PSVC3", Name: "Old", Status: "disabled", TeamID: "PT2", Team: "SRE"},
+		{ID: "PSVC4", Name: "Mobile", Status: "active", TeamID: "PT4", Team: "Mobile"},
+	}
+	f.h.st.Write(func(d *store.Data) {
+		d.Teams["T-1"] = &model.Team{ID: "T-1", Name: "SRE"}
+		d.Teams["T-2"] = &model.Team{ID: "T-2", Name: "Payments"}
+	})
+	var v app.PagerDutyView
+	f.expect(f.admin, http.MethodPut, "/api/pagerduty", map[string]any{"enabled": true, "events_url": pd.EventsURL(), "api_url": pd.APIURL(),
+		"api_token": pdtest.Token, "pd_service_id": pdtest.ServiceID}, http.StatusOK, &v)
+	var out struct {
+		Links  app.QueueLinks `json:"links"`
+		Queues app.QueuesView `json:"queues"`
+	}
+	f.expect(f.admin, http.MethodPost, "/api/pagerduty/queues/link", nil, http.StatusOK, &out)
+	if !slices.Equal(out.Links.Created, []string{"Billing API"}) || len(out.Queues.Queues) != 4 || !pd.Created("PSVC2") {
+		t.Fatalf("links = %+v", out)
+	}
+	f.expect(f.admin, http.MethodGet, "/api/pagerduty", nil, http.StatusOK, &v)
+	if len(v.Routes) != 1 || v.Routes[0].TeamID != "T-1" || v.Routes[0].PDServiceID != "PSVC2" || !v.Routes[0].HasKey {
+		t.Fatalf("routes = %+v", v.Routes)
+	}
+	f.expect(f.admin, http.MethodPost, "/api/pagerduty/queues/link", nil, http.StatusOK, &out)
+	if len(out.Links.Created) != 0 {
+		t.Fatalf("linked twice: %+v", out.Links)
+	}
+	// A queue gone from PagerDuty is shown, its route kept.
+	pd.Extra = pd.Extra[1:]
+	f.expect(f.admin, http.MethodPost, "/api/pagerduty/queues/link", nil, http.StatusOK, &out)
+	if !slices.Equal(out.Queues.Gone, []string{v.Routes[0].ID}) {
+		t.Fatalf("gone = %+v", out.Queues.Gone)
+	}
+	f.h.st.Write(func(d *store.Data) {
+		d.Roles["viewer"] = &model.Role{ID: "viewer", Name: "Viewer", Permissions: []string{"settings.alerting:view"}}
+	})
+	f.h.addLocal("vi", "Viewer-pass-2026", "viewer", time.Now())
+	vi := f.h.client()
+	vi.login("vi", "Viewer-pass-2026")
+	f.expect(vi, http.MethodGet, "/api/pagerduty/queues", nil, http.StatusOK, nil)
+	f.expect(vi, http.MethodPost, "/api/pagerduty/queues/link", nil, http.StatusForbidden, nil)
 }

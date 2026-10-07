@@ -28,7 +28,7 @@ func syncGateway(t *testing.T, sync model.PDSync) (*pagerduty.Gateway, *pdtest.F
 }
 
 func pdAlert(id, status, pdState, incident string) alert.Alert {
-	return alert.Alert{ID: id, Status: status, PD: alert.PD{Key: "umb-" + id, State: pdState, IncidentID: incident}}
+	return alert.Alert{ID: id, Status: status, PD: alert.PD{Key: "umb-" + id, State: pdState, IncidentID: incident, Queue: pdtest.ServiceID}}
 }
 
 // The read-back brings what happened in PagerDuty when no webhook did: an acknowledgement, a

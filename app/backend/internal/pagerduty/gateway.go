@@ -69,6 +69,9 @@ type Status struct {
 	SyncApplied   int        `json:"sync_applied"`
 	// OnCallAt is when the on-call people were last read.
 	OnCallAt *time.Time `json:"on_call_at,omitempty"`
+	// QueuesAt is when the queues were last read; QueuesError why the last read failed.
+	QueuesAt    *time.Time `json:"queues_at,omitempty"`
+	QueuesError string     `json:"queues_error,omitempty"`
 }
 
 type Gateway struct {
@@ -91,6 +94,9 @@ type Gateway struct {
 	syncMu sync.Mutex
 	// users finds Umbrella users by e-mail, for the on-call people.
 	users UserFinder
+	// queues are the PagerDuty services as queues, as last read; queueHook runs after a read.
+	queues    []Queue
+	queueHook QueueHook
 }
 
 // UserFinder finds the Umbrella user of a PagerDuty user by e-mail; nil without one.

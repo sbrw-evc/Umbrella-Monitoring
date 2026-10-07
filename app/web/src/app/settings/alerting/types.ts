@@ -15,13 +15,33 @@ export type PDStatus = {
   last_sync_error?: string
   sync_applied?: number
   on_call_at?: string
+  queues_at?: string
+  queues_error?: string
 }
 
 // The role of PagerDuty next to the notification channels of Umbrella; '' is primary.
 export const PD_MODES = ['primary', 'backup', 'parallel', 'off'] as const
 export type PDMode = (typeof PD_MODES)[number]
 
-export type PDSync = { interval_seconds?: number; from_email?: string; notes: boolean; priority: boolean; on_call: boolean }
+export type PDSync = { interval_seconds?: number; from_email?: string; notes: boolean; priority: boolean; on_call: boolean; queues: boolean }
+
+// A PagerDuty service seen as a queue of incidents.
+export type PDQueue = {
+  id: string
+  name: string
+  html_url: string
+  status: 'active' | 'warning' | 'critical' | 'maintenance' | 'disabled'
+  policy?: string
+  teams: { id: string; name: string }[]
+  events_key: boolean
+  triggered: number
+  acknowledged: number
+  // Umbrella routes sending to it ('default': the default integration).
+  routes: string[]
+}
+
+export type QueuesView = { queues: PDQueue[]; at?: string; error?: string; gone: string[] }
+export type QueueLinks = { created: string[]; renamed: number; failed?: Record<string, string> }
 
 export type PDOnCall = { name: string; email: string; level: number; policy: string; until?: string; user_id?: string }
 

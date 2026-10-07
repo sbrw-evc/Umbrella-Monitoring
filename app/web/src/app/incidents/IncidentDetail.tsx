@@ -327,6 +327,7 @@ function Main({ d, onOpen }: { d: Detail; onOpen: (id: string) => void }) {
   if (a.resolved_at) rows.push([t('inc.field.resolved'), `${at(a.resolved_at)}${a.resolved_by ? ` · ${a.resolved_by}` : ''}`])
   rows.push([t('inc.field.pd'), <PDPill key="pd" state={a.pd.state} />])
   if (a.pd.route) rows.push([t('inc.field.pdroute'), a.pd.route])
+  if (a.pd.queue) rows.push([t('inc.field.pdqueue'), a.pd.queue_name || a.pd.queue])
   if (a.pd.error) rows.push([t('inc.field.pderror'), <span key="e" className="inc-warn">{a.pd.error}</span>])
   if (a.fallback) rows.push([t('inc.field.fallback'), at(a.fallback_at)])
   if (a.excluded) rows.push([t('inc.field.excluded'), t('inc.excluded.text')])

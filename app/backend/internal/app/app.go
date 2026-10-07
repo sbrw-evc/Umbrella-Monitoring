@@ -178,6 +178,7 @@ func New(opt Options, deps Deps) *App {
 	a.pdGateway = pagerduty.New(deps.Store, resolver)
 	a.pagerduty = NewPagerDutyService(deps.Store, vault, a.pdGateway)
 	a.pdGateway.SetUsers(usersByEmail(deps.Store))
+	a.pdGateway.SetQueueHook(a.pagerduty.autoLinkQueues)
 	a.notifier = notify.New(deps.Store, resolver)
 	a.notifier.SetOnCall(a.pdGateway)
 	a.notifications = NewNotificationsService(deps.Store, vault, a.notifier)

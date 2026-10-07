@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -136,12 +137,14 @@ type integrationRef struct {
 }
 
 type serviceObj struct {
-	ID           string           `json:"id"`
-	Summary      string           `json:"summary"`
-	Name         string           `json:"name"`
-	HTMLURL      string           `json:"html_url"`
-	Status       string           `json:"status"`
-	Integrations []integrationRef `json:"integrations"`
+	ID               string           `json:"id"`
+	Summary          string           `json:"summary"`
+	Name             string           `json:"name"`
+	HTMLURL          string           `json:"html_url"`
+	Status           string           `json:"status"`
+	Integrations     []integrationRef `json:"integrations"`
+	EscalationPolicy summary          `json:"escalation_policy"`
+	Teams            []summary        `json:"teams"`
 }
 
 func (s serviceObj) name() string {
@@ -151,11 +154,16 @@ func (s serviceObj) name() string {
 	return s.Summary
 }
 
-// Services lists the PagerDuty services and whether they have an Events API v2 integration.
-func (g *Gateway) Services(ctx context.Context) ([]Service, error) {
-	out := []Service{}
+// eventsKey tells a service with an Events API v2 integration.
+func (s serviceObj) eventsKey() bool {
+	return slices.ContainsFunc(s.Integrations, func(in integrationRef) bool { return strings.HasPrefix(in.Type, eventsIntegrationType) })
+}
+
+// listServices reads every PagerDuty service with the given includes, by name.
+func (g *Gateway) listServices(ctx context.Context, include ...string) ([]serviceObj, error) {
+	var out []serviceObj
 	for page := 0; page < maxPages; page++ {
-		q := url.Values{"limit": {strconv.Itoa(pageLimit)}, "offset": {strconv.Itoa(page * pageLimit)}, "include[]": {"integrations"}, "sort_by": {"name"}}
+		q := url.Values{"limit": {strconv.Itoa(pageLimit)}, "offset": {strconv.Itoa(page * pageLimit)}, "include[]": include, "sort_by": {"name"}}
 		var resp struct {
 			Services []serviceObj `json:"services"`
 			More     bool         `json:"more"`
@@ -163,18 +171,23 @@ func (g *Gateway) Services(ctx context.Context) ([]Service, error) {
 		if err := g.rest(ctx, "", http.MethodGet, "/services", q, nil, &resp); err != nil {
 			return nil, err
 		}
-		for _, s := range resp.Services {
-			has := false
-			for _, in := range s.Integrations {
-				if strings.HasPrefix(in.Type, eventsIntegrationType) {
-					has = true
-				}
-			}
-			out = append(out, Service{ID: s.ID, Name: s.name(), HTMLURL: s.HTMLURL, Status: s.Status, EventsKey: has})
-		}
+		out = append(out, resp.Services...)
 		if !resp.More {
 			break
 		}
+	}
+	return out, nil
+}
+
+// Services lists the PagerDuty services and whether they have an Events API v2 integration.
+func (g *Gateway) Services(ctx context.Context) ([]Service, error) {
+	list, err := g.listServices(ctx, "integrations")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Service, 0, len(list))
+	for _, s := range list {
+		out = append(out, Service{ID: s.ID, Name: s.name(), HTMLURL: s.HTMLURL, Status: s.Status, EventsKey: s.eventsKey()})
 	}
 	return out, nil
 }
