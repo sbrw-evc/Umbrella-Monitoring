@@ -86,12 +86,8 @@ func (teamsChannel) Team(ch alert.Channel) string        { return ch.Teams }
 func (teamsChannel) User(model.User) string              { return "" }
 func (teamsChannel) Extra(n model.Notify) []string       { return n.ExtraTeams }
 func (teamsChannel) Secret(model.Notify) (string, error) { return "", nil }
-func (c teamsChannel) Send(ctx context.Context, s *Service, _ model.Notify, _, to string, m composed) error {
-	return postJSON(ctx, s.client, "Teams", to, nil, teamsCard(m))
-}
-
-func (c teamsChannel) Test(ctx context.Context, s *Service, n model.Notify, secret, to string, m composed) (map[string]string, error) {
-	return nil, c.Send(ctx, s, n, secret, to, m)
+func (c teamsChannel) Send(ctx context.Context, s *Service, _ model.Notify, _, to string, m composed) (string, error) {
+	return "", postJSON(ctx, s.client, "Teams", to, nil, teamsCard(m))
 }
 
 // teamsCard is the message as an Adaptive Card: the subject in bold, a text block per line of
@@ -156,23 +152,19 @@ func (zoomChannel) Secret(n model.Notify) (string, error) {
 	return n.Zoom.TokenRef, nil
 }
 
-func (zoomChannel) Send(ctx context.Context, s *Service, _ model.Notify, token, to string, m composed) error {
+func (zoomChannel) Send(ctx context.Context, s *Service, _ model.Notify, token, to string, m composed) (string, error) {
 	if token == "" {
-		return errPermanent{errors.New("the Zoom verification token is not set")}
+		return "", errPermanent{errors.New("the Zoom verification token is not set")}
 	}
 	endpoint, err := zoomEndpoint(to)
 	if err != nil {
-		return errPermanent{err}
+		return "", errPermanent{err}
 	}
 	body := map[string]any{
 		"head": map[string]any{"text": m.subject},
 		"body": []map[string]any{{"type": "message", "text": strings.TrimRight(m.text, "\n")}},
 	}
-	return postJSON(ctx, s.client, "Zoom", endpoint, http.Header{"Authorization": {token}}, body)
-}
-
-func (c zoomChannel) Test(ctx context.Context, s *Service, n model.Notify, secret, to string, m composed) (map[string]string, error) {
-	return nil, c.Send(ctx, s, n, secret, to, m)
+	return "", postJSON(ctx, s.client, "Zoom", endpoint, http.Header{"Authorization": {token}}, body)
 }
 
 // zoomEndpoint is the endpoint URL with format=full: the message has a head and a body.

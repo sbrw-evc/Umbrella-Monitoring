@@ -82,6 +82,8 @@ type State struct {
 	// Priority is the response priority: the highest the assessment gave while the incident was
 	// active (it is never lowered during an incident).
 	Priority string `json:"priority"`
+	// PDPriority is the priority last set on the PagerDuty incident.
+	PDPriority string `json:"pd_priority,omitempty"`
 	// OpenedAt is the opening of the incident the steps count from; a reopening starts the
 	// steps again.
 	OpenedAt   time.Time  `json:"opened_at"`

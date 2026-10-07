@@ -35,6 +35,8 @@ type results struct {
 	mu      sync.Mutex
 	got     []result
 	inbound []alert.PDUpdate
+	active  []alert.Alert
+	notes   []string
 }
 
 func (r *results) PDResult(_ context.Context, _ string, action alert.Action, route, routeID string, err error) {
@@ -50,6 +52,17 @@ func (r *results) PDInbound(_ context.Context, u alert.PDUpdate) error {
 }
 func (r *results) PDKeys(context.Context, string, string) ([]string, error) {
 	return nil, nil
+}
+func (r *results) PDActive(context.Context, int) ([]alert.Alert, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]alert.Alert(nil), r.active...), nil
+}
+func (r *results) Note(_ context.Context, _, _, code string, args map[string]string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.notes = append(r.notes, code+" "+args["error"])
+	return nil
 }
 
 func (r *results) wait(t *testing.T, n int) []result {

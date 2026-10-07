@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"html"
 	"strings"
 )
 
@@ -44,11 +45,10 @@ func (s *Service) Ready(kind string) bool {
 func (s *Service) SendDirect(ctx context.Context, m Direct, to []Target) []Outcome {
 	c := s.config()
 	base := strings.TrimRight(c.set.PublicURL, "/")
-	links := s.Links()
 	seen := map[string]bool{}
 	var out []Outcome
 	for _, t := range to {
-		key := t.Channel + "|" + strings.ToLower(t.Address)
+		key := target{channel: t.Channel, address: t.Address}.key()
 		if t.Address == "" || seen[key] {
 			continue
 		}
@@ -61,36 +61,30 @@ func (s *Service) SendDirect(ctx context.Context, m Direct, to []Target) []Outco
 		case !ch.Enabled(c.set.Notify):
 			o.Err = ErrDisabled
 		case !ch.Valid(t.Address):
-			o.Err = ErrUnknownChannel
+			o.Err = ErrBadAddress
 		}
 		if o.Err != nil {
 			out = append(out, o)
 			continue
 		}
-		msg := composed{subject: m.Subject, text: m.Text, html: m.HTML}
-		var ack string
-		if m.AckID != "" && base != "" && links != nil {
-			ack = base + "/ack/" + links.Sign(m.AckID, ch.Recipient(t.Address), s.now().Add(LinkTTL))
+		msg := composed{subject: m.Subject, text: m.Text, html: m.HTML, incident: m.AckID}
+		if ack := s.ackURL(base, m.AckID, ch.Recipient(t.Address)); m.AckID != "" && ack != "" {
 			title := m.AckTitle
 			if title == "" {
 				title = lang(c.locale)["ack"]
 			}
-			msg.links = append(msg.links, link{title, ack})
+			msg.links = append(msg.links, link{title: title, url: ack, ack: true})
 			msg.text += "\n" + title + ": " + ack + "\n"
-			msg.html += "\n<a href=\"" + escapeAttr(ack) + "\">" + escapeAttr(title) + "</a>"
+			msg.html += "\n<a href=\"" + html.EscapeString(ack) + "\">" + html.EscapeString(title) + "</a>"
 		}
 		for _, l := range m.Links {
 			if l.URL != "" {
-				msg.links = append(msg.links, link{l.Title, l.URL})
+				msg.links = append(msg.links, link{title: l.Title, url: l.URL})
 			}
 		}
-		o.Err = unwrap(s.send(ctx, c, msg, target{channel: t.Channel, address: t.Address, recipient: ch.Recipient(t.Address)}))
+		_, err := s.send(ctx, c, msg, target{channel: t.Channel, address: t.Address, recipient: ch.Recipient(t.Address)})
+		o.Err = unwrap(err)
 		out = append(out, o)
 	}
 	return out
-}
-
-func escapeAttr(v string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
-	return r.Replace(v)
 }

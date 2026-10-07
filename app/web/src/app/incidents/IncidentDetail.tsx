@@ -33,7 +33,7 @@ export function StatusPill({ status }: { status: Incident['status'] }) {
 // PDPill: "off" (PagerDuty is turned off) is grey and neutral, not a failure.
 export function PDPill({ state }: { state: PD['state'] }) {
   const t = useT(strings)
-  const tone = state === 'accepted' || state === 'acked' ? 'ok' : state === 'failed' ? 'error' : state === 'pending' ? 'warn' : 'off'
+  const tone = state === 'accepted' || state === 'acked' ? 'ok' : state === 'failed' ? 'error' : state === 'pending' || state === 'standby' ? 'warn' : 'off'
   const label = t(`inc.pd.${state}`)
   return <span className={`pill pill-${tone}`}>{label === `inc.pd.${state}` ? state : label}</span>
 }
@@ -127,6 +127,11 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
             {t('inc.pd.open')}
             <ExternalLink size={14} aria-hidden />
           </a>
+        )}
+        {actor && a && a.status !== 'resolved' && (a.pd.state === 'standby' || (a.pd.state === 'skipped' && a.pd.error_code !== 'test')) && (
+          <Button busy={act.busy} onClick={() => void run('pagerduty')}>
+            {t('inc.pd.send')}
+          </Button>
         )}
         {actor && a?.status === 'open' && (
           <Button busy={act.busy} onClick={() => void run('ack')}>

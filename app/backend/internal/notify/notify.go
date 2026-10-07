@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"net/textproto"
 	"slices"
 	"strings"
 	"sync"
@@ -30,9 +29,14 @@ const (
 	ChannelZoom     = "zoom"
 )
 
+// errPermanent marks a failure retrying will not fix.
+type errPermanent struct{ error }
+
 var (
 	ErrDisabled = errors.New("the channel is turned off")
-	ErrNoSecret = errors.New("secrets are not available")
+	// ErrBadAddress: the address is not one of the channel.
+	ErrBadAddress = errors.New("the address is not valid for the channel")
+	ErrNoSecret   = errors.New("secrets are not available")
 )
 
 type Resolver interface {
@@ -81,8 +85,9 @@ type Service struct {
 	qmu    sync.Mutex
 	queued map[string]bool
 
-	mu    sync.RWMutex
-	links *Links
+	mu     sync.RWMutex
+	links  *Links
+	onCall OnCallSource
 
 	Retries int
 	Backoff time.Duration
@@ -95,6 +100,25 @@ func New(st *store.Store, sec Resolver) *Service {
 }
 
 func (s *Service) SetResults(r Results) { s.results = r }
+
+// OnCallSource gives the people on call for an alert (PagerDuty), who get the notifications
+// of Umbrella too.
+type OnCallSource interface {
+	OnCallPeople(a alert.Alert) []alert.Person
+}
+
+// SetOnCall adds the people on call to the recipients.
+func (s *Service) SetOnCall(o OnCallSource) {
+	s.mu.Lock()
+	s.onCall = o
+	s.mu.Unlock()
+}
+
+func (s *Service) OnCall() OnCallSource {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.onCall
+}
 
 // SetLinks turns on acknowledgement links.
 func (s *Service) SetLinks(l *Links) {
@@ -157,7 +181,12 @@ type target struct {
 	address   string
 	recipient string
 	tz        *time.Location
+	// ref is the earlier message to this address the follow-up answers.
+	ref string
 }
+
+// key identifies an address: a channel and an address are reached once.
+func (t target) key() string { return t.channel + "|" + strings.ToLower(t.address) }
 
 type config struct {
 	set    model.Alerting
@@ -179,6 +208,8 @@ func (s *Service) settings() config {
 		c.set.Notify.ExtraTeams = slices.Clone(d.Settings.Alerting.Notify.ExtraTeams)
 		c.set.Notify.ExtraZoom = slices.Clone(d.Settings.Alerting.Notify.ExtraZoom)
 		c.set.Notify.Templates = maps.Clone(d.Settings.Alerting.Notify.Templates)
+		c.set.PagerDuty.Modes = maps.Clone(d.Settings.Alerting.PagerDuty.Modes)
+		c.set.PagerDuty.Routes = nil
 		c.locale = d.Settings.DefaultLocale
 	})
 	return c
@@ -213,7 +244,8 @@ func (s *Service) resolve(ref string) (string, error) {
 	return v, nil
 }
 
-func loadTZ(name string) *time.Location {
+// LoadTZ is the time zone of a name; UTC when it is empty or unknown.
+func LoadTZ(name string) *time.Location {
 	if name == "" {
 		return time.UTC
 	}
@@ -223,53 +255,91 @@ func loadTZ(name string) *time.Location {
 	return time.UTC
 }
 
-// targets: the people of the route (the team, or the owners of the item when the team has
-// nobody) with their contacts, the team channel, then the extra addresses; each address once.
+// zones are the time zones of messages: the default one and those of users.
+type zones struct {
+	def   *time.Location
+	users map[string]*time.Location
+}
+
+// of is the time zone of a user (by ID); the default for anybody else.
+func (z zones) of(userID string) *time.Location {
+	if l := z.users[userID]; l != nil {
+		return l
+	}
+	return z.def
+}
+
+// zones reads the default time zone and those of the users.
+func (s *Service) zones(userIDs []string) zones {
+	z := zones{users: map[string]*time.Location{}}
+	def := ""
+	names := map[string]string{}
+	s.st.Read(func(d *store.Data) {
+		def = d.Settings.DefaultTZ
+		for _, id := range userIDs {
+			if u := d.Users[id]; u != nil && u.Timezone != "" {
+				names[id] = u.Timezone
+			}
+		}
+	})
+	z.def = LoadTZ(def)
+	for id, n := range names {
+		z.users[id] = LoadTZ(n)
+	}
+	return z
+}
+
+// recipients are the people of the route of an alert (the team, or the owners of the item when
+// the team has nobody) and, when PagerDuty shares who is on call, those people.
+func (s *Service) recipients(a alert.Alert) []alert.Person {
+	people := a.Route.Recipients()
+	if oc := s.OnCall(); oc != nil {
+		people = append(people, oc.OnCallPeople(a)...)
+	}
+	return people
+}
+
+// targets: the people of the route with their contacts, the team channel, then the extra
+// addresses; each address once.
 func (s *Service) targets(c config, a alert.Alert) []target {
 	n := c.set.Notify
 	var out []target
 	seen := map[string]bool{}
 	add := func(t target) {
-		k := t.channel + "|" + strings.ToLower(t.address)
-		if t.address == "" || seen[k] {
+		if t.address == "" || seen[t.key()] {
 			return
 		}
-		seen[k] = true
+		seen[t.key()] = true
 		out = append(out, t)
 	}
-	tz := map[string]string{}
-	defTZ := ""
-	s.st.Read(func(d *store.Data) {
-		defTZ = d.Settings.DefaultTZ
-		for _, p := range a.Route.Recipients() {
-			if u := d.Users[p.UserID]; u != nil {
-				tz[p.UserID] = u.Timezone
-			}
-		}
-	})
-	def := loadTZ(defTZ)
+	people := s.recipients(a)
+	ids := make([]string, 0, len(people))
+	for _, p := range people {
+		ids = append(ids, p.UserID)
+	}
+	z := s.zones(ids)
 	on := enabled(n)
-	for _, p := range a.Route.Recipients() {
-		loc := def
-		if tz[p.UserID] != "" {
-			loc = loadTZ(tz[p.UserID])
-		}
+	for _, p := range people {
 		for _, ch := range on {
 			if addr := ch.Person(p); ch.Valid(addr) {
-				add(target{channel: ch.Kind(), address: addr, recipient: UserRecipient(p.UserID), tz: loc})
+				recipient := UserRecipient(p.UserID)
+				if p.UserID == "" {
+					recipient = ch.Recipient(addr)
+				}
+				add(target{channel: ch.Kind(), address: addr, recipient: recipient, tz: z.of(p.UserID)})
 			}
 		}
 	}
 	if team := a.Route.Channel; team != nil {
 		for _, ch := range on {
 			if addr := ch.Team(*team); ch.Valid(addr) {
-				add(target{channel: ch.Kind(), address: addr, recipient: ch.Recipient(addr), tz: def})
+				add(target{channel: ch.Kind(), address: addr, recipient: ch.Recipient(addr), tz: z.def})
 			}
 		}
 	}
 	for _, ch := range on {
 		for _, addr := range ch.Extra(n) {
-			add(target{channel: ch.Kind(), address: addr, recipient: ch.Recipient(addr), tz: def})
+			add(target{channel: ch.Kind(), address: addr, recipient: ch.Recipient(addr), tz: z.def})
 		}
 	}
 	return out
@@ -291,6 +361,12 @@ func (s *Service) PreviewTargets(r alert.Route) []Target {
 	return out
 }
 
+// On tells whether a channel is turned on and has what it needs to send (alert.Notifier).
+func (s *Service) On() bool {
+	n := s.settings().set.Notify
+	return slices.ContainsFunc(channels, func(ch channel) bool { return ch.Ready(n) })
+}
+
 // On tells whether any channel is turned on.
 func On(n model.Notify) bool { return len(enabled(n)) > 0 }
 
@@ -303,6 +379,40 @@ func enabled(n model.Notify) []channel {
 		}
 	}
 	return out
+}
+
+// outcome codes of one round of delivery (Deliver or DeliverFollowUp) on the timeline.
+type outcome struct {
+	sent, failed string
+	args         map[string]string
+}
+
+// deliverAll sends a message to each target, records failures one by one and successes per
+// channel on the timeline of the incident, and returns the addresses reached.
+func (s *Service) deliverAll(ctx context.Context, c config, a alert.Alert, targets []target, compose func(target) composed, o outcome) []alert.Notified {
+	var reached []alert.Notified
+	sent := map[string][]string{}
+	for _, t := range targets {
+		ref, err := s.send(ctx, c, compose(t), t)
+		shown := ShowAddress(t.channel, t.address)
+		if err != nil {
+			slog.Warn("notification not sent", "alert", a.ID, "kind", o.sent, "channel", t.channel, "to", shown, "err", err)
+			args := map[string]string{"channel": t.channel, "to": shown, "error": err.Error()}
+			maps.Copy(args, o.args)
+			s.note(ctx, a.ID, o.failed, args)
+			continue
+		}
+		sent[t.channel] = append(sent[t.channel], shown)
+		reached = append(reached, alert.Notified{Channel: t.channel, Address: t.address, Recipient: t.recipient, Ref: ref})
+	}
+	for _, ch := range Channels() {
+		if len(sent[ch]) > 0 {
+			args := map[string]string{"channel": ch, "to": strings.Join(sent[ch], ", ")}
+			maps.Copy(args, o.args)
+			s.note(ctx, a.ID, o.sent, args)
+		}
+	}
+	return reached
 }
 
 // Deliver sends backup notification for an incident, records the outcome on its timeline and
@@ -335,23 +445,8 @@ func (s *Service) Deliver(ctx context.Context, a alert.Alert) {
 		s.note(ctx, a.ID, "notify_none", nil)
 		return
 	}
-	sent := map[string][]string{}
-	for _, t := range targets {
-		err := s.send(ctx, c, s.compose(c, a, t), t)
-		shown := ShowAddress(t.channel, t.address)
-		if err != nil {
-			slog.Warn("backup notification not sent", "alert", a.ID, "channel", t.channel, "to", shown, "err", err)
-			s.note(ctx, a.ID, "notify_failed", map[string]string{"channel": t.channel, "to": shown, "error": err.Error()})
-			continue
-		}
-		sent[t.channel] = append(sent[t.channel], shown)
-		reached = append(reached, alert.Notified{Channel: t.channel, Address: t.address, Recipient: t.recipient})
-	}
-	for _, ch := range Channels() {
-		if len(sent[ch]) > 0 {
-			s.note(ctx, a.ID, "notify_sent", map[string]string{"channel": ch, "to": strings.Join(sent[ch], ", ")})
-		}
-	}
+	reached = s.deliverAll(ctx, c, a, targets, func(t target) composed { return s.compose(c, a, t) },
+		outcome{sent: "notify_sent", failed: "notify_failed"})
 }
 
 func (s *Service) note(ctx context.Context, id, code string, args map[string]string) {
@@ -360,59 +455,72 @@ func (s *Service) note(ctx context.Context, id, code string, args map[string]str
 	}
 }
 
-func (s *Service) send(ctx context.Context, c config, m composed, t target) error {
+// send delivers a message to a target with retries; it returns the reference of the message
+// where the channel has one.
+func (s *Service) send(ctx context.Context, c config, m composed, t target) (string, error) {
 	ch := channelOf(t.channel)
 	if ch == nil {
-		return fmt.Errorf("%w: %s", ErrUnknownChannel, t.channel)
+		return "", fmt.Errorf("%w: %s", ErrUnknownChannel, t.channel)
 	}
-	attempt := func() error {
+	m.locale, m.replyTo = c.locale, t.ref
+	attempt := func() (string, error) {
 		if err := c.secretErr[t.channel]; err != nil {
-			return errPermanent{err}
+			return "", errPermanent{err}
 		}
 		return ch.Send(ctx, s, c.set.Notify, c.secret[t.channel], t.address, m)
 	}
 	wait := s.Backoff
 	var err error
 	for i := 1; i <= max(1, s.Retries); i++ {
-		if err = attempt(); err == nil {
-			return nil
+		var ref string
+		if ref, err = attempt(); err == nil {
+			return ref, nil
 		}
 		var perm errPermanent
 		if errors.As(err, &perm) {
-			return perm.error
-		}
-		var smtpErr *textproto.Error
-		if errors.As(err, &smtpErr) && smtpErr.Code >= 500 {
-			return err
+			return "", perm.error
 		}
 		if i < s.Retries {
 			select {
 			case <-ctx.Done():
-				return err
+				return "", err
 			case <-time.After(wait):
 			}
 			wait *= 2
 		}
 	}
-	return err
+	return "", err
 }
 
-// composed is a message: the parts of its template and its links, which Teams shows as buttons.
+// composed is a message: the parts of its template and its links, which Teams and Telegram
+// show as buttons.
 type composed struct {
 	subject, text, html string
 	links               []link
+	// incident is the incident the message is about: Telegram adds buttons that act on it.
+	incident string
+	// final: the incident was taken (a follow-up); no buttons act on it any more.
+	final bool
+	// locale and replyTo are filled in by send: the language of the buttons and the earlier
+	// message to the same address the message answers.
+	locale, replyTo string
 }
 
-type link struct{ title, url string }
+type link struct {
+	title, url string
+	// ack: the link acknowledges the incident (a signed link).
+	ack bool
+}
 
 // withLinks adds the links of a message in the language of the messages.
 func (c composed) withLinks(locale string, m Message) composed {
 	w := lang(locale)
-	for _, l := range []link{{w["ack"], m.Ack}, {w["open"], m.Open}, {"Grafana", m.Grafana}} {
+	for _, l := range []link{{w["ack"], m.Ack, true}, {w["open"], m.Open, false}, {"Grafana", m.Grafana, false}} {
 		if l.url != "" {
 			c.links = append(c.links, l)
 		}
 	}
+	c.incident = m.ID
 	return c
 }
 
@@ -424,28 +532,38 @@ func (c config) messages() messages {
 	return newMessages(c.locale, nil)
 }
 
+// ackURL is the signed link that acknowledges an incident in the name of a recipient; empty
+// without a public address or links.
+func (s *Service) ackURL(base, id, recipient string) string {
+	if l := s.Links(); l != nil && base != "" {
+		return base + "/ack/" + l.Sign(id, recipient, s.now().Add(LinkTTL))
+	}
+	return ""
+}
+
 // compose is backup notification about an incident for one address.
 func (s *Service) compose(c config, a alert.Alert, t target) composed {
-	m := incidentMessage(a, t.tz)
-	if base := strings.TrimRight(c.set.PublicURL, "/"); base != "" {
-		m.Open = model.IncidentURL(base, a.ID)
-		if c.set.Grafana.DashboardURL != "" {
-			m.Grafana = model.GrafanaHopURL(base, a.ID)
-		}
-		if l := s.Links(); l != nil {
-			m.Ack = base + "/ack/" + l.Sign(a.ID, t.recipient, s.now().Add(LinkTTL))
-		}
-	}
+	m := s.incidentMessage(c, a, t.tz)
+	m.Ack = s.ackURL(strings.TrimRight(c.set.PublicURL, "/"), a.ID, t.recipient)
 	return c.messages().render("fallback", m).withLinks(c.locale, m)
 }
 
 // incidentMessage is what the templates see of an incident.
-func incidentMessage(a alert.Alert, tz *time.Location) Message {
+func (s *Service) incidentMessage(c config, a alert.Alert, tz *time.Location) Message {
 	m := Message{ID: a.ID, Title: a.Title, Severity: a.Severity, CI: a.CIName, Signal: a.Signal, Team: a.Route.Team,
 		Opened: formatTime(&a.OpenedAt, tz), PDState: a.PD.State, PDErrorCode: a.PD.ErrorCode, PDError: a.PD.Error,
 		Event: a.FollowUp, AckedBy: a.AckedBy, AckedAt: formatTime(a.AckedAt, tz), ResolvedBy: a.ResolvedBy, ResolvedAt: formatTime(a.ResolvedAt, tz)}
+	if c.set.PagerDuty.Enabled {
+		m.PDMode = c.set.PagerDuty.ModeFor(a.Severity)
+	}
 	for _, r := range a.Route.Services {
 		m.Services = append(m.Services, r.Name)
+	}
+	if base := strings.TrimRight(c.set.PublicURL, "/"); base != "" {
+		m.Open = model.IncidentURL(base, a.ID)
+		if c.set.Grafana.DashboardURL != "" && a.FollowUp == "" {
+			m.Grafana = model.GrafanaHopURL(base, a.ID)
+		}
 	}
 	return m
 }
@@ -453,16 +571,16 @@ func incidentMessage(a alert.Alert, tz *time.Location) Message {
 // composeFollowUp is the short message telling that the incident was taken (who and when) or
 // resolved, with a link to it.
 func (s *Service) composeFollowUp(c config, a alert.Alert, tz *time.Location) composed {
-	m := incidentMessage(a, tz)
-	if base := strings.TrimRight(c.set.PublicURL, "/"); base != "" {
-		m.Open = model.IncidentURL(base, a.ID)
-	}
-	return c.messages().render("followup", m).withLinks(c.locale, m)
+	m := s.incidentMessage(c, a, tz)
+	out := c.messages().render("followup", m).withLinks(c.locale, m)
+	out.final = true
+	return out
 }
 
 // DeliverFollowUp tells the addresses backup notification reached that the incident was
 // acknowledged or resolved, records the outcome on its timeline and reports the attempt.
-// Addresses of a channel turned off since are skipped.
+// Addresses of a channel turned off since are skipped. A Telegram follow-up answers the first
+// message, whose buttons are taken away.
 func (s *Service) DeliverFollowUp(ctx context.Context, a alert.Alert) {
 	if a.FollowUp == "" {
 		return
@@ -476,41 +594,23 @@ func (s *Service) DeliverFollowUp(ctx context.Context, a alert.Alert) {
 			slog.Warn("follow-up not marked as sent", "alert", a.ID, "err", err)
 		}
 	}()
-	tz := map[string]string{}
-	defTZ := ""
-	s.st.Read(func(d *store.Data) {
-		defTZ = d.Settings.DefaultTZ
-		for _, n := range a.Notified {
-			if kind, id, _ := strings.Cut(n.Recipient, ":"); kind == "u" {
-				if u := d.Users[id]; u != nil {
-					tz[n.Recipient] = u.Timezone
-				}
-			}
+	var ids []string
+	for _, n := range a.Notified {
+		if kind, id, _ := strings.Cut(n.Recipient, ":"); kind == "u" {
+			ids = append(ids, id)
 		}
-	})
-	sent := map[string][]string{}
+	}
+	z := s.zones(ids)
+	var targets []target
 	for _, n := range a.Notified {
 		if ch := channelOf(n.Channel); ch == nil || !ch.Enabled(c.set.Notify) {
 			continue
 		}
-		loc := loadTZ(defTZ)
-		if tz[n.Recipient] != "" {
-			loc = loadTZ(tz[n.Recipient])
-		}
-		t := target{channel: n.Channel, address: n.Address, recipient: n.Recipient, tz: loc}
-		shown := ShowAddress(t.channel, t.address)
-		if err := s.send(ctx, c, s.composeFollowUp(c, a, loc), t); err != nil {
-			slog.Warn("follow-up not sent", "alert", a.ID, "channel", t.channel, "to", shown, "err", err)
-			s.note(ctx, a.ID, "notify_followup_failed", map[string]string{"channel": t.channel, "to": shown, "event": a.FollowUp, "error": err.Error()})
-			continue
-		}
-		sent[t.channel] = append(sent[t.channel], shown)
+		_, id, _ := strings.Cut(n.Recipient, ":")
+		targets = append(targets, target{channel: n.Channel, address: n.Address, recipient: n.Recipient, tz: z.of(id), ref: n.Ref})
 	}
-	for _, ch := range Channels() {
-		if len(sent[ch]) > 0 {
-			s.note(ctx, a.ID, "notify_followup", map[string]string{"channel": ch, "to": strings.Join(sent[ch], ", "), "event": a.FollowUp})
-		}
-	}
+	s.deliverAll(ctx, c, a, targets, func(t target) composed { return s.composeFollowUp(c, a, t.tz) },
+		outcome{sent: "notify_followup", failed: "notify_followup_failed", args: map[string]string{"event": a.FollowUp}})
 }
 
 // Test sends a test message to an address of a channel with the saved settings; the map tells
@@ -527,8 +627,14 @@ func (s *Service) Test(ctx context.Context, kind, to string) (map[string]string,
 	if err := c.secretErr[kind]; err != nil {
 		return nil, err
 	}
-	info, err := ch.Test(ctx, s, c.set.Notify, c.secret[kind], to, s.composeTest(c))
-	return info, unwrap(err)
+	m := s.composeTest(c)
+	m.locale = c.locale
+	if t, ok := ch.(tester); ok {
+		info, err := t.Test(ctx, s, c.set.Notify, c.secret[kind], to, m)
+		return info, unwrap(err)
+	}
+	_, err := ch.Send(ctx, s, c.set.Notify, c.secret[kind], to, m)
+	return nil, unwrap(err)
 }
 
 func (s *Service) composeTest(c config) composed {

@@ -59,9 +59,12 @@ const (
 	CommWarRoom   = "war_room"
 	CommCallTeams = "call_teams"
 	CommCallZoom  = "call_zoom"
+	// CommPagerDuty sends the incident to PagerDuty at this step, whatever the PagerDuty mode
+	// of its severity says (an incident PagerDuty already has stays as it is).
+	CommPagerDuty = "pagerduty"
 )
 
-var CommMethods = []string{CommEmail, CommTelegram, CommTeams, CommZoom, CommWarRoom, CommCallTeams, CommCallZoom}
+var CommMethods = []string{CommEmail, CommTelegram, CommTeams, CommZoom, CommWarRoom, CommCallTeams, CommCallZoom, CommPagerDuty}
 
 func ValidComm(v string) bool { return slices.Contains(CommMethods, v) }
 

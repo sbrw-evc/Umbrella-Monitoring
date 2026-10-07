@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ArrowDown, ArrowUp, Plus, Send, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Plus, RefreshCw, Send, Trash2 } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../../api'
 import { useResource } from '../../../connections/useRequest'
@@ -11,7 +11,7 @@ import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { strings } from './strings'
 import { severityText } from '../../incidents/types'
-import { SEVERITIES, type PagerDutyView, type PDService, type Refs } from './types'
+import { PD_MODES, SEVERITIES, type PagerDutyView, type PDService, type PDSync, type Refs } from './types'
 
 type RouteDraft = { key: string; id: string; name: string; team_id: string; service_id: string; routing_key: string; pd_service_id: string; has_key: boolean }
 
@@ -26,7 +26,15 @@ type Draft = {
   api_token: string
   webhook_secret: string
   routes: RouteDraft[]
+  mode: string
+  modes: Record<string, string>
+  // Minutes as typed; empty is the default.
+  backup_min: string
+  sync: PDSync
 }
+
+// The choices of how often incident states are read back, in seconds (0: default, -1: off).
+const SYNC_INTERVALS = [15, 30, 0, 300, -1]
 
 let seq = 0
 
@@ -53,6 +61,16 @@ function draftOf(v: PagerDutyView): Draft {
       pd_service_id: r.pd_service_id ?? '',
       has_key: r.has_key,
     })),
+    mode: v.mode || 'primary',
+    modes: { ...(v.modes ?? {}) },
+    backup_min: v.backup_after_seconds ? String(v.backup_after_seconds / 60) : '',
+    sync: {
+      interval_seconds: v.sync?.interval_seconds ?? 0,
+      from_email: v.sync?.from_email ?? '',
+      notes: !!v.sync?.notes,
+      priority: !!v.sync?.priority,
+      on_call: !!v.sync?.on_call,
+    },
   }
 }
 
@@ -68,6 +86,10 @@ function bodyOf(d: Draft) {
     api_token: d.api_token,
     webhook_secret: d.webhook_secret,
     routes: d.routes.map((r) => ({ id: r.id, name: r.name, team_id: r.team_id, service_id: r.service_id, routing_key: r.routing_key, pd_service_id: r.pd_service_id })),
+    mode: d.mode,
+    modes: Object.fromEntries(Object.entries(d.modes).filter(([, m]) => m)),
+    backup_after_seconds: d.backup_min.trim() === '' ? 0 : Math.round(Number(d.backup_min) * 60),
+    sync: d.sync,
   }
 }
 
@@ -121,6 +143,10 @@ export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void
     next.splice(i + by, 0, r)
     set({ routes: next })
   }
+  const setSync = (p: Partial<PDSync>) => set({ sync: { ...draft.sync, ...p } })
+  const usesBackup = draft.mode === 'backup' || Object.values(draft.modes).includes('backup')
+  const routeName = (id: string) => (id === '' ? t('pd.oncall.default') : (view.routes.find((r) => r.id === id)?.name ?? id))
+  const onCall = Object.entries(view.on_call ?? {}).filter(([, people]) => people.length > 0)
   const setRoute = (i: number, p: Partial<RouteDraft>) => set({ routes: draft.routes.map((r, j) => (j === i ? { ...r, ...p } : r)) })
   const st = view.status
 
@@ -135,6 +161,12 @@ export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void
       const r = await api<PagerDutyView | unknown>(method, path, body)
       if (r && typeof r === 'object' && 'routes' in r) apply(r as PagerDutyView)
       return done
+    })
+  const syncNow = () =>
+    other.run(async () => {
+      const r = await api<{ applied: number }>('POST', '/api/pagerduty/sync')
+      setView(await api<PagerDutyView>('GET', '/api/pagerduty'))
+      return t('pd.sync.done', { n: r.applied })
     })
 
   const servicePicker = (value: string, onChange: (v: string) => void, label: string) =>
@@ -157,6 +189,7 @@ export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void
   const subscribed = !!(view.webhook_subscription_id || view.has_webhook_secret)
   const fallback = view.service_name || (view.has_routing_key ? t('pd.set') : '')
   const rows: [string, ReactNode][] = [
+    [t('pd.mode'), t(`pd.mode.short.${view.mode || 'primary'}`)],
     [t('pd.sent'), `${st.sent} / ${st.failed}`],
     [t('pd.queue'), String(st.queue)],
     [t('pd.lastSuccess'), at(st.last_success_at)],
@@ -165,6 +198,8 @@ export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void
     [t('pd.routes'), String(view.routes.length)],
     [t('pd.webhook'), t(subscribed ? 'pd.webhook.on' : 'pd.webhook.off')],
   ]
+  if (view.has_api_token) rows.push([t('pd.sync.last'), at(st.last_sync_at)])
+  if (st.last_sync_error) rows.push([t('pd.sync.error'), <span key="s" className="al-error">{st.last_sync_error}</span>])
   if (st.last_error) rows.push([t('pd.lastError'), <span key="e" className="al-error">{`${at(st.last_error_at)} · ${st.last_error}`}</span>])
 
   return (
@@ -178,10 +213,18 @@ export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void
         footer={
           canTest &&
           view.enabled && (
-            <Button busy={other.busy} disabled={dirty} title={dirty ? t('nt.test.saveFirst') : undefined} onClick={() => void call('POST', '/api/pagerduty/test', t('pd.test.ok'))}>
-              <Send size={15} aria-hidden />
-              {t('pd.test')}
-            </Button>
+            <>
+              <Button busy={other.busy} disabled={dirty} title={dirty ? t('nt.test.saveFirst') : undefined} onClick={() => void call('POST', '/api/pagerduty/test', t('pd.test.ok'))}>
+                <Send size={15} aria-hidden />
+                {t('pd.test')}
+              </Button>
+              {view.has_api_token && (
+                <Button busy={other.busy} disabled={dirty} onClick={() => void syncNow()}>
+                  <RefreshCw size={15} aria-hidden />
+                  {t('pd.sync.now')}
+                </Button>
+              )}
+            </>
           )
         }
       />
@@ -236,6 +279,44 @@ export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void
                     </Button>
                   )}
                 </div>
+
+                <section className="al-section">
+                  <h3 className="al-sub">{t('pd.role')}</h3>
+                  <p className="hint">{t('pd.role.hint')}</p>
+                  <Field label={t('pd.mode')}>
+                    {(id) => (
+                      <Select id={id} value={draft.mode} onChange={(e) => set({ mode: e.target.value })}>
+                        {PD_MODES.map((m) => (
+                          <option key={m} value={m}>
+                            {t(`pd.mode.${m}`)}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </Field>
+                  <p className="hint">{t('pd.modes.hint')}</p>
+                  <div className="al-modes">
+                    {[...SEVERITIES].reverse().map((sev) => (
+                      <Field key={sev} label={severityText(t, sev)}>
+                        {(id) => (
+                          <Select id={id} value={draft.modes[sev] ?? ''} onChange={(e) => set({ modes: { ...draft.modes, [sev]: e.target.value } })}>
+                            <option value="">{t('pd.mode.same')}</option>
+                            {PD_MODES.map((m) => (
+                              <option key={m} value={m}>
+                                {t(`pd.mode.short.${m}`)}
+                              </option>
+                            ))}
+                          </Select>
+                        )}
+                      </Field>
+                    ))}
+                  </div>
+                  {usesBackup && (
+                    <Field label={t('pd.backupAfter')} hint={t('pd.backupAfter.hint')}>
+                      {(id) => <Input id={id} type="number" min={0} max={1440} placeholder="5" value={draft.backup_min} onChange={(e) => set({ backup_min: e.target.value })} />}
+                    </Field>
+                  )}
+                </section>
 
                 <section className="al-section">
                   <h3 className="al-sub">{t('pd.default')}</h3>
@@ -320,6 +401,47 @@ export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void
                       {t('pd.route.add')}
                     </Button>
                   </div>
+                </section>
+
+                <section className="al-section">
+                  <h3 className="al-sub">{t('pd.sync')}</h3>
+                  <p className="hint">{t('pd.sync.hint')}</p>
+                  <div className="grid-2">
+                    <Field label={t('pd.sync.interval')}>
+                      {(id) => (
+                        <Select id={id} value={String(draft.sync.interval_seconds ?? 0)} onChange={(e) => setSync({ interval_seconds: Number(e.target.value) })}>
+                          {SYNC_INTERVALS.map((v) => (
+                            <option key={v} value={v}>
+                              {t(`pd.sync.interval.${v}`)}
+                            </option>
+                          ))}
+                        </Select>
+                      )}
+                    </Field>
+                    <Field label={t('pd.sync.from')} hint={t('pd.sync.from.hint')}>
+                      {(id) => <Input id={id} type="email" value={draft.sync.from_email ?? ''} onChange={(e) => setSync({ from_email: e.target.value })} />}
+                    </Field>
+                  </div>
+                  <Switch checked={draft.sync.notes} onChange={(notes) => setSync({ notes })} label={t('pd.sync.notes')} hint={t('pd.sync.notes.hint')} />
+                  <Switch checked={draft.sync.priority} onChange={(priority) => setSync({ priority })} label={t('pd.sync.priority')} hint={t('pd.sync.priority.hint')} />
+                  <Switch checked={draft.sync.on_call} onChange={(on_call) => setSync({ on_call })} label={t('pd.sync.oncall')} hint={t('pd.sync.oncall.hint')} />
+                  {view.sync?.on_call && (
+                    <>
+                      <h4 className="al-sub">{t('pd.oncall')}</h4>
+                      {onCall.length === 0 ? (
+                        <p className="hint">{t('pd.oncall.none')}</p>
+                      ) : (
+                        <Rows
+                          rows={onCall.map(([route, people]) => [
+                            routeName(route),
+                            people
+                              .map((p) => [p.name, p.until && t('pd.oncall.until', { at: at(p.until) }), !p.user_id && t('pd.oncall.notUser')].filter(Boolean).join(', '))
+                              .join('; '),
+                          ])}
+                        />
+                      )}
+                    </>
+                  )}
                 </section>
 
                 <section className="al-section">

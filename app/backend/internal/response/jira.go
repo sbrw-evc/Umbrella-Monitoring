@@ -2,6 +2,7 @@ package response
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -282,27 +283,20 @@ func Link(title, href string) Block   { return Block{Kind: "p", Text: title, Lin
 func adfText(t string) map[string]any { return map[string]any{"type": "text", "text": t} }
 func adfPara(c ...any) map[string]any { return map[string]any{"type": "paragraph", "content": c} }
 
-func nonEmpty(s, def string) string {
-	if s == "" {
-		return def
-	}
-	return s
-}
-
 // ADF is the document in Atlassian Document Format.
 func (d Doc) ADF() map[string]any {
 	content := []any{}
 	for _, b := range d {
 		switch b.Kind {
 		case "h":
-			content = append(content, map[string]any{"type": "heading", "attrs": map[string]int{"level": 3}, "content": []any{adfText(nonEmpty(b.Text, " "))}})
+			content = append(content, map[string]any{"type": "heading", "attrs": map[string]int{"level": 3}, "content": []any{adfText(cmp.Or(b.Text, " "))}})
 		case "ul":
 			if len(b.Items) == 0 {
 				continue
 			}
 			items := []any{}
 			for _, it := range b.Items {
-				items = append(items, map[string]any{"type": "listItem", "content": []any{adfPara(adfText(nonEmpty(it, " ")))}})
+				items = append(items, map[string]any{"type": "listItem", "content": []any{adfPara(adfText(cmp.Or(it, " ")))}})
 			}
 			content = append(content, map[string]any{"type": "bulletList", "content": items})
 		default:

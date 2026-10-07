@@ -43,18 +43,98 @@ type PagerDuty struct {
 	Enabled bool   `json:"enabled"`
 	Region  string `json:"region"`
 	// EventsURL and APIURL replace the regional addresses (a proxy, tests).
-	EventsURL             string     `json:"events_url,omitempty"`
-	APIURL                string     `json:"api_url,omitempty"`
-	RoutingKeyRef         string     `json:"-"`
-	ServiceID             string     `json:"service_id,omitempty"`
-	ServiceName           string     `json:"service_name,omitempty"`
-	APITokenRef           string     `json:"-"`
-	WebhookSecretRef      string     `json:"-"`
-	WebhookSubscriptionID string     `json:"webhook_subscription_id,omitempty"`
-	MinSeverity           string     `json:"min_severity"`
-	Routes                []PDRoute  `json:"routes"`
-	UpdatedAt             *time.Time `json:"updated_at,omitempty"`
-	UpdatedBy             string     `json:"updated_by,omitempty"`
+	EventsURL             string    `json:"events_url,omitempty"`
+	APIURL                string    `json:"api_url,omitempty"`
+	RoutingKeyRef         string    `json:"-"`
+	ServiceID             string    `json:"service_id,omitempty"`
+	ServiceName           string    `json:"service_name,omitempty"`
+	APITokenRef           string    `json:"-"`
+	WebhookSecretRef      string    `json:"-"`
+	WebhookSubscriptionID string    `json:"webhook_subscription_id,omitempty"`
+	MinSeverity           string    `json:"min_severity"`
+	Routes                []PDRoute `json:"routes"`
+	// Mode is the role of PagerDuty next to the notification channels of Umbrella (PDMode*);
+	// empty is primary. Modes replaces it for some severities.
+	Mode  string            `json:"mode,omitempty"`
+	Modes map[string]string `json:"modes,omitempty"`
+	// BackupAfterSeconds: in backup mode, how long an incident nobody has taken waits before it
+	// goes to PagerDuty; 0 is DefaultPDBackupAfter.
+	BackupAfterSeconds int `json:"backup_after_seconds,omitempty"`
+	// Sync tunes the two-way synchronization through the REST API (it needs the API token).
+	Sync      PDSync     `json:"sync"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+	UpdatedBy string     `json:"updated_by,omitempty"`
+}
+
+// The role of PagerDuty next to the notification channels of Umbrella.
+const (
+	// PDModePrimary: incidents go to PagerDuty at once; the channels of Umbrella are the backup
+	// when PagerDuty does not take an incident in time.
+	PDModePrimary = "primary"
+	// PDModeBackup: the channels of Umbrella go first; PagerDuty gets an incident only when
+	// nobody has taken it in time or the channels reached nobody.
+	PDModeBackup = "backup"
+	// PDModeParallel: PagerDuty and the channels of Umbrella get an incident at once.
+	PDModeParallel = "parallel"
+	// PDModeOff: incidents of the severity do not go to PagerDuty.
+	PDModeOff = "off"
+)
+
+// DefaultPDBackupAfter is how long backup mode waits before PagerDuty by default.
+const DefaultPDBackupAfter = 5 * time.Minute
+
+// ValidPDMode tells whether v names a mode; empty is not one.
+func ValidPDMode(v string) bool {
+	return v == PDModePrimary || v == PDModeBackup || v == PDModeParallel || v == PDModeOff
+}
+
+// ModeFor is the mode for incidents of a severity: the one set for it, else the general one.
+func (s PagerDuty) ModeFor(severity string) string {
+	if m := s.Modes[severity]; m != "" {
+		return m
+	}
+	if s.Mode != "" {
+		return s.Mode
+	}
+	return PDModePrimary
+}
+
+// BackupAfter is how long backup mode waits before PagerDuty.
+func (s PagerDuty) BackupAfter() time.Duration {
+	if s.BackupAfterSeconds <= 0 {
+		return DefaultPDBackupAfter
+	}
+	return time.Duration(s.BackupAfterSeconds) * time.Second
+}
+
+// PDSync is the synchronization with PagerDuty beyond the Events API and the webhooks.
+type PDSync struct {
+	// IntervalSeconds: how often incident states are read back (covers lost webhooks or
+	// an Umbrella PagerDuty cannot reach); 0 is the default, negative turns it off.
+	IntervalSeconds int `json:"interval_seconds,omitempty"`
+	// FromEmail is the PagerDuty user Umbrella writes notes and priorities as (the From header
+	// of the REST API); empty turns writing off.
+	FromEmail string `json:"from_email,omitempty"`
+	// Notes: comments made in Umbrella become notes of the PagerDuty incident.
+	Notes bool `json:"notes"`
+	// Priority: the response priority (P1–P5) is set on the PagerDuty incident.
+	Priority bool `json:"priority"`
+	// OnCall: who is on call in PagerDuty also gets the notifications of Umbrella.
+	OnCall bool `json:"on_call"`
+}
+
+// DefaultPDSyncInterval is how often incident states are read back by default.
+const DefaultPDSyncInterval = time.Minute
+
+// Interval is how often incident states are read back; 0 is off.
+func (s PDSync) Interval() time.Duration {
+	switch {
+	case s.IntervalSeconds < 0:
+		return 0
+	case s.IntervalSeconds == 0:
+		return DefaultPDSyncInterval
+	}
+	return max(time.Duration(s.IntervalSeconds)*time.Second, 15*time.Second)
 }
 
 func (s PagerDuty) Events() string {
@@ -136,6 +216,10 @@ type EmailChannel struct {
 type TelegramChannel struct {
 	Enabled  bool   `json:"enabled"`
 	TokenRef string `json:"-"`
+	// Bot turns on the bot built into Umbrella: it reads updates by long polling (no webhook,
+	// nothing to deploy), lets people acknowledge, resolve and comment from Telegram, link their
+	// account, and keeps the messages it sent in step with the incident.
+	Bot bool `json:"bot"`
 	// APIURL replaces https://api.telegram.org (a proxy, tests).
 	APIURL string `json:"api_url,omitempty"`
 }

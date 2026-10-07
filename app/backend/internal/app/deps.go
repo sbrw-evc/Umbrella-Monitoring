@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/credentials"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/config"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory"
@@ -43,4 +45,17 @@ func (ldapDirectory) Memberships(cfg directory.Config, bindPassword string, user
 
 func (ldapDirectory) Test(cfg directory.Config, bindPassword, username, password string) (directory.Probe, error) {
 	return directory.Test(cfg, bindPassword, username, password)
+}
+
+// putSecret stores a secret in OpenBao and returns its reference; credentials.ErrUnavailable
+// when OpenBao is not configured or refuses it.
+func putSecret(ctx context.Context, sec Secrets, path, key, value string) (string, error) {
+	if sec == nil {
+		return "", credentials.ErrUnavailable
+	}
+	ref, err := sec.PutRef(ctx, path, key, value)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", credentials.ErrUnavailable, err)
+	}
+	return ref, nil
 }

@@ -3,9 +3,11 @@ package notify
 import (
 	"context"
 	"errors"
+	"net/textproto"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/telegram"
 )
 
 // channel is one way backup notification reaches people. Everything that differs between
@@ -31,9 +33,14 @@ type channel interface {
 	// Secret is the reference of the secret the channel needs (empty: none); an error when the
 	// channel cannot work without one.
 	Secret(n model.Notify) (string, error)
-	// Send delivers a composed message; secret is the resolved Secret.
-	Send(ctx context.Context, s *Service, n model.Notify, secret, to string, m composed) error
-	// Test sends a test message; the map tells more for the interface (the bot name).
+	// Send delivers a composed message; secret is the resolved Secret. ref names the message
+	// sent where the channel can refer to it later (the Telegram message the follow-up answers).
+	Send(ctx context.Context, s *Service, n model.Notify, secret, to string, m composed) (ref string, err error)
+}
+
+// tester is a channel whose test tells more than that the message went (the bot name);
+// other channels are tested by sending.
+type tester interface {
 	Test(ctx context.Context, s *Service, n model.Notify, secret, to string, m composed) (map[string]string, error)
 }
 
@@ -125,12 +132,14 @@ func (emailChannel) User(u model.User) string              { return u.Email }
 func (emailChannel) Extra(n model.Notify) []string         { return n.ExtraEmails }
 func (emailChannel) Secret(n model.Notify) (string, error) { return n.Email.PasswordRef, nil }
 
-func (emailChannel) Send(ctx context.Context, _ *Service, n model.Notify, secret, to string, m composed) error {
-	return sendMail(ctx, n.Email, secret, to, m.subject, m.text)
-}
-
-func (c emailChannel) Test(ctx context.Context, s *Service, n model.Notify, secret, to string, m composed) (map[string]string, error) {
-	return nil, c.Send(ctx, s, n, secret, to, m)
+func (emailChannel) Send(ctx context.Context, _ *Service, n model.Notify, secret, to string, m composed) (string, error) {
+	err := sendMail(ctx, n.Email, secret, to, m.subject, m.text)
+	var smtpErr *textproto.Error
+	if errors.As(err, &smtpErr) && smtpErr.Code >= 500 {
+		// A permanent SMTP answer: the address or the message is refused.
+		return "", errPermanent{err}
+	}
+	return "", err
 }
 
 type telegramChannel struct{}
@@ -150,19 +159,20 @@ func (telegramChannel) Extra(n model.Notify) []string { return n.ExtraTelegram }
 
 func (telegramChannel) Secret(n model.Notify) (string, error) {
 	if n.Telegram.TokenRef == "" {
-		return "", errors.New("the Telegram bot token is not set")
+		return "", telegram.ErrNoToken
 	}
 	return n.Telegram.TokenRef, nil
 }
 
-func (telegramChannel) Send(ctx context.Context, s *Service, n model.Notify, secret, to string, m composed) error {
-	return sendTelegram(ctx, s.client, n.Telegram.APIURL, secret, to, m.html)
+func (telegramChannel) Send(ctx context.Context, s *Service, n model.Notify, secret, to string, m composed) (string, error) {
+	return sendTelegram(ctx, telegram.New(s.client, n.Telegram.APIURL, secret), n.Telegram.Bot, to, m)
 }
 
 func (c telegramChannel) Test(ctx context.Context, s *Service, n model.Notify, secret, to string, m composed) (map[string]string, error) {
-	me, err := telegramCall(ctx, s.client, n.Telegram.APIURL, secret, "getMe", map[string]any{})
+	me, err := telegram.New(s.client, n.Telegram.APIURL, secret).Me(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{"bot": me.Result.Username}, c.Send(ctx, s, n, secret, to, m)
+	_, err = c.Send(ctx, s, n, secret, to, m)
+	return map[string]string{"bot": me.Username}, err
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/rules"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/tgbot"
 )
 
 const (
@@ -100,8 +101,10 @@ type App struct {
 	proxies          TrustedProxies
 	rules            *RulesService
 	ruleEngine       *rules.Engine
-	ready            atomic.Bool
-	rates            rates
+	// tgBot is the Telegram bot built into Umbrella (PostgreSQL only: it needs the link key).
+	tgBot *tgbot.Bot
+	ready atomic.Bool
+	rates rates
 }
 
 func New(opt Options, deps Deps) *App {
@@ -174,7 +177,9 @@ func New(opt Options, deps Deps) *App {
 	}
 	a.pdGateway = pagerduty.New(deps.Store, resolver)
 	a.pagerduty = NewPagerDutyService(deps.Store, vault, a.pdGateway)
+	a.pdGateway.SetUsers(usersByEmail(deps.Store))
 	a.notifier = notify.New(deps.Store, resolver)
+	a.notifier.SetOnCall(a.pdGateway)
 	a.notifications = NewNotificationsService(deps.Store, vault, a.notifier)
 	a.responseSettings = NewResponseService(deps.Store, vault, a.notifier)
 	if queue != nil {
@@ -189,6 +194,8 @@ func New(opt Options, deps Deps) *App {
 			sec = vault
 		}
 		a.response = response.New(deps.Backend.Pool(), deps.Store, a.alerts, a.notifier, sec)
+		a.response.SetPagerDuty(pdResponse{alerts: a.alerts, gw: a.pdGateway})
+		a.tgBot = tgbot.New(botBackend{a}, a.botLock)
 	}
 	a.ruleEngine = rules.New(deps.Store, ruleCredentials(creds))
 	a.rules = NewRulesService(deps.Store, a.ruleEngine, creds)
@@ -218,7 +225,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerWallboards, a.registerRules, a.registerGrafana, a.registerOnboarding, a.registerResponse} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerWallboards, a.registerRules, a.registerGrafana, a.registerOnboarding, a.registerResponse, a.registerTelegram} {
 		register(mux)
 	}
 	a.registerRoutePreview(mux)
@@ -262,11 +269,13 @@ func (a *App) Run(ctx context.Context) {
 		slog.Error("acknowledgement links are off: no signing key", "err", err)
 	} else {
 		a.notifier.SetLinks(notify.NewLinks(key))
+		wg.Go(func() { a.tgBot.Run(ctx) })
 	}
 	a.ready.Store(true)
 	wg.Go(func() { a.alerts.Run(ctx) })
 	wg.Go(func() { alert.Watch(ctx, a.deps.Backend.Pool, a.feed.publish) })
 	wg.Go(func() { a.pdGateway.Run(ctx) })
+	wg.Go(func() { a.pdGateway.RunSync(ctx) })
 	wg.Go(func() { a.notifier.Run(ctx) })
 	wg.Go(func() { a.ruleEngine.Run(ctx) })
 	wg.Go(func() { a.response.Run(ctx) })

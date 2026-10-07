@@ -1,6 +1,7 @@
 package response
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 	"time"
@@ -270,7 +271,7 @@ func (v view) entry(e alert.Entry) string {
 	case "response_priority_raised":
 		return when + " — " + v.t("upd.raised", "from", v.t(e.Args["from"]), "to", v.t(e.Args["to"]))
 	case "response_step":
-		return when + " — " + v.t("upd.step", "level", e.Args["level"], "people", nonEmpty(e.Args["people"], v.t("none")))
+		return when + " — " + v.t("upd.step", "level", e.Args["level"], "people", cmp.Or(e.Args["people"], v.t("none")))
 	case "event":
 		if e.Args["status"] == alert.SourceResolved {
 			return when + " — ✓ " + e.Args["title"]

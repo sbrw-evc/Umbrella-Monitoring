@@ -121,3 +121,9 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+.al-modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}

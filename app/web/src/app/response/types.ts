@@ -3,13 +3,13 @@ import type { Severity } from '../incidents/types'
 export type Mode = 'off' | 'dry_run' | 'live'
 export type Impact = 'extensive' | 'significant' | 'moderate' | 'minor'
 export type Criticality = 'critical' | 'high' | 'medium' | 'low'
-export type Method = 'email' | 'telegram' | 'teams' | 'zoom' | 'war_room' | 'call_teams' | 'call_zoom'
+export type Method = 'email' | 'telegram' | 'teams' | 'zoom' | 'pagerduty' | 'war_room' | 'call_teams' | 'call_zoom'
 export type Target = 'route' | 'lead' | 'parent_lead' | 'ci_owners' | 'service_owners'
 
 export const SEVERITIES: Severity[] = ['critical', 'error', 'warning', 'low', 'info']
 export const IMPACTS: Impact[] = ['extensive', 'significant', 'moderate', 'minor']
 export const CRITICALITIES: Criticality[] = ['critical', 'high', 'medium', 'low']
-export const METHODS: Method[] = ['email', 'telegram', 'teams', 'zoom', 'war_room', 'call_teams', 'call_zoom']
+export const METHODS: Method[] = ['email', 'telegram', 'teams', 'zoom', 'pagerduty', 'war_room', 'call_teams', 'call_zoom']
 export const TARGETS: Target[] = ['route', 'lead', 'parent_lead', 'ci_owners', 'service_owners']
 export const PRIORITY: Record<Severity, string> = { critical: 'P1', error: 'P2', warning: 'P3', low: 'P4', info: 'P5' }
 

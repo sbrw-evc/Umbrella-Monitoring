@@ -17,6 +17,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/tgbot"
 )
 
 const (
@@ -55,6 +56,8 @@ type NotifyView struct {
 	AutoDelaySeconds int  `json:"auto_delay_seconds"`
 	// DefaultTemplates are the built-in message templates by name: what Templates replace.
 	DefaultTemplates map[string]string `json:"default_templates"`
+	// BotStatus is the state of the Telegram bot built into Umbrella.
+	BotStatus *tgbot.Status `json:"bot_status,omitempty"`
 }
 
 func (s *NotificationsService) View() NotifyView {
@@ -113,6 +116,8 @@ type TelegramInput struct {
 	Enabled bool   `json:"enabled"`
 	Token   string `json:"token"`
 	APIURL  string `json:"api_url"`
+	// Bot turns on the bot built into Umbrella; nil keeps the saved value (older clients).
+	Bot *bool `json:"bot,omitempty"`
 }
 
 type TeamsInput struct {
@@ -248,17 +253,17 @@ func (s *NotificationsService) Save(ctx context.Context, actor string, in Notify
 		pwRef = ""
 	}
 	if e.Password != "" {
-		if pwRef, err = s.put(ctx, "smtp_password", e.Password); err != nil {
+		if pwRef, err = putSecret(ctx, s.secrets, notifySecretPath, "smtp_password", e.Password); err != nil {
 			return NotifyView{}, err
 		}
 	}
 	if token != "" {
-		if tokenRef, err = s.put(ctx, "telegram_token", token); err != nil {
+		if tokenRef, err = putSecret(ctx, s.secrets, notifySecretPath, "telegram_token", token); err != nil {
 			return NotifyView{}, err
 		}
 	}
 	if zoomToken != "" {
-		if zoomRef, err = s.put(ctx, "zoom_token", zoomToken); err != nil {
+		if zoomRef, err = putSecret(ctx, s.secrets, notifySecretPath, "zoom_token", zoomToken); err != nil {
 			return NotifyView{}, err
 		}
 	}
@@ -267,7 +272,11 @@ func (s *NotificationsService) Save(ctx context.Context, actor string, in Notify
 	if n.Email.Security == "" {
 		n.Email.Security = model.SMTPStartTLS
 	}
-	n.Telegram = model.TelegramChannel{Enabled: in.Telegram.Enabled, TokenRef: tokenRef, APIURL: api}
+	bot := n.Telegram.Bot
+	if in.Telegram.Bot != nil {
+		bot = *in.Telegram.Bot
+	}
+	n.Telegram = model.TelegramChannel{Enabled: in.Telegram.Enabled, TokenRef: tokenRef, APIURL: api, Bot: bot}
 	n.Teams = model.TeamsChannel{Enabled: in.Teams.Enabled}
 	n.Zoom = model.ZoomChannel{Enabled: in.Zoom.Enabled, TokenRef: zoomRef}
 	n.ExtraEmails, n.ExtraTelegram = extraEmails, extraTelegram
@@ -320,17 +329,6 @@ func validFrom(v string) bool {
 	return notify.ValidEmail(v)
 }
 
-func (s *NotificationsService) put(ctx context.Context, key, value string) (string, error) {
-	if s.secrets == nil {
-		return "", credentials.ErrUnavailable
-	}
-	ref, err := s.secrets.PutRef(ctx, notifySecretPath, key, value)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", credentials.ErrUnavailable, err)
-	}
-	return ref, nil
-}
-
 func (a *App) registerNotifications(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/notifications", a.authed(a.can("settings.alerting:view", a.notifyView)))
 	mux.HandleFunc("PUT /api/notifications", a.authed(a.can("settings.alerting:edit", a.notifySave)))
@@ -341,7 +339,16 @@ func (a *App) registerNotifications(mux *http.ServeMux) {
 }
 
 func (a *App) notifyView(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, a.notifications.View())
+	httpx.JSON(w, http.StatusOK, a.withBot(a.notifications.View()))
+}
+
+// withBot adds the state of the Telegram bot to the view.
+func (a *App) withBot(v NotifyView) NotifyView {
+	if a.tgBot != nil {
+		st := a.tgBot.Status()
+		v.BotStatus = &st
+	}
+	return v
 }
 
 func (a *App) notifySave(w http.ResponseWriter, r *http.Request) {
@@ -350,7 +357,7 @@ func (a *App) notifySave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.notifications.Save(r.Context(), current(r).user.Username, in)
-	settingsRespond(w, out, err)
+	settingsRespond(w, a.withBot(out), err)
 }
 
 type notifyPreviewInput struct {

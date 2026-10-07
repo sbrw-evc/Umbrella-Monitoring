@@ -11,7 +11,7 @@ import { useSession } from '../../session'
 import { reveal } from './PagerDutyCard'
 import { strings } from './strings'
 import { severityText } from '../../incidents/types'
-import { SEVERITIES, TEMPLATE_MESSAGES, TEMPLATE_PARTS, type NotifyPreview, type NotifyView } from './types'
+import { SEVERITIES, TEMPLATE_MESSAGES, TEMPLATE_PARTS, type BotStatus, type NotifyPreview, type NotifyView } from './types'
 
 type Channel = 'email' | 'telegram' | 'teams' | 'zoom'
 
@@ -20,7 +20,7 @@ const DELAYS = [0, 60, 120, 300, 600, 900, 1800, 3600]
 
 type Draft = {
   email: NotifyView['email'] & { password: string; port_text: string }
-  telegram: { enabled: boolean; api_url: string; token: string }
+  telegram: { enabled: boolean; api_url: string; token: string; bot: boolean }
   teams: { enabled: boolean }
   zoom: { enabled: boolean; token: string }
   extra_emails: string
@@ -36,7 +36,7 @@ type Draft = {
 function draftOf(v: NotifyView): Draft {
   return {
     email: { ...v.email, password: '', port_text: v.email.port ? String(v.email.port) : '' },
-    telegram: { enabled: v.telegram.enabled, api_url: v.telegram.api_url ?? '', token: '' },
+    telegram: { enabled: v.telegram.enabled, api_url: v.telegram.api_url ?? '', token: '', bot: !!v.telegram.bot },
     teams: { enabled: v.teams?.enabled ?? false },
     zoom: { enabled: v.zoom?.enabled ?? false, token: '' },
     extra_emails: v.extra_emails.join('\n'),
@@ -79,7 +79,7 @@ function bodyOf(d: Draft, defaults: Record<string, string>) {
       password: d.email.password,
       from: d.email.from,
     },
-    telegram: { enabled: d.telegram.enabled, token: d.telegram.token, api_url: d.telegram.api_url },
+    telegram: { enabled: d.telegram.enabled, token: d.telegram.token, api_url: d.telegram.api_url, bot: d.telegram.bot },
     teams: d.teams,
     zoom: d.zoom,
     extra_emails: lines(d.extra_emails),
@@ -140,6 +140,14 @@ export function NotifyCard() {
       return r.bot ? t('nt.test.okBot', { to: r.to, bot: r.bot }) : t('nt.test.ok', { to: r.to })
     })
 
+  // botText: the state of the bot built into Umbrella, with its name and last error.
+  const botText = (b?: BotStatus) => {
+    if (!b) return t('nt.bot.state.off')
+    const parts = [t(`nt.bot.state.${b.state}`)]
+    if (b.username) parts.push(`@${b.username}`)
+    if (b.state === 'error' && b.last_error) parts.push(b.last_error)
+    return <span className={b.state === 'error' ? 'al-error' : undefined}>{parts.join(' · ')}</span>
+  }
   const autoText = t(view.pd_enabled ? 'nt.delay.auto.pd' : 'nt.delay.auto.nopd')
   const delayText = (v: number | null | undefined) =>
     v === null || v === undefined ? t('nt.delay.auto', { auto: autoText }) : v === 0 ? t('nt.delay.now') : v % 60 === 0 ? t('nt.delay.min', { n: v / 60 }) : `${v} s`
@@ -156,6 +164,7 @@ export function NotifyCard() {
   const rows: [string, ReactNode][] = [
     [t('nt.email'), view.email.enabled ? [t('pd.state.on'), view.email.host].filter(Boolean).join(' · ') : t('pd.state.off')],
     [t('nt.telegram'), t(view.telegram.enabled ? 'pd.state.on' : 'pd.state.off')],
+    ...(view.telegram.enabled && view.telegram.bot ? [[t('nt.bot'), botText(view.bot_status)] as [string, ReactNode]] : []),
     [t('nt.teams'), t(teamsOn ? 'pd.state.on' : 'pd.state.off')],
     [t('nt.zoom'), t(zoomOn ? 'pd.state.on' : 'pd.state.off')],
     [t('nt.extra'), extra],
@@ -226,6 +235,7 @@ export function NotifyCard() {
               <Field label={t('nt.api')} hint={t('nt.api.hint')}>
                 {(id) => <Input id={id} value={draft.telegram.api_url} placeholder="https://api.telegram.org" onChange={(e) => setTg({ api_url: e.target.value })} />}
               </Field>
+              <Switch checked={draft.telegram.bot} onChange={(bot) => setTg({ bot })} label={t('nt.bot.enable')} hint={t('nt.bot.hint')} />
             </Reveal>
           </div>
           <div className="al-col stack">
