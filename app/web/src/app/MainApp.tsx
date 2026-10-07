@@ -17,12 +17,14 @@ import { strings } from './strings'
 import { TopBar } from './TopBar'
 import type { User } from './types'
 import { setNotifyOwner, Toaster } from '../notify'
+import { ConfirmHost } from '../confirm'
 
 export default function MainApp({ meta }: { meta: Meta }) {
   return (
     <RouterProvider>
       <Shell meta={meta} />
       <Toaster />
+      <ConfirmHost />
     </RouterProvider>
   )
 }

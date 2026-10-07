@@ -10,6 +10,7 @@ import { strings } from './strings'
 import '../connectors/connectors.css'
 import '../cis/cis.css'
 import './maintenance.css'
+import { ask } from '../../confirm'
 
 type Ref = { id: string; name: string; missing?: boolean }
 type State = 'active' | 'planned' | 'finished'
@@ -214,7 +215,7 @@ function Row({
           <Button
             variant="ghost"
             busy={busy}
-            onClick={() => window.confirm(t('mw.delete.confirm', { title: w.title })) && run(() => api('DELETE', `/api/maintenance/${w.id}`))}
+            onClick={async () => (await ask({ text: t('mw.delete.confirm', { title: w.title }), danger: true })) && run(() => api('DELETE', `/api/maintenance/${w.id}`))}
           >
             {t('mw.delete')}
           </Button>

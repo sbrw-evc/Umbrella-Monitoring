@@ -9,6 +9,7 @@ import { useSession } from '../session'
 import { contextStrings } from './contextStrings'
 import { panelTitle } from '../incidents/Chart'
 import { Flash } from '../../notify'
+import { ask } from '../../confirm'
 
 type LogKind = 'loki' | 'opensearch'
 type Panel = { id: string; title: string; unit: string; promql: string; zabbix_key: string }
@@ -218,7 +219,7 @@ function SettingsCard({ v, editable, onSaved }: { v: View; editable: boolean; on
             <Plus size={16} aria-hidden />
             {t('ctx.panel.add')}
           </Button>
-          <Button variant="ghost" onClick={() => window.confirm(t('ctx.panels.defaults.confirm')) && set({ panels: local(v.defaults.panels) })}>
+          <Button variant="ghost" onClick={async () => (await ask({ text: t('ctx.panels.defaults.confirm') })) && set({ panels: local(v.defaults.panels) })}>
             <RotateCcw size={15} aria-hidden />
             {t('ctx.panels.defaults')}
           </Button>
@@ -312,9 +313,9 @@ function LogEditor({ value, defaults, onClose, onSaved }: { value: LogSource | '
     test.run(async () => {
       setReport(await api<Report>('POST', '/api/host-context/logs/test', { ...d, host }))
     })
-  const remove = () =>
+  const remove = async () =>
     editing &&
-    window.confirm(t('ctx.delete.confirm', { name: editing.name })) &&
+    (await ask({ text: t('ctx.delete.confirm', { name: editing.name }), danger: true })) &&
     save.run(async () => {
       await api('DELETE', `/api/host-context/logs/${editing.id}`)
       onSaved()
