@@ -23,7 +23,7 @@ func zabbixWithHosts(t *testing.T, version string) *monitoringtest.Zabbix {
 }
 
 func TestZabbixToken(t *testing.T) {
-	for _, version := range []string{"7.2.1", "6.0.30"} {
+	for _, version := range []string{"8.0.0", "7.2.1", "6.0.30"} {
 		t.Run(version, func(t *testing.T) {
 			z := zabbixWithHosts(t, version)
 			src := model.MonitoringSource{Kind: model.MonitoringZabbix, URL: z.URL + "/"}
