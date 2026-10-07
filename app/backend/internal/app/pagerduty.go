@@ -549,3 +549,22 @@ func (p pdResponse) SetPriority(ctx context.Context, a alert.Alert, priority str
 	}
 	return err
 }
+
+// dropPDRoutes removes the PagerDuty routes of a deleted team or service: such a route can
+// never match again, and the PagerDuty settings could not be saved while it pointed at nothing.
+func dropPDRoutes(d *store.Data, teamID, serviceID string) []string {
+	pd := &d.Settings.Alerting.PagerDuty
+	var dropped []string
+	kept := make([]model.PDRoute, 0, len(pd.Routes))
+	for _, r := range pd.Routes {
+		if (teamID != "" && r.TeamID == teamID) || (serviceID != "" && r.ServiceID == serviceID) {
+			dropped = append(dropped, r.Name)
+			continue
+		}
+		kept = append(kept, r)
+	}
+	if len(dropped) > 0 {
+		pd.Routes = kept
+	}
+	return dropped
+}

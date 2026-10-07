@@ -6,7 +6,7 @@ export type Reason = { code: string; level: Level; count?: number; ref?: string;
 
 export type Health = { level: Level; reasons: Reason[] }
 
-export type MapEvent = { title: string; severity: string; connector_id: string; last_seen: string }
+export type MapEvent = { incident_id: string; title: string; severity: string; status: string; suppressed?: boolean; last_seen: string }
 
 export type MapCI = {
   id: string
@@ -18,7 +18,7 @@ export type MapCI = {
   netbox_url?: string
   directory?: 'matched' | 'missing' | 'disabled'
   services: string[]
-  events: { critical: number; error: number; warning: number; low?: number; info: number; recent: MapEvent[] }
+  events: { critical: number; error: number; warning: number; low?: number; info: number; maintenance?: number; recent: MapEvent[] }
   health: Health
 }
 
@@ -37,7 +37,7 @@ export type MapService = {
 export type CMDBMap = {
   services: MapService[]
   cis: MapCI[]
-  events: { available: boolean; window_hours: number; error?: string }
+  events: { available: boolean; error?: string }
   generated_at: string
 }
 

@@ -268,7 +268,11 @@ func (s *ServicesService) Delete(ctx context.Context, actor, id string) error {
 				other.UpdatedAt = now
 			}
 		}
-		d.AddAudit(store.AuditEntry{Actor: actor, Action: "service.delete", Object: id, Detail: svc.Name})
+		detail := svc.Name
+		if routes := dropPDRoutes(d, "", id); len(routes) > 0 {
+			detail += "; PagerDuty routes removed: " + strings.Join(routes, ", ")
+		}
+		d.AddAudit(store.AuditEntry{Actor: actor, Action: "service.delete", Object: id, Detail: detail})
 	})
 	return err
 }
