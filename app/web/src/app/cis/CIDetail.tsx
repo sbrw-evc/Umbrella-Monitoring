@@ -34,7 +34,7 @@ export function CIDetail({ ci, editable, onClose, onEdit, onDelete, onChanged }:
   const footer =
     ci && editable ? (
       <>
-        <Button variant="ghost" className="svc-danger" onClick={() => onDelete(ci)}>
+        <Button variant="danger-soft" className="svc-danger" onClick={() => onDelete(ci)}>
           {t('ci.delete')}
         </Button>
         {ci.registrable && (

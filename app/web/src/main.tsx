@@ -6,6 +6,7 @@ import { installScrollbars } from './scrollbars'
 import { applyTheme, savedTheme, ThemeProvider } from './theme'
 import { Button } from './ui'
 import './styles.css'
+import './controls.css'
 
 const SetupApp = lazy(() => import('./setup/SetupApp'))
 const MainApp = lazy(() => import('./app/MainApp'))

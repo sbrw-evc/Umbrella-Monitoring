@@ -145,7 +145,7 @@ export function DeleteDialog({ ci, onClose, onDeleted }: { ci: CI | null; onClos
           <Button variant="ghost" onClick={close}>
             {t('ci.cancel')}
           </Button>
-          <Button variant="primary" className="svc-danger-solid" busy={remover.busy} onClick={confirm}>
+          <Button variant="danger" busy={remover.busy} onClick={confirm}>
             {t('ci.delete.confirm')}
           </Button>
         </>

@@ -291,11 +291,11 @@ function Editor({ value, onClose, onSaved }: { value: Editing; onClose: () => vo
         <div className="mw-quick">
           <span className="hint">{t('mw.tz', { zone })}</span>
           <span className="mw-chips">
-            <button type="button" className="mw-chip" onClick={() => setD({ ...d, start: toLocal(new Date()), end: toLocal(new Date(Date.now() + Math.max(hours, 1) * 3600_000)) })}>
+            <button type="button" className="chip mw-chip" onClick={() => setD({ ...d, start: toLocal(new Date()), end: toLocal(new Date(Date.now() + Math.max(hours, 1) * 3600_000)) })}>
               {t('mw.now')}
             </button>
             {HOURS.map((h) => (
-              <button key={h} type="button" className={`mw-chip ${hours === h ? 'on' : ''}`} onClick={() => setLength(h)}>
+              <button key={h} type="button" className={`chip mw-chip${hours === h ? ' on' : ''}`} onClick={() => setLength(h)}>
                 {t('mw.hours', { n: h })}
               </button>
             ))}

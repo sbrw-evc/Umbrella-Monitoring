@@ -8,7 +8,7 @@ import {
   type ReactNode,
   type TextareaHTMLAttributes,
 } from 'react'
-import { AlertTriangle, CheckCircle2, Eye, EyeOff, Info, Loader2, Minus, Moon, Plus, Sun, X, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Eye, EyeOff, FileCheck2, Info, Loader2, Minus, Moon, Plus, Sun, Upload, X, XCircle } from 'lucide-react'
 import { AnimatePresence, motion, type HTMLMotionProps, type Transition } from 'motion/react'
 import { useLocale, useT } from './i18n'
 import { useTheme } from './theme'
@@ -17,7 +17,7 @@ import { Select } from './select'
 
 export const spring: Transition = { type: 'spring', stiffness: 420, damping: 30 }
 
-type ButtonProps = Omit<HTMLMotionProps<'button'>, 'children'> & { children?: ReactNode; variant?: 'primary' | 'secondary' | 'ghost'; busy?: boolean }
+type ButtonProps = Omit<HTMLMotionProps<'button'>, 'children'> & { children?: ReactNode; variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-soft'; busy?: boolean }
 
 export function Button({ variant = 'secondary', busy, disabled, children, className, ...rest }: ButtonProps) {
   return (
@@ -67,6 +67,51 @@ export function Password(props: InputHTMLAttributes<HTMLInputElement>) {
 }
 
 export { Select }
+
+// A file picker drawn as a drop zone: click to choose a file or drop one on it.
+export function FileInput({ id, accept, onFile }: { id?: string; accept?: string; onFile: (f: File) => void }) {
+  const t = useT(labels)
+  const [name, setName] = useState('')
+  const [over, setOver] = useState(false)
+  const take = (f: File | undefined) => {
+    if (!f) return
+    setName(f.name)
+    onFile(f)
+  }
+  return (
+    <label
+      className={`file-drop${over ? ' over' : ''}${name ? ' has-file' : ''}`}
+      onDragOver={(e) => {
+        e.preventDefault()
+        setOver(true)
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault()
+        setOver(false)
+        take(e.dataTransfer.files?.[0])
+      }}
+    >
+      <input
+        id={id}
+        type="file"
+        accept={accept}
+        className="file-drop-input"
+        onChange={(e) => {
+          take(e.target.files?.[0])
+          e.target.value = ''
+        }}
+      />
+      <span className="file-drop-icon" aria-hidden>
+        {name ? <FileCheck2 size={18} /> : <Upload size={18} />}
+      </span>
+      <span className="file-drop-text">
+        <span className="file-drop-title">{name || t('ui.file.choose')}</span>
+        <span className="hint">{t(name ? 'ui.file.replace' : 'ui.file.drop')}</span>
+      </span>
+    </label>
+  )
+}
 
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea {...props} className="input textarea" />
@@ -459,6 +504,20 @@ export function Modal({
 }
 
 const labels = {
-  en: { 'ui.show': 'Show', 'ui.hide': 'Hide', 'ui.close': 'Close' },
-  ru: { 'ui.show': 'Показать', 'ui.hide': 'Скрыть', 'ui.close': 'Закрыть' },
+  en: {
+    'ui.show': 'Show',
+    'ui.hide': 'Hide',
+    'ui.close': 'Close',
+    'ui.file.choose': 'Choose a file',
+    'ui.file.drop': 'or drop it here',
+    'ui.file.replace': 'Click or drop another file to replace it',
+  },
+  ru: {
+    'ui.show': 'Показать',
+    'ui.hide': 'Скрыть',
+    'ui.close': 'Закрыть',
+    'ui.file.choose': 'Выберите файл',
+    'ui.file.drop': 'или перетащите его сюда',
+    'ui.file.replace': 'Нажмите или перетащите другой файл, чтобы заменить',
+  },
 }

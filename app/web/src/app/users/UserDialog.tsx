@@ -249,7 +249,7 @@ function EditView({
             )}
             {rights.remove && (
               <SettingRow label={t('usr.delete')} hint={t('usr.delete.hint')}>
-                <Button className="usr-danger" onClick={() => onMode('delete')}>
+                <Button variant="danger-soft" onClick={() => onMode('delete')}>
                   <Trash2 size={16} aria-hidden />
                   {t('usr.delete')}
                 </Button>
@@ -319,7 +319,7 @@ function DeleteView({ user, onBack, onDeleted }: { user: ManagedUser; onBack: ()
         <Button variant="ghost" onClick={onBack}>
           {t('usr.back')}
         </Button>
-        <Button className="usr-danger-solid" onClick={remove} busy={action.busy}>
+        <Button variant="danger" onClick={remove} busy={action.busy}>
           <Trash2 size={16} aria-hidden />
           {t('usr.delete.confirm')}
         </Button>

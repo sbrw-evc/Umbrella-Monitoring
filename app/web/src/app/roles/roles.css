@@ -127,40 +127,12 @@
 }
 
 .perm-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 11px 5px 7px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-2);
+  padding-left: 6px;
   color: var(--muted);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    border-color 0.15s,
-    color 0.15s;
-}
-
-.perm-chip:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-.perm-chip:focus-visible {
-  outline: none;
-  box-shadow: var(--focus);
 }
 
 .perm-chip:disabled {
-  cursor: default;
-}
-
-.perm-chip.on {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--text);
+  opacity: 1;
 }
 
 .perm-chip.view {
@@ -168,20 +140,23 @@
 }
 
 .perm-tick {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  border: 1.5px solid var(--border);
-  background: var(--surface);
-  color: var(--accent-text);
+  border: 1.5px solid var(--check-border);
+  background: var(--check-bg);
+  color: var(--check-mark);
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
 }
 
 .perm-chip.on .perm-tick {
-  background: var(--accent);
-  border-color: var(--accent);
+  background: var(--check-on);
+  border-color: var(--check-on);
 }
 
 .roles-savebar {

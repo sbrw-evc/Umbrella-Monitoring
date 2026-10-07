@@ -97,7 +97,7 @@ function Dialog({ q }: { q: Ask }) {
         </div>
         <div className="modal-foot">
           <Button onClick={() => answer(false)}>{t('cf.cancel')}</Button>
-          <Button ref={ok} variant="primary" className={q.danger ? 'btn-danger' : ''} onClick={() => answer(true)}>
+          <Button ref={ok} variant={q.danger ? 'danger' : 'primary'} onClick={() => answer(true)}>
             {q.ok ?? t(q.danger ? 'cf.delete' : 'cf.ok')}
           </Button>
         </div>

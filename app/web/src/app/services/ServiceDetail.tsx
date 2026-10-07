@@ -32,7 +32,7 @@ export function ServiceDetail({
   const footer =
     service && editable ? (
       <>
-        <Button variant="ghost" className="svc-danger" onClick={() => onDelete(service)}>
+        <Button variant="danger-soft" className="svc-danger" onClick={() => onDelete(service)}>
           {t('svc.delete')}
         </Button>
         <Button variant="primary" onClick={() => onEdit(service)}>
