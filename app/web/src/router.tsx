@@ -2,9 +2,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 
 type NavigateOptions = { replace?: boolean }
 
-type Router = { path: string; navigate: (to: string, options?: NavigateOptions) => void }
+// search and visit change with every navigation, also to the same page with other parameters
+// (a link to an incident from a notification while the incident list is open).
+type Router = { path: string; search: string; visit: number; navigate: (to: string, options?: NavigateOptions) => void }
 
-const RouterContext = createContext<Router>({ path: '/', navigate: () => {} })
+const RouterContext = createContext<Router>({ path: '/', search: '', visit: 0, navigate: () => {} })
 
 export const SCROLL_ROOT_ID = 'app-main'
 
@@ -20,22 +22,27 @@ function currentPath() {
 
 export function RouterProvider({ children }: { children: ReactNode }) {
   const [path, setPath] = useState(currentPath)
+  const [visit, setVisit] = useState<{ search: string; n: number }>(() => ({ search: document.location.search, n: 0 }))
+  const moved = useCallback(() => {
+    setPath(currentPath())
+    setVisit((v) => ({ search: document.location.search, n: v.n + 1 }))
+  }, [])
 
   useEffect(() => {
-    const onPop = () => setPath(currentPath())
+    const onPop = () => moved()
     window.addEventListener('popstate', onPop)
     return () => window.removeEventListener('popstate', onPop)
-  }, [])
+  }, [moved])
 
   const navigate = useCallback((to: string, { replace = false }: NavigateOptions = {}) => {
     if (to === currentPath() && !replace) return
     if (replace) window.history.replaceState(null, '', to)
     else window.history.pushState(null, '', to)
-    setPath(currentPath())
+    moved()
     scrollToTop()
-  }, [])
+  }, [moved])
 
-  const value = useMemo(() => ({ path, navigate }), [path, navigate])
+  const value = useMemo(() => ({ path, search: visit.search, visit: visit.n, navigate }), [path, visit, navigate])
   return <RouterContext.Provider value={value}>{children}</RouterContext.Provider>
 }
 

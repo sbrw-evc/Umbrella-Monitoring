@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { ArrowUp, Plus, RotateCcw, X } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
-import { Banner, Button, Field, Input, Modal, Segmented, Select, Stepper, Switch, Textarea } from '../../ui'
+import { Button, Field, Input, Modal, Segmented, Select, Stepper, Switch, Textarea } from '../../ui'
 import { useSession } from '../session'
 import { contextStrings } from './contextStrings'
 import { panelTitle } from '../incidents/Chart'
+import { Flash } from '../../notify'
+import { ask } from '../../confirm'
 
 type LogKind = 'loki' | 'opensearch'
 type Panel = { id: string; title: string; unit: string; promql: string; zabbix_key: string }
@@ -217,7 +219,7 @@ function SettingsCard({ v, editable, onSaved }: { v: View; editable: boolean; on
             <Plus size={16} aria-hidden />
             {t('ctx.panel.add')}
           </Button>
-          <Button variant="ghost" onClick={() => window.confirm(t('ctx.panels.defaults.confirm')) && set({ panels: local(v.defaults.panels) })}>
+          <Button variant="ghost" onClick={async () => (await ask({ text: t('ctx.panels.defaults.confirm') })) && set({ panels: local(v.defaults.panels) })}>
             <RotateCcw size={15} aria-hidden />
             {t('ctx.panels.defaults')}
           </Button>
@@ -228,7 +230,7 @@ function SettingsCard({ v, editable, onSaved }: { v: View; editable: boolean; on
           </Button>
         </div>
       )}
-      <ErrorBanner error={save.error} strings={contextStrings} />
+      <ErrorFlash error={save.error} strings={contextStrings} />
     </section>
   )
 }
@@ -311,9 +313,9 @@ function LogEditor({ value, defaults, onClose, onSaved }: { value: LogSource | '
     test.run(async () => {
       setReport(await api<Report>('POST', '/api/host-context/logs/test', { ...d, host }))
     })
-  const remove = () =>
+  const remove = async () =>
     editing &&
-    window.confirm(t('ctx.delete.confirm', { name: editing.name })) &&
+    (await ask({ text: t('ctx.delete.confirm', { name: editing.name }), danger: true })) &&
     save.run(async () => {
       await api('DELETE', `/api/host-context/logs/${editing.id}`)
       onSaved()
@@ -409,20 +411,20 @@ function LogEditor({ value, defaults, onClose, onSaved }: { value: LogSource | '
         )}
         {report &&
           (report.ok ? (
-            <Banner kind="ok" title={t('ctx.test.ok', { n: report.lines.length })}>
+            <Flash kind="ok" title={t('ctx.test.ok', { n: report.lines.length })} trigger={report}>
               {report.query && <div className="cn-mono ctx-query">{report.query}</div>}
               {report.lines.slice(0, 5).map((l, i) => (
                 <div key={i} className="cn-mono ctx-line">
                   {l.text}
                 </div>
               ))}
-            </Banner>
+            </Flash>
           ) : (
-            <Banner kind="error" title={t('ctx.test.fail')}>
+            <Flash kind="error" title={t('ctx.test.fail')} trigger={report}>
               {report.error}
-            </Banner>
+            </Flash>
           ))}
-        <ErrorBanner error={test.error ?? save.error} strings={contextStrings} />
+        <ErrorFlash error={test.error ?? save.error} strings={contextStrings} />
       </div>
     </Modal>
   )

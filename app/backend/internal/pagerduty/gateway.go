@@ -385,6 +385,24 @@ func Build(publicURL string, grafana bool, routingKey string, cmd alert.Command)
 	if len(a.Labels) > 0 {
 		details["labels"] = a.Labels
 	}
+	// The description and fields of the newest firing source, the description cut short: the
+	// incident in Umbrella has the whole of it.
+	var latest *alert.Source
+	for _, s := range a.Sources {
+		if s.Status == alert.SourceFiring && (latest == nil || s.LastSeen.After(latest.LastSeen)) {
+			latest = s
+		}
+	}
+	if latest != nil {
+		if latest.Description != "" {
+			details["description"] = truncate(latest.Description, 4000)
+		}
+		for _, f := range latest.Fields {
+			if _, taken := details[f.Name]; !taken {
+				details[f.Name] = f.Value
+			}
+		}
+	}
 	group := ""
 	if len(services) > 0 {
 		group = services[0]

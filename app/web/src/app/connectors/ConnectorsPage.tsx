@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { FileUp, Lock, Plus, PlugZap } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Link, useRouter } from '../../router'
@@ -15,6 +15,7 @@ import { sourcesStrings } from './sourcesStrings'
 import { strings } from './strings'
 import type { ConnectorList, ConnectorSummary, Connector, CredentialChoice, ImportCheck, Preset, Slot } from './types'
 import './connectors.css'
+import { Flash } from '../../notify'
 
 export function ConnectorsPage() {
   const { path } = useRouter()
@@ -337,7 +338,7 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
         {(id) => <Textarea id={id} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />}
       </Field>
       {current && <SlotMapping key={preset} slots={current.credentials} choices={choices.data ?? []} value={creds} onChange={setCreds} name={name} />}
-      <ErrorBanner error={action.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
     </Modal>
   )
 }
@@ -406,7 +407,7 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
       <Field label={t('cn.import.file')} hint={t('cn.import.file.hint')}>
         {(id) => <input id={id} type="file" accept="application/json,.json" onChange={(e) => void pick(e.target.files?.[0])} />}
       </Field>
-      {fileError && <Banner kind="error" title={fileError} />}
+      {fileError && <Flash kind="error" title={fileError} />}
       {check && (
         <>
           <p className="muted">{t('cn.import.summary', { nodes: check.nodes, samples: check.samples })}</p>
@@ -415,7 +416,7 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
           <SlotMapping slots={check.credentials} choices={check.choices} value={creds} onChange={setCreds} name={name} />
         </>
       )}
-      <ErrorBanner error={action.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
     </Modal>
   )
 }

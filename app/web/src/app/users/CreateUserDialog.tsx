@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { api } from '../../api'
 import { useT } from '../../i18n'
-import { Banner, Button, Field, Input, Modal } from '../../ui'
+import { Button, Field, Input, Modal } from '../../ui'
 import { ProfileFieldsGrid } from '../profile/ProfileFieldsGrid'
 import { useAction } from '../profile/useAction'
 import { profileOf, type ProfileFields } from '../types'
@@ -9,6 +9,7 @@ import { AccessFields, type Access } from './AccessFields'
 import type { ManagedUser, Refs } from './model'
 import { freshPassword, NewPasswordFields, usePasswordValid, type NewPassword } from './NewPasswordFields'
 import { strings } from './strings'
+import { Flash } from '../../notify'
 
 const FORM_ID = 'usr-create-form'
 const USERNAME = /^[^\s\p{Cc}]{1,64}$/u
@@ -58,9 +59,9 @@ export function CreateUserDialog({ open, refs, onClose, onCreated }: { open: boo
         <AccessFields refs={refs} value={access} onChange={setAccess} />
         <NewPasswordFields value={password} onChange={setPassword} username={login} />
         {action.error && (
-          <Banner kind="error" title={action.error.message}>
+          <Flash kind="error" title={action.error.message}>
             {action.error.detail}
-          </Banner>
+          </Flash>
         )}
       </form>
     </Modal>

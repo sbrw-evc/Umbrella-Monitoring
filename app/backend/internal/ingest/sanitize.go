@@ -64,7 +64,10 @@ func cleanAny(v any) any {
 func cleanEvent(e *flow.Event) {
 	e.Title, e.CI, e.Signal, e.Method = cleanText(e.Title), cleanText(e.CI), cleanText(e.Signal), cleanText(e.Method)
 	e.Severity, e.Status, e.ExternalID = cleanText(e.Severity), cleanText(e.Status), cleanText(e.ExternalID)
-	e.Value, e.Key = cleanText(e.Value), cleanText(e.Key)
+	e.Value, e.Key, e.Description = cleanText(e.Value), cleanText(e.Key), cleanText(e.Description)
+	for i := range e.Fields {
+		e.Fields[i].Name, e.Fields[i].Value = cleanText(e.Fields[i].Name), cleanText(e.Fields[i].Value)
+	}
 	e.Labels = cleanMap(e.Labels)
 }
 

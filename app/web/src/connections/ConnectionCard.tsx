@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { PlugZap } from 'lucide-react'
 import { errorText, useT, type Dict } from '../i18n'
+import { Flash } from '../notify'
 import { Banner, Button } from '../ui'
 import { ProfileCard } from '../app/profile/ProfileCard'
 import { SummaryCard } from '../app/profile/SummaryCard'
@@ -21,6 +22,15 @@ export function ErrorBanner({ error, strings }: { error: unknown; strings?: Dict
       {e.detail}
     </Banner>
   )
+}
+
+// ErrorFlash reports the error of an action (a save, a check) as a notification; errors that
+// stand in for a page or list that could not be loaded stay in place, as ErrorBanner.
+export function ErrorFlash({ error, strings }: { error: unknown; strings?: Dict }) {
+  const t = useT(strings ?? connectionStrings)
+  if (!error) return null
+  const e = errorText(t, error)
+  return <Flash kind="error" title={e.message}>{e.detail}</Flash>
 }
 
 export function ConnectionCard({

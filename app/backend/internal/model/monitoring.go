@@ -5,6 +5,7 @@ import "time"
 const (
 	MonitoringZabbix     = "zabbix"
 	MonitoringPrometheus = "prometheus"
+	MonitoringGrafana    = "grafana"
 
 	HostUp       = "up"
 	HostPartial  = "partial"
@@ -17,8 +18,8 @@ const (
 	HostNoCI = "-"
 )
 
-// MonitoringSource is a monitoring system (Zabbix or a Prometheus-compatible API) whose host
-// list is read and matched with configuration items. The credential, when set, is one of the
+// MonitoringSource is a monitoring system (Zabbix, a Prometheus-compatible API or Grafana)
+// whose host list is read and matched with configuration items. The credential, when set, is one of the
 // credential catalog.
 type MonitoringSource struct {
 	ID           string `json:"id"`
@@ -30,8 +31,16 @@ type MonitoringSource struct {
 	Enabled      bool   `json:"enabled"`
 	SyncMinutes  int    `json:"sync_minutes"`
 	// Prometheus: the instant query that lists targets and the label that names the host.
+	// Grafana: the label of alert instances that names the host (empty: instance, host…).
 	Query     string `json:"query,omitempty"`
 	HostLabel string `json:"host_label,omitempty"`
+	// Grafana: read the firing alerts through the API every PollSeconds and hand them to the
+	// connector as if the contact point had sent them. Alerts that stop firing are resolved.
+	PollAlerts  bool `json:"poll_alerts,omitempty"`
+	PollSeconds int  `json:"poll_seconds,omitempty"`
+	// Polled are the alerts the last poll found firing, by fingerprint: an alert missing from
+	// the next poll is resolved.
+	Polled map[string]PolledAlert `json:"-"`
 	// ConnectorID is the connector that receives the alerts of this system («Приём алертов»).
 	// A Prometheus system also serves RED and USE rules as a metric source (store.Data.MetricSource).
 	ConnectorID string `json:"connector_id,omitempty"`
@@ -94,4 +103,23 @@ type MonitoringSync struct {
 	Actor      string    `json:"actor"`
 	Hosts      int       `json:"hosts"`
 	Version    string    `json:"version,omitempty"`
+}
+
+// MonitoringPoll is the last poll of the alerts of a source; it is kept in memory only.
+type MonitoringPoll struct {
+	At     time.Time `json:"at"`
+	OK     bool      `json:"ok"`
+	Error  string    `json:"error,omitempty"`
+	Firing int       `json:"firing"`
+	// Sent counts the alerts handed to the connector by the last poll: new, changed and resolved.
+	Sent int `json:"sent"`
+}
+
+// PolledAlert is what a poll remembers of a firing alert to resolve it once it is gone.
+type PolledAlert struct {
+	Labels      map[string]string
+	Annotations map[string]string
+	StartsAt    time.Time
+	RuleUID     string
+	Value       string
 }

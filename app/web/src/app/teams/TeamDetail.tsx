@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { ChevronRight, FolderPlus, Trash2, UserMinus, UserPlus, Users } from 'lucide-react'
 import { api } from '../../api'
 import { useT } from '../../i18n'
-import { Banner, Button } from '../../ui'
+import { Button } from '../../ui'
 import { MemberList } from '../org/MemberList'
 import { MemberPicker } from '../org/MemberPicker'
 import type { TreeIndex } from '../org/treeIndex'
@@ -11,6 +11,7 @@ import { useAction } from '../profile/useAction'
 import { MAX_DEPTH, teamChanges, teamDraft, type Team } from './team'
 import { TeamFields } from './TeamFields'
 import { strings } from './strings'
+import { Flash } from '../../notify'
 
 export function TeamDetail({
   team,
@@ -91,11 +92,11 @@ export function TeamDetail({
       </div>
 
       <TeamFields draft={draft} onChange={setDraft} index={index} users={users} self={team.id} disabled={!editable} />
-      {saver.notice && !dirty && <Banner kind="ok" title={saver.notice} />}
+      {saver.notice && <Flash kind="ok" title={saver.notice} />}
       {saver.error && (
-        <Banner kind="error" title={saver.error.message}>
+        <Flash kind="error" title={saver.error.message}>
           {saver.error.detail}
-        </Banner>
+        </Flash>
       )}
       {editable && dirty && (
         <div className="teams-save">
@@ -118,10 +119,10 @@ export function TeamDetail({
             </Button>
           )}
         </div>
-        {!picking && members.error && (
-          <Banner kind="error" title={members.error.message}>
+        {members.error && (
+          <Flash kind="error" title={members.error.message}>
             {members.error.detail}
-          </Banner>
+          </Flash>
         )}
         <MemberList
           members={team.members}

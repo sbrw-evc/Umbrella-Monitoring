@@ -668,3 +668,18 @@
 .cn-panel-body .row > .input {
   width: auto;
 }
+
+.cn-ev-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 12.5px;
+}
+
+.cn-ev-details[open] {
+  min-width: 360px;
+}
+
+.cn-ev-details .field-list,
+.cn-ev-details .long-text {
+  margin-top: 6px;
+}

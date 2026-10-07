@@ -4,6 +4,7 @@ import { Banner, Field, formatDate, Input, Password, Select } from '../ui'
 import { CheckResult, type Check } from './CheckResult'
 import { postgresCheckKey, postgresFailHint, postgresUsable, SSL_MODES, type PostgresDraft, type PostgresReport } from './postgres'
 import { postgresStrings } from './postgresStrings'
+import { Flash } from '../notify'
 
 export function PostgresForm({ value: pg, onChange }: { value: PostgresDraft; onChange: (d: PostgresDraft) => void }) {
   const t = useT(postgresStrings)
@@ -70,10 +71,10 @@ export function PostgresCheckResult({
       }}
       ok={(r) => (
         <>
-          <Banner kind={postgresUsable(r.probe) ? 'ok' : 'error'} title={postgresUsable(r.probe) ? t('pg.ok') : t('pg.fail')}>
+          <Flash kind={postgresUsable(r.probe) ? 'ok' : 'error'} title={postgresUsable(r.probe) ? t('pg.ok') : t('pg.fail')} trigger={r}>
             {t('pg.ok.text', { version: r.probe.version, database: r.probe.database, user: r.probe.user })}
             {!postgresUsable(r.probe) && <p>{t('pg.nocreate')}</p>}
-          </Banner>
+          </Flash>
           {r.probe.has_state && (
             <Banner kind="warn" title={r.probe.saved_at ? t('pg.state', { at: formatDate(r.probe.saved_at, locale) }) : t('pg.state.data')}>
               {state}

@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { api } from '../../../api'
-import { ConnectionCard, ErrorBanner } from '../../../connections/ConnectionCard'
+import { ConnectionCard, ErrorFlash } from '../../../connections/ConnectionCard'
 import type { OpenBaoReport } from '../../../connections/openbao'
 import { useAction } from '../../../connections/useRequest'
 import { useLocale, useT } from '../../../i18n'
-import { Banner, formatDate } from '../../../ui'
+import { formatDate } from '../../../ui'
 import { useSession } from '../../session'
 import { strings } from './strings'
 import type { OpenBaoOverview } from './types'
+import { Flash } from '../../../notify'
 
 export function CurrentConnection({ overview }: { overview: OpenBaoOverview }) {
   const t = useT(strings)
@@ -45,16 +46,16 @@ export function CurrentConnection({ overview }: { overview: OpenBaoOverview }) {
         ...(s.last_error ? ([[t('obs.lastError'), `${s.last_error} (${formatDate(s.last_error_at, locale, timezone)})`]] as [string, string][]) : []),
       ]}
     >
-      <ErrorBanner error={test.error} strings={strings} />
+      <ErrorFlash error={test.error} strings={strings} />
       {result &&
         (result.ok ? (
-          <Banner kind="ok" title={t('obs.test.ok')}>
+          <Flash kind="ok" title={t('obs.test.ok')} trigger={result}>
             {t('obs.test.okText', { mount: c.mount })}
-          </Banner>
+          </Flash>
         ) : (
-          <Banner kind="error" title={t('obs.test.fail')}>
+          <Flash kind="error" title={t('obs.test.fail')} trigger={result}>
             {result.error}
-          </Banner>
+          </Flash>
         ))}
     </ConnectionCard>
   )

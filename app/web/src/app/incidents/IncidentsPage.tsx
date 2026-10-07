@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLiveReload } from './live'
 import { useT } from '../../i18n'
@@ -18,6 +18,8 @@ import '../services/services.css'
 import '../connectors/connectors.css'
 import '../cis/cis.css'
 import './incidents.css'
+import { useRouter } from '../../router'
+import { notify } from '../../notify'
 
 // The stream brings changes at once; the list is also reloaded now and then, in case the stream
 // is down or a change does not touch an incident (a maintenance window that starts).
@@ -46,7 +48,6 @@ export function IncidentsPage() {
   const [epoch, setEpoch] = useState(0)
   const [now, setNow] = useState(() => Date.now())
   const [checked, setChecked] = useState<Set<string>>(new Set())
-  const [bulkNote, setBulkNote] = useState('')
   const [confirming, setConfirming] = useState<'ack' | 'resolve' | null>(null)
   const q = useDebounced(filters.q, 250)
   const list = useResource<Page>(`/api/incidents${queryOf({ ...filters, q })}`, epoch)
@@ -65,6 +66,15 @@ export function IncidentsPage() {
     const id = window.setInterval(() => setNow(Date.now()), CLOCK_MS)
     return () => window.clearInterval(id)
   }, [])
+  // A link to the list (a light of the top bar, a notification) while it is open.
+  const { search, visit } = useRouter()
+  const arrived = useRef(visit)
+  useEffect(() => {
+    if (visit === arrived.current) return
+    arrived.current = visit
+    setFilters(filtersFromURL(search))
+    setOpenID(new URLSearchParams(search).get('id'))
+  }, [search, visit])
   useEffect(() => {
     window.history.replaceState(null, '', urlOf(filters, openID))
   }, [filters, openID])
@@ -93,7 +103,8 @@ export function IncidentsPage() {
   const runBulk = (action: 'ack' | 'resolve') =>
     void bulk.run(async () => {
       const out = await api<{ done: string[]; failed: Record<string, string> }>('POST', '/api/incidents/bulk', { ids: [...checked], action })
-      setBulkNote(t('inc.bulk.done', { done: out.done.length, failed: Object.keys(out.failed).length }))
+      const failed = Object.keys(out.failed).length
+      notify({ kind: failed ? 'warn' : 'ok', title: t('inc.bulk.done', { done: out.done.length, failed }) })
       setChecked(new Set())
       reload()
     })
@@ -142,7 +153,6 @@ export function IncidentsPage() {
                 </Button>
               </>
             )}
-            {bulkNote && checked.size === 0 && <span className="muted">{bulkNote}</span>}
           </div>
           <div className="row">
             {filtered && (
@@ -154,7 +164,7 @@ export function IncidentsPage() {
           </div>
         </div>
       </div>
-      <ErrorBanner error={bulk.error} strings={strings} />
+      <ErrorFlash error={bulk.error} strings={strings} />
       {list.error ? <ErrorBanner error={list.error} strings={strings} /> : null}
       {more && <Banner kind="info" title={t('inc.more', { n: alerts.length })} />}
 

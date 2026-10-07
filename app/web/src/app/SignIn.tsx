@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { ApiError, api, setCsrf, type Meta } from '../api'
 import { errorText, useT } from '../i18n'
-import { Banner, Brand, Button, Field, Input, Password, Preferences } from '../ui'
+import { Brand, Button, Field, Input, Password, Preferences } from '../ui'
 import { strings } from './strings'
 import type { User } from './types'
+import { Flash } from '../notify'
 
 export function SignIn({ meta, onSignedIn }: { meta: Meta; onSignedIn: (u: User) => void }) {
   const t = useT(strings)
@@ -39,7 +40,7 @@ export function SignIn({ meta, onSignedIn }: { meta: Meta; onSignedIn: (u: User)
         </div>
         <form onSubmit={submit} noValidate>
           <h1>{t('signin.title')}</h1>
-          {error && <Banner kind="error" title={error.message} />}
+          {error && <Flash kind="error" title={error.message}>{error.detail}</Flash>}
           <Field label={t('signin.username')}>
             {(id) => <Input id={id} value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoFocus required />}
           </Field>

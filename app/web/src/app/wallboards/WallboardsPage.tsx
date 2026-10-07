@@ -1,7 +1,7 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Copy, Eye, ExternalLink, Pencil, Plus, RefreshCw, Trash2, Tv } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Banner, Button, formatDate, Modal, Rows } from '../../ui'
@@ -17,6 +17,8 @@ import '../incidents/incidents.css'
 import '../maintenance/maintenance.css'
 import './wallboards.css'
 import { WallboardEditor } from './WallboardEditor'
+import { notify } from '../../notify'
+import { ask } from '../../confirm'
 
 type T = (key: string, vars?: Record<string, string | number>) => string
 
@@ -29,15 +31,8 @@ export function WallboardsPage() {
   const [editing, setEditing] = useState<Wallboard | 'new' | null>(null)
   const [viewing, setViewing] = useState<Wallboard | null>(null)
   const [preview, setPreview] = useState<Wallboard | null>(null)
-  const [note, setNote] = useState<{ kind: 'ok' | 'warn'; text: string } | null>(null)
   const act = useAction()
   const reload = () => setEpoch((e) => e + 1)
-
-  useEffect(() => {
-    if (!note) return
-    const id = window.setTimeout(() => setNote(null), 4000)
-    return () => window.clearTimeout(id)
-  }, [note])
 
   const boards = list.data?.wallboards ?? []
   const clientIP = list.data?.client_ip ?? ''
@@ -45,10 +40,10 @@ export function WallboardsPage() {
   const copy = async (w: Wallboard) => {
     const url = publicURL(w)
     const ok = await copyText(url)
-    setNote(ok ? { kind: 'ok', text: t('wb.copied') } : { kind: 'warn', text: t('wb.copy.failed', { url }) })
+    notify(ok ? { kind: 'ok', title: t('wb.copied') } : { kind: 'warn', title: t('wb.copy.failed', { url }) })
   }
-  const remove = (w: Wallboard) =>
-    window.confirm(t('wb.delete.confirm', { title: w.title })) &&
+  const remove = async (w: Wallboard) =>
+    (await ask({ text: t('wb.delete.confirm', { title: w.title }), danger: true })) &&
     void act.run(async () => {
       await api('DELETE', `/api/wallboards/${encodeURIComponent(w.id)}`)
       reload()
@@ -64,8 +59,8 @@ export function WallboardsPage() {
           </Button>
         </div>
       )}
-      <ErrorBanner error={list.error ?? act.error} strings={strings} />
-      {note && <Banner kind={note.kind} title={note.text} />}
+      <ErrorBanner error={list.error} strings={strings} />
+      <ErrorFlash error={act.error} strings={strings} />
       {list.data && boards.length === 0 && (
         <div className="card wb-empty">
           <Tv size={36} className="wb-empty-icon" aria-hidden />

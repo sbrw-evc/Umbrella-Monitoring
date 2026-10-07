@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Plus, Search, X } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
 import { Banner, Button, Field, Input, Modal, Segmented, Stepper, Switch, Textarea } from '../../ui'
@@ -297,7 +297,7 @@ export function WallboardEditor({
           {open.length > 0 && <Banner kind="warn" title={t('wb.allowed.everyone', { net: open.join(', ') })} />}
         </section>
 
-        <ErrorBanner error={save.error} strings={strings} />
+        <ErrorFlash error={save.error} strings={strings} />
       </div>
     </Modal>
   )

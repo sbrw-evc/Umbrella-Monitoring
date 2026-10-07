@@ -30,6 +30,9 @@ export type Source = {
   severity: Severity
   title: string
   value?: string
+  // description and fields are what the connector shows of the alert: its full text and named values.
+  description?: string
+  fields?: { name: string; value: string }[]
   first_seen: string
   last_seen: string
 }

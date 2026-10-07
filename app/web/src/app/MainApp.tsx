@@ -16,11 +16,15 @@ import { SignIn } from './SignIn'
 import { strings } from './strings'
 import { TopBar } from './TopBar'
 import type { User } from './types'
+import { setNotifyOwner, Toaster } from '../notify'
+import { ConfirmHost } from '../confirm'
 
 export default function MainApp({ meta }: { meta: Meta }) {
   return (
     <RouterProvider>
       <Shell meta={meta} />
+      <Toaster />
+      <ConfirmHost />
     </RouterProvider>
   )
 }
@@ -31,6 +35,8 @@ function Shell({ meta }: { meta: Meta }) {
   const [defaultTz, setDefaultTz] = useState(meta.default_timezone || 'UTC')
   const [policy, setPolicy] = useState<PasswordPolicy>(meta.password_policy ?? defaultPolicy)
   const t = useT(strings)
+
+  useEffect(() => setNotifyOwner(user?.id ?? ''), [user?.id])
 
   useEffect(() => {
     api<User>('GET', '/api/auth/me')

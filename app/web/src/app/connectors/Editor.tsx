@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ReactFlowProvider, useReactFlow, type Connection } from '@xyflow/react'
 import { ArrowLeft, ChevronDown, ChevronUp, Copy, Download, History, Lock, Redo2, Rocket, Send, Settings, Square, Undo2 } from 'lucide-react'
 import { api, ApiError } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Link, useRouter } from '../../router'
@@ -441,7 +441,7 @@ function EditorInner({ id }: { id: string }) {
           <Button onClick={() => void load(true)}>{t('cn.reload')}</Button>
         </Banner>
       )}
-      {save === 'error' && <ErrorBanner error={saveError} strings={strings} />}
+      {save === 'error' && <ErrorFlash error={saveError} strings={strings} />}
       {conn.publish_error && <Banner kind="error" title={t('cn.publishBroken')}>{conn.publish_error}</Banner>}
 
       <div className={`cn-workspace ${node ? 'with-inspector' : ''}`}>
@@ -654,7 +654,7 @@ function PublishDialog({
         {(id) => <Textarea id={id} rows={3} value={comment} onChange={(e) => setComment(e.target.value)} />}
       </Field>
       {conn.published > 0 && <p className="hint">{t('cn.unpublish.hint')}</p>}
-      <ErrorBanner error={action.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
     </Modal>
   )
 }
@@ -720,7 +720,7 @@ function VersionsDialog({
           </div>
         </div>
       ))}
-      <ErrorBanner error={action.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
     </Modal>
   )
 }
@@ -749,7 +749,7 @@ function ExportDialog({ open, conn, canPayload, onClose }: { open: boolean; conn
     >
       <p className="muted">{t('cn.export.hint')}</p>
       {canPayload && <Switch checked={withSamples} onChange={setWithSamples} label={t('cn.export.samples')} hint={t('cn.export.samples.hint')} />}
-      <ErrorBanner error={action.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
     </Modal>
   )
 }
@@ -816,7 +816,7 @@ function SettingsDialog({ open, conn, onClose, onSaved }: { open: boolean; conn:
       <Field label={t('cn.field.tags')} hint={t('cn.field.tags.hint')} optional={t('cn.optional')}>
         {(id) => <Input id={id} value={tags} onChange={(e) => setTags(e.target.value)} />}
       </Field>
-      <ErrorBanner error={action.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
       <details className="cn-danger">
         <summary>{t('cn.delete')}</summary>
         <p className="muted">{t('cn.delete.hint', { slug: conn.slug })}</p>

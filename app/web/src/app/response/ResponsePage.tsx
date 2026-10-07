@@ -71,7 +71,7 @@ export function ResponsePage() {
 
   if (!view || !draft) {
     return (
-      <ProfileCard title={t('rs.mode')} action={loader}>
+      <ProfileCard title={t('rs.mode')} action={loader} inline>
         {!loader.error && <p className="muted">{t('loading')}</p>}
       </ProfileCard>
     )

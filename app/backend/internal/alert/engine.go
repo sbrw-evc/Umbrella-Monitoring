@@ -351,6 +351,7 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 			return nil, c.save(ctx, tx)
 		}
 		src.Status, src.LastSeen, src.Value = SourceResolved, now, in.Value
+		src.details(in)
 		a.Count++
 		a.LastSeen = now
 		if !Active(a.Status) {
@@ -401,6 +402,7 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 	if src != nil && src.Status == SourceFiring && src.Severity == in.Severity && !opened && !reopened {
 		// A repeated delivery: the alert is only touched.
 		src.LastSeen, src.Value = now, in.Value
+		src.details(in)
 		a.Count++
 		a.LastSeen = now
 		c.dirty = true
@@ -411,6 +413,7 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 		a.Sources[srcKey] = src
 	}
 	src.Status, src.Severity, src.Title, src.Value, src.LastSeen = SourceFiring, in.Severity, in.Title, in.Value, now
+	src.details(in)
 	maps.Copy(a.Labels, in.Labels)
 	a.Count++
 	a.LastSeen = now
@@ -1464,5 +1467,16 @@ func (e *Engine) Run(ctx context.Context) {
 				}
 			}
 		}
+	}
+}
+
+// details takes the description and fields of a delivery. A resolution that carries none
+// keeps what the firing delivery said.
+func (s *Source) details(in Incoming) {
+	if in.Description != "" || in.Status != SourceResolved {
+		s.Description = in.Description
+	}
+	if len(in.Fields) > 0 || in.Status != SourceResolved {
+		s.Fields = slices.Clone(in.Fields)
 	}
 }

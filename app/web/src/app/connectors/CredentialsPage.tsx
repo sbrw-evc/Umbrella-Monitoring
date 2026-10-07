@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { KeyRound, Plus, Trash2 } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Link } from '../../router'
@@ -206,7 +206,8 @@ function CredentialDialog({ editing, editable, onClose, onSaved }: { editing: Ed
           {t('cred.inUse')} <UsedBy uses={existing.used_by} />
         </p>
       )}
-      <ErrorBanner error={action.error ?? kinds.error} strings={strings} />
+      <ErrorBanner error={kinds.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
     </Modal>
   )
 }
