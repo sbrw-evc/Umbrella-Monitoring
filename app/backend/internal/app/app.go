@@ -165,15 +165,6 @@ func New(opt Options, deps Deps) *App {
 	if a.proxies == nil {
 		a.proxies = ParseTrustedProxies(os.Getenv("UMBRELLA_TRUSTED_PROXIES"))
 	}
-	var firing firingSource
-	if queue != nil {
-		firing = func(ctx context.Context, since time.Time) ([]ingest.FiringEvent, error) {
-			if !a.ingestReady() {
-				return nil, errEventsNotReady
-			}
-			return queue.Firing(ctx, since)
-		}
-	}
 	var resolver pagerduty.Resolver = noSecrets{}
 	if vault != nil {
 		resolver = vault
@@ -206,7 +197,16 @@ func New(opt Options, deps Deps) *App {
 	if a.alerts != nil {
 		a.ruleEngine.SetSink(a.alerts)
 	}
-	a.cmdb = NewCMDBService(deps.Store, firing)
+	var active activeSource
+	if a.alerts != nil {
+		active = func(ctx context.Context) ([]alert.Alert, error) {
+			if !a.ingestReady() {
+				return nil, errEventsNotReady
+			}
+			return a.alerts.ActiveOnCIs(ctx, maxActive)
+		}
+	}
+	a.cmdb = NewCMDBService(deps.Store, active)
 	a.monitoring = NewMonitoringService(deps.Store, creds, a.cis)
 	a.alertPoll = newAlertPoller(a)
 	a.monitoring.polls = a.alertPoll.status

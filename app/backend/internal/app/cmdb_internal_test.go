@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
@@ -39,20 +38,22 @@ func TestCMDBEvents(t *testing.T) {
 		d.Services["SVC-3"] = &model.Service{ID: "SVC-3", Name: "Old", Status: model.ServiceRetired, CIIDs: []string{"CI-1"}}
 		d.Services["SVC-4"] = &model.Service{ID: "SVC-4", Name: "Lab", Status: model.ServiceActive, CIIDs: []string{"CI-3"}}
 	})
-	var since time.Time
-	s := NewCMDBService(st, func(_ context.Context, from time.Time) ([]ingest.FiringEvent, error) {
-		since = from
-		return []ingest.FiringEvent{
-			{CI: "10.0.0.1:9100", Severity: "critical", Title: "Disk full", LastSeen: now},
-			{CI: "SRV-DB-01", Severity: "warning", Title: "Slow queries", LastSeen: now},
-			{CI: "srv-app-01:443", Severity: "info", Title: "Deploy", LastSeen: now},
-			{CI: "nobody", Severity: "critical", Title: "Lost", LastSeen: now},
+	s := NewCMDBService(st, func(context.Context) ([]alert.Alert, error) {
+		return []alert.Alert{
+			{ID: "INC-1", CIID: "CI-1", Severity: "critical", Status: alert.StatusOpen, Title: "Disk full", LastSeen: now},
+			{ID: "INC-2", CIID: "CI-1", Severity: "warning", Status: alert.StatusAcknowledged, Title: "Slow queries", LastSeen: now},
+			{ID: "INC-3", CIID: "CI-2", Severity: "info", Status: alert.StatusOpen, Title: "Deploy", LastSeen: now},
+			{ID: "INC-4", CIID: "CI-2", Severity: "critical", Status: alert.StatusOpen, Suppressed: true, Title: "Reboot", LastSeen: now},
+			{ID: "INC-5", CIID: "CI-1", Severity: "critical", Status: alert.StatusResolved, Title: "Gone", LastSeen: now},
+			{ID: "INC-6", CIID: "CI-1", Severity: "critical", Status: alert.StatusOpen, Title: "Test", LastSeen: now,
+				Labels: map[string]string{alert.TestLabel: "true"}},
+			{ID: "INC-7", CIID: "CI-9", Severity: "critical", Status: alert.StatusOpen, Title: "Lost", LastSeen: now},
 		}, nil
 	})
 	s.now = func() time.Time { return now }
 	m := s.Map(context.Background())
-	if !m.Events.Available || !since.Equal(now.Add(-24*time.Hour)) || len(m.CIs) != 3 {
-		t.Fatalf("map = %+v since %v", m, since)
+	if !m.Events.Available || len(m.CIs) != 3 {
+		t.Fatalf("map = %+v", m)
 	}
 	ci := map[string]MapCI{}
 	for _, c := range m.CIs {
@@ -61,7 +62,9 @@ func TestCMDBEvents(t *testing.T) {
 	if e := ci["CI-1"].Events; e.Critical != 1 || e.Warning != 1 || len(e.Recent) != 2 || ci["CI-1"].Health.Level != HealthCritical {
 		t.Fatalf("CI-1 = %+v", ci["CI-1"])
 	}
-	if c := ci["CI-2"]; c.Events.Info != 1 || c.Health.Level != HealthWarning || c.Health.Reasons[0].Code != "directory_missing" {
+	// An incident under a maintenance window is shown but does not make the item worse.
+	if c := ci["CI-2"]; c.Events.Info != 1 || c.Events.Critical != 0 || c.Events.Maintenance != 1 || c.Health.Level != HealthWarning ||
+		c.Health.Reasons[0].Code != "directory_missing" || c.Health.Reasons[len(c.Health.Reasons)-1].Code != "events_maintenance" {
 		t.Fatalf("CI-2 = %+v", c)
 	}
 	if ci["CI-3"].Health.Level != HealthUnknown {
@@ -92,8 +95,8 @@ func TestCMDBEvents(t *testing.T) {
 		t.Fatalf("scoped flag = %v / %v", scoped.Events.Scoped, m.Events.Scoped)
 	}
 
-	// Without the event tables the map still comes, and says why events are missing.
-	s.firing = func(context.Context, time.Time) ([]ingest.FiringEvent, error) { return nil, errors.New("down") }
+	// Without the alert tables the map still comes, and says why incidents are missing.
+	s.active = func(context.Context) ([]alert.Alert, error) { return nil, errors.New("down") }
 	if m := s.Map(context.Background()); m.Events.Available || m.Events.Error != "down" || len(m.CIs) != 3 {
 		t.Fatalf("no events = %+v", m.Events)
 	}

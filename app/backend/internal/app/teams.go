@@ -183,8 +183,11 @@ func (s *TeamsService) Delete(actor, id string) error {
 		}
 		delete(d.Teams, id)
 		dropMappingRefs(d, "", id)
-		d.AddAudit(store.AuditEntry{Actor: actor, Action: "team.delete", Object: id,
-			Detail: fmt.Sprintf("%s; %d child team(s) moved up, %d member(s) removed from it", path, len(children), cleared)})
+		detail := fmt.Sprintf("%s; %d child team(s) moved up, %d member(s) removed from it", path, len(children), cleared)
+		if routes := dropPDRoutes(d, id, ""); len(routes) > 0 {
+			detail += "; PagerDuty routes removed: " + strings.Join(routes, ", ")
+		}
+		d.AddAudit(store.AuditEntry{Actor: actor, Action: "team.delete", Object: id, Detail: detail})
 		err = nil
 	})
 	return err
