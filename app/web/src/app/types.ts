@@ -28,6 +28,8 @@ export type User = ProfileFields & {
   must_change_password?: boolean
   timezone: string
   telegram?: string
+  /** The interface language the server keeps (voice calls speak it). */
+  locale?: string
   last_login_at?: string
   csrf?: string
   gravatar?: string

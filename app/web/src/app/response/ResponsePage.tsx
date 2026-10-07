@@ -86,6 +86,14 @@ export function ResponsePage() {
     .filter(([, on]) => !on)
     .map(([c]) => t(`method.${c}`))
   const policyTab = tab === 'policies' || tab === 'impact'
+  // Voice methods work when voice is on and the integration they go through is.
+  const voiceOn = view.voice.mode !== 'off'
+  const channels = {
+    ...view.channels,
+    voice_teams: voiceOn && view.graph.mode !== 'off',
+    voice_telegram: voiceOn && !!view.channels.telegram,
+    voice_zoom: voiceOn && view.zoom.mode !== 'off',
+  }
   return (
     <div className="rs-page">
       <ProfileCard
@@ -132,7 +140,7 @@ export function ResponsePage() {
             { value: 'check', label: t('rs.tab.check') },
           ]}
         />
-        {tab === 'policies' && <PoliciesTab policies={draft.policies} onChange={(policies) => setDraft({ ...draft, policies })} refs={refs} channels={view.channels} disabled={!canEdit} />}
+        {tab === 'policies' && <PoliciesTab policies={draft.policies} onChange={(policies) => setDraft({ ...draft, policies })} refs={refs} channels={channels} disabled={!canEdit} />}
         {tab === 'impact' && <ImpactTab impact={draft.impact} onChange={(impact) => setDraft({ ...draft, impact })} disabled={!canEdit} />}
       </ProfileCard>
       {tab === 'integrations' && <IntegrationsTab view={view} onSaved={apply} />}

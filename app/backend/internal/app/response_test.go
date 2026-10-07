@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,6 +113,53 @@ func TestResponseSettingsAndIncidentActions(t *testing.T) {
 		t.Fatalf("get = %+v", ir)
 	}
 	f.expect(f.admin, http.MethodGet, "/api/incidents/INC-404/response", nil, http.StatusNotFound, nil)
+
+	// Voice: the engine, the voices and the templates are checked; the key goes to OpenBao.
+	if v.Voice.Mode != model.ModeOff || v.Voice.TTS.Provider != model.TTSPiper || v.Voice.DefaultTemplates["ru"] == "" || v.Voice.Repeat != 2 {
+		t.Fatalf("voice defaults = %+v", v.Voice)
+	}
+	voice := map[string]any{"mode": "dry_run", "provider": "espeak", "url": "http://piper:5000", "repeat": 2}
+	f.expect(f.admin, http.MethodPut, "/api/response/voice", voice, http.StatusBadRequest, nil)
+	voice["provider"], voice["url"] = "openai", "ftp://tts"
+	f.expect(f.admin, http.MethodPut, "/api/response/voice", voice, http.StatusBadRequest, nil)
+	voice["url"], voice["voices"], voice["repeat"] = "http://tts:8000/", map[string]string{"ru": "bad voice!"}, 2
+	f.expect(f.admin, http.MethodPut, "/api/response/voice", voice, http.StatusBadRequest, nil)
+	voice["voices"], voice["api_key"] = map[string]string{"ru": "ru-anna", "en": "alloy"}, "tts-key"
+	voice["templates"] = map[string]string{"ru": "Инцидент {number}: {title}", "en": model.DefaultVoiceTemplates["en"]}
+	f.expect(f.admin, http.MethodPut, "/api/response/voice", voice, http.StatusOK, &v)
+	if !v.Voice.HasKey || v.Voice.TTS.URL != "http://tts:8000" || v.Voice.Templates["ru"] != "Инцидент {number}: {title}" || v.Voice.Templates["en"] != "" {
+		t.Fatalf("voice = %+v", v.Voice)
+	}
+	var text map[string]string
+	f.expect(f.admin, http.MethodGet, "/api/response/voice/preview?format=text&locale=ru", nil, http.StatusOK, &text)
+	if text["text"] != "Инцидент 1042: Рост ошибок HTTP 5xx на pay-01" {
+		t.Fatalf("preview = %v", text)
+	}
+	// In dry run a call by hand is planned for the route (the admin, lead of the owning team).
+	var withCalls struct {
+		Voice string               `json:"voice"`
+		Calls []response.VoiceCall `json:"calls"`
+	}
+	f.expect(f.admin, http.MethodPost, "/api/incidents/"+id+"/response/call", map[string]any{"via": "teams"}, http.StatusOK, &withCalls)
+	if withCalls.Voice != model.ModeDryRun || len(withCalls.Calls) != 1 || withCalls.Calls[0].State != response.VoicePlanned || withCalls.Calls[0].Address != "admin@example.com" {
+		t.Fatalf("calls = %+v", withCalls)
+	}
+	f.expect(f.admin, http.MethodPost, "/api/incidents/"+id+"/response/call", map[string]any{"via": "pigeon"}, http.StatusBadRequest, nil)
+	// The audio and the call reports of Microsoft are reached by the token of a call only.
+	anon := f.h.client()
+	if got := anon.call(http.MethodGet, "/api/voice/audio/"+strings.Repeat("a", 48)+"/main.wav", nil, nil); got != http.StatusNotFound {
+		t.Fatalf("audio of no call = %d", got)
+	}
+	if got := anon.call(http.MethodPost, "/api/voice/teams/short", map[string]any{}, nil); got != http.StatusNotFound {
+		t.Fatalf("report with a bad token = %d", got)
+	}
+	// The interface language of a user is kept for voice.
+	var me model.User
+	f.expect(f.admin, http.MethodPut, "/api/auth/me/preferences", map[string]any{"locale": "en"}, http.StatusOK, &me)
+	f.expect(f.admin, http.MethodPut, "/api/auth/me/preferences", map[string]any{"locale": "de"}, http.StatusBadRequest, nil)
+	if me.Locale != "en" {
+		t.Fatalf("locale = %q", me.Locale)
+	}
 
 	// A viewer sees neither the settings nor the actions.
 	f.h.addLocal("viewer", "Viewer-pass-2026", model.RoleViewer, time.Now())

@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"mime"
 	"net"
 	"net/http"
@@ -175,7 +176,25 @@ type Telegram struct {
 	answers  []string
 	updates  []map[string]any
 	nextID   int
+	voices   []Voice
 	Blocked  map[string]bool
+}
+
+// Voice is an audio upload: a voice message or a document.
+type Voice struct {
+	ID             int
+	ChatID, Method string
+	FileName       string
+	Audio          []byte
+	Caption        string
+	Keyboard       json.RawMessage
+}
+
+// Voices are the audio messages sent.
+func (f *Telegram) Voices() []Voice {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]Voice(nil), f.voices...)
 }
 
 func NewTelegram(t *testing.T) *Telegram {
@@ -275,6 +294,28 @@ func (f *Telegram) handle(w http.ResponseWriter, r *http.Request) {
 		f.answers = append(f.answers, in.Text)
 		f.mu.Unlock()
 		reply(http.StatusOK, map[string]any{"ok": true, "result": true})
+	case "sendVoice", "sendDocument":
+		field := map[string]string{"sendVoice": "voice", "sendDocument": "document"}[strings.TrimPrefix(r.URL.Path, "/bot"+f.Token+"/")]
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			reply(http.StatusBadRequest, map[string]any{"ok": false, "error_code": 400, "description": "Bad Request: " + err.Error()})
+			return
+		}
+		file, hdr, err := r.FormFile(field)
+		if err != nil {
+			reply(http.StatusBadRequest, map[string]any{"ok": false, "error_code": 400, "description": "Bad Request: no " + field})
+			return
+		}
+		data, _ := io.ReadAll(file)
+		chat := r.FormValue("chat_id")
+		if f.Blocked[chat] {
+			reply(http.StatusForbidden, map[string]any{"ok": false, "error_code": 403, "description": "Forbidden: bot was blocked by the user"})
+			return
+		}
+		f.mu.Lock()
+		id := len(f.messages) + len(f.voices) + 1
+		f.voices = append(f.voices, Voice{ID: id, ChatID: chat, Method: field, FileName: hdr.Filename, Audio: data, Caption: r.FormValue("caption"), Keyboard: json.RawMessage(r.FormValue("reply_markup"))})
+		f.mu.Unlock()
+		reply(http.StatusOK, map[string]any{"ok": true, "result": map[string]any{"message_id": id}})
 	case "deleteWebhook", "setMyCommands":
 		reply(http.StatusOK, map[string]any{"ok": true, "result": true})
 	case "getUpdates":

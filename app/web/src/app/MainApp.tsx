@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api, ApiError, setCsrf, type Meta } from '../api'
 import { defaultPolicy, type PasswordPolicy } from '../policy'
-import { useT } from '../i18n'
+import { useLocale, useT } from '../i18n'
 import { RouterProvider, SCROLL_ROOT_ID, useRouter } from '../router'
 import { ExpiredPassword } from './profile/ExpiredPassword'
 import { PasswordExpiryNotice } from './profile/PasswordExpiryNotice'
@@ -65,6 +65,16 @@ function Shell({ meta }: { meta: Meta }) {
       expire()
     }
   }, [expire])
+
+  // The server keeps the interface language: voice calls speak to the user in it.
+  const { locale } = useLocale()
+  const userLocale = user && !user.password_expired ? (user.locale ?? '') : null
+  useEffect(() => {
+    if (userLocale === null || userLocale === locale) return
+    api('PUT', '/api/auth/me/preferences', { locale })
+      .then(() => setUser((prev) => (prev ? { ...prev, locale } : prev)))
+      .catch(() => undefined)
+  }, [userLocale, locale])
 
   const permissions = useMemo(() => new Set(user?.permissions ?? []), [user?.permissions])
 

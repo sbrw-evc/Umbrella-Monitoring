@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -78,11 +79,16 @@ func (c *Client) Call(ctx context.Context, method string, body, out any) error {
 	if err != nil {
 		return permanent{err}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.API+"/bot"+c.Token+"/"+method, bytes.NewReader(raw))
+	return c.post(ctx, method, "application/json", bytes.NewReader(raw), out)
+}
+
+// post sends a request body to a method and decodes its result into out (may be nil).
+func (c *Client) post(ctx context.Context, method, contentType string, body io.Reader, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.API+"/bot"+c.Token+"/"+method, body)
 	if err != nil {
 		return permanent{errors.New("the Telegram API address is not valid")}
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		// The error carries the URL with the token in it.
@@ -248,6 +254,51 @@ func (c *Client) SetCommands(ctx context.Context, lang string, cmds [][2]string)
 		body["language_code"] = lang
 	}
 	return c.Call(ctx, "setMyCommands", body, nil)
+}
+
+// Voice is an audio message to send: OGG/Opus goes as a voice message, any other audio as a
+// file.
+type Voice struct {
+	Chat     string
+	Audio    []byte
+	Opus     bool
+	FileName string
+	// Caption is HTML under the audio.
+	Caption  string
+	Keyboard *Keyboard
+}
+
+// SendVoice uploads a voice message (sendVoice) or an audio file (sendDocument).
+func (c *Client) SendVoice(ctx context.Context, v Voice) (int, error) {
+	if c.Token == "" {
+		return 0, permanent{ErrNoToken}
+	}
+	method, field := "sendVoice", "voice"
+	if !v.Opus {
+		method, field = "sendDocument", "document"
+	}
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	_ = mw.WriteField("chat_id", v.Chat)
+	if v.Caption != "" {
+		_ = mw.WriteField("caption", v.Caption)
+		_ = mw.WriteField("parse_mode", "HTML")
+	}
+	if v.Keyboard != nil && len(v.Keyboard.Rows) > 0 {
+		k, _ := json.Marshal(v.Keyboard)
+		_ = mw.WriteField("reply_markup", string(k))
+	}
+	fw, err := mw.CreateFormFile(field, v.FileName)
+	if err != nil {
+		return 0, permanent{err}
+	}
+	_, _ = fw.Write(v.Audio)
+	if err := mw.Close(); err != nil {
+		return 0, permanent{err}
+	}
+	var out Message
+	err = c.post(ctx, method, mw.FormDataContentType(), &body, &out)
+	return out.MessageID, err
 }
 
 // ChatOf is the chat address of a numeric ID.

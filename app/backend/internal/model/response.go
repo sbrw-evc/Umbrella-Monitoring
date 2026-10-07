@@ -50,7 +50,9 @@ func ValidMode(v string) bool { return v == ModeOff || v == ModeDryRun || v == M
 // Communication methods of a response policy. Email, Telegram, Teams and Zoom are messages
 // through the backup notification channels (people and team channels); war_room is the incident
 // chat in Microsoft Teams; call_teams and call_zoom are a conference call (an online meeting)
-// whose link every message carries.
+// whose link every message carries. voice_teams, voice_telegram and voice_zoom speak the
+// incident to each person in their interface language: a Teams call, a Telegram voice message
+// (bots cannot call), a voice message in Zoom Team Chat (Zoom has no API to place a call).
 const (
 	CommEmail     = "email"
 	CommTelegram  = "telegram"
@@ -62,9 +64,35 @@ const (
 	// CommPagerDuty sends the incident to PagerDuty at this step, whatever the PagerDuty mode
 	// of its severity says (an incident PagerDuty already has stays as it is).
 	CommPagerDuty = "pagerduty"
+	// Voice methods: the incident spoken by text-to-speech.
+	CommVoiceTeams    = "voice_teams"
+	CommVoiceTelegram = "voice_telegram"
+	CommVoiceZoom     = "voice_zoom"
 )
 
-var CommMethods = []string{CommEmail, CommTelegram, CommTeams, CommZoom, CommWarRoom, CommCallTeams, CommCallZoom, CommPagerDuty}
+var CommMethods = []string{CommEmail, CommTelegram, CommTeams, CommZoom, CommWarRoom, CommCallTeams, CommCallZoom, CommPagerDuty, CommVoiceTeams, CommVoiceTelegram, CommVoiceZoom}
+
+// VoiceVia is the voice channel of a voice method ("" for another method).
+func VoiceVia(method string) string {
+	switch method {
+	case CommVoiceTeams:
+		return VoiceTeams
+	case CommVoiceTelegram:
+		return VoiceTelegram
+	case CommVoiceZoom:
+		return VoiceZoom
+	}
+	return ""
+}
+
+// Voice channels.
+const (
+	VoiceTeams    = "teams"
+	VoiceTelegram = "telegram"
+	VoiceZoom     = "zoom"
+)
+
+func ValidVoiceVia(v string) bool { return v == VoiceTeams || v == VoiceTelegram || v == VoiceZoom }
 
 func ValidComm(v string) bool { return slices.Contains(CommMethods, v) }
 
@@ -104,6 +132,7 @@ type Response struct {
 	Jira        JiraSettings     `json:"jira"`
 	Graph       GraphSettings    `json:"graph"`
 	ZoomAPI     ZoomAPISettings  `json:"zoom_api"`
+	Voice       VoiceSettings    `json:"voice"`
 	// UpdatedAt and UpdatedBy: the last change of the policies.
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 	UpdatedBy string     `json:"updated_by,omitempty"`
@@ -474,6 +503,74 @@ func (z ZoomAPISettings) API() string {
 	return "https://api.zoom.us/v2"
 }
 
+// Text-to-speech engines. All of them are self-hosted servers: Piper (its HTTP server),
+// RHVoice (rhvoice-rest) and any server with the OpenAI speech API (openedai-speech, LocalAI,
+// Kokoro-FastAPI…).
+const (
+	TTSPiper   = "piper"
+	TTSRHVoice = "rhvoice"
+	TTSOpenAI  = "openai"
+)
+
+func ValidTTS(v string) bool { return v == TTSPiper || v == TTSRHVoice || v == TTSOpenAI }
+
+// VoiceSettings: incidents spoken to people. The text comes from a template of the language of
+// the person, a text-to-speech server turns it into audio.
+type VoiceSettings struct {
+	// Mode: off, dry_run (calls are planned and written on the timeline, nothing is sent) or live.
+	Mode string      `json:"mode"`
+	TTS  TTSSettings `json:"tts"`
+	// Templates by locale; an empty one is the built-in text. Placeholders are in {braces}.
+	Templates map[string]string `json:"templates"`
+	// Repeat: how many times a call speaks the text (1–3).
+	Repeat int `json:"repeat"`
+	// AckDigit: in a Teams call, pressing 1 acknowledges the incident.
+	AckDigit bool `json:"ack_digit"`
+}
+
+// TTSSettings connect the text-to-speech server.
+type TTSSettings struct {
+	Provider string `json:"provider"`
+	// URL of the server: Piper http://piper:5000, rhvoice-rest http://rhvoice:8080, an OpenAI
+	// speech API http://tts:8000 (/v1/audio/speech is added).
+	URL string `json:"url"`
+	// Voices by locale (en, ru): a Piper voice (ru_RU-irina-medium), an RHVoice voice (anna) or a
+	// voice of the OpenAI server.
+	Voices map[string]string `json:"voices"`
+	// Model of the OpenAI speech API (tts-1).
+	Model     string `json:"model"`
+	APIKeyRef string `json:"-"`
+}
+
+// DefaultVoice is the voice part of a new installation: Piper with a Russian and an English voice.
+func DefaultVoice() VoiceSettings {
+	return VoiceSettings{Mode: ModeOff, Repeat: 2, AckDigit: true, Templates: map[string]string{},
+		TTS: TTSSettings{Provider: TTSPiper, URL: "http://piper:5000", Voices: map[string]string{LocaleRU: "ru_RU-irina-medium", LocaleEN: "en_US-lessac-medium"}}}
+}
+
+// DefaultVoiceTemplates are the built-in texts of voice calls.
+var DefaultVoiceTemplates = map[string]string{
+	LocaleRU: "Внимание! Инцидент Umbrella номер {number}. Приоритет {priority}. {title}. Объект: {ci}. Затронутые сервисы: {services}. Команда: {team}. Открыт в {opened}. Статус: {status}. {ack_hint}",
+	LocaleEN: "Attention! Umbrella incident number {number}. Priority {priority}. {title}. Item: {ci}. Affected services: {services}. Team: {team}. Opened at {opened}. Status: {status}. {ack_hint}",
+}
+
+// VoicePlaceholders are what voice templates may use.
+var VoicePlaceholders = []string{"number", "id", "priority", "title", "ci", "services", "team", "opened", "status", "impact", "level", "signal", "ack_hint"}
+
+// MaxVoiceTemplate is the longest template, in characters.
+const MaxVoiceTemplate = 2000
+
+// Template is the template of a locale: the saved one or the built-in one.
+func (v VoiceSettings) Template(locale string) string {
+	if t := strings.TrimSpace(v.Templates[locale]); t != "" {
+		return t
+	}
+	if t, ok := DefaultVoiceTemplates[locale]; ok {
+		return t
+	}
+	return DefaultVoiceTemplates[LocaleEN]
+}
+
 // NormalizeHTTPS checks a site address: https (http only for a loopback test server), no query.
 func NormalizeHTTPS(v string) (string, error) {
 	v = strings.TrimRight(strings.TrimSpace(v), "/")
@@ -535,6 +632,23 @@ func (r Response) Effective() Response {
 	if r.ZoomAPI.User == "" {
 		r.ZoomAPI.User = "me"
 	}
+	dv := DefaultVoice()
+	if r.Voice.Mode == "" {
+		r.Voice.Mode = ModeOff
+	}
+	if r.Voice.TTS.Provider == "" {
+		r.Voice.TTS = dv.TTS
+		r.Voice.AckDigit = true
+	}
+	if r.Voice.Repeat <= 0 {
+		r.Voice.Repeat = dv.Repeat
+	}
+	if r.Voice.TTS.Voices == nil {
+		r.Voice.TTS.Voices = map[string]string{}
+	}
+	if r.Voice.Templates == nil {
+		r.Voice.Templates = map[string]string{}
+	}
 	return r
 }
 
@@ -564,5 +678,7 @@ func (r Response) Clone() Response {
 	}
 	r.Jira.Priorities = maps.Clone(r.Jira.Priorities)
 	r.Jira.Labels = slices.Clone(r.Jira.Labels)
+	r.Voice.Templates = maps.Clone(r.Voice.Templates)
+	r.Voice.TTS.Voices = maps.Clone(r.Voice.TTS.Voices)
 	return r
 }

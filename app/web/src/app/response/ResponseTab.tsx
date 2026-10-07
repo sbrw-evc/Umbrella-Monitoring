@@ -6,10 +6,10 @@ import { useLocale, useT } from '../../i18n'
 import { Banner, Button, formatDate } from '../../ui'
 import { AssessmentView } from './parts'
 import { responseStrings } from './strings'
-import type { JiraIssue, ResponseState } from './types'
+import { VOICE_VIA, type JiraIssue, type ResponseState, type VoiceCall } from './types'
 import './response.css'
 
-type View = { mode: 'off' | 'dry_run' | 'live'; state: ResponseState | null }
+type View = { mode: 'off' | 'dry_run' | 'live'; state: ResponseState | null; voice: 'off' | 'dry_run' | 'live'; calls: VoiceCall[] }
 
 // ResponseTab is the response of one incident: its assessment, the escalation so far, the war
 // room, the call and the Jira issues, with the actions people may take by hand.
@@ -23,12 +23,59 @@ export function ResponseTab({ id, status, actor, epoch }: { id: string; status: 
       await api('POST', `/api/incidents/${encodeURIComponent(id)}/response/${action}`)
       await res.reload()
     })
+  const call = (via: string) =>
+    act.run(async () => {
+      await api('POST', `/api/incidents/${encodeURIComponent(id)}/response/call`, { via })
+      await res.reload()
+    })
   if (res.error) return <ErrorBanner error={res.error} strings={responseStrings} />
   const v = res.data
   if (!v) return <p className="muted">{t('loading')}</p>
-  if (v.mode === 'off') return <Banner kind="info" title={t('ir.off')} />
-  const st = v.state
   const active = status !== 'resolved'
+  const voiceOn = v.voice !== 'off'
+  const voice = (voiceOn || v.calls.length > 0) && (
+    <>
+      <h3 className="rs-h">{t('ir.voice')}</h3>
+      {v.voice === 'dry_run' && <p className="hint">{t('ir.dry')}</p>}
+      {v.calls.length === 0 && <p className="muted">{t('ir.voice.none')}</p>}
+      {v.calls.length > 0 && (
+        <ul className="rs-ir-steps rs-voice-calls">
+          {v.calls.map((c) => (
+            <li key={c.id}>
+              <b>{t('ir.voice.row', { person: c.person, via: t(`via.${c.via}`), lang: c.locale.toUpperCase() })}</b>{' '}
+              <span className={`pill ${c.state === 'failed' || c.state === 'no_answer' ? 'pill-error' : c.state === 'planned' ? 'pill-off' : 'pill-ok'}`}>{t(`vs.${c.state}`)}</span>
+              <div className="hint">
+                {[formatDate(c.created, locale), c.level ? t('ir.voice.level', { n: c.level }) : '', c.by ? t('ir.voice.by', { by: c.by }) : ''].filter(Boolean).join(' · ')}
+              </div>
+              <div className="rs-voice-text">«{c.text}»</div>
+              {c.error && <div className="rs-failed">{c.error}</div>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {actor && voiceOn && active && (
+        <>
+          <p className="hint">{t('ir.voice.hint')}</p>
+          <div className="row inc-actions">
+            {VOICE_VIA.map((via) => (
+              <Button key={via} busy={act.busy} onClick={() => void call(via)}>
+                {t('ir.voice.call', { via: t(`via.${via}`) })}
+              </Button>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  )
+  if (v.mode === 'off')
+    return (
+      <div className="rs-incident">
+        <Banner kind="info" title={t('ir.off')} />
+        {voice}
+        <ErrorBanner error={act.error} strings={responseStrings} />
+      </div>
+    )
+  const st = v.state
   const link = (label: string, url?: string, dry?: boolean, extra?: string) => (
     <div className="rs-link">
       <span className="hint">{label}</span>
@@ -65,7 +112,7 @@ export function ResponseTab({ id, status, actor, epoch }: { id: string; status: 
                     <b>{t('ir.step', { n: s.index + 1, at: formatDate(s.at, locale) })}</b>
                     {s.dry_run && <span className="pill pill-off">{t('ir.dry_tag')}</span>}
                     {s.people && s.people.length > 0 && <div>{t('ir.step.people', { people: s.people.join(', ') })}</div>}
-                    {s.reached.length > 0 && <div className="hint">{t('ir.step.reached', { list: s.reached.map((r) => (r.startsWith('call_') || r === 'war_room' ? t(`method.${r}`) : r)).join(', ') })}</div>}
+                    {s.reached.length > 0 && <div className="hint">{t('ir.step.reached', { list: s.reached.map((r) => (r.startsWith('call_') || r === 'war_room' ? t(`method.${r}`) : r.startsWith('voice_') ? r.replace(/^voice_\w+/, (m) => t(`method.${m}`)) : r)).join(', ') })}</div>}
                     {s.failed && s.failed.length > 0 && <div className="rs-failed">{t('ir.step.failed', { list: s.failed.join('; ') })}</div>}
                   </li>
                 ))}
@@ -76,6 +123,7 @@ export function ResponseTab({ id, status, actor, epoch }: { id: string; status: 
             Object.entries(st.failures).map(([k, f]) => <Banner key={k} kind="warn" title={t('ir.failure', { action: t(`ir.do.${k}`), error: f.error, n: f.attempts })} />)}
         </>
       )}
+      {voice}
       {actor && (
         <div className="row inc-actions">
           {active && !st?.room && <Button busy={act.busy} onClick={() => void run('room')}>{t('ir.do.room')}</Button>}
