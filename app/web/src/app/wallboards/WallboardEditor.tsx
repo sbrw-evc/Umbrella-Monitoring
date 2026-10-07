@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Plus, Search, X } from 'lucide-react'
+import { AlertTriangle, Plus, RefreshCw, Search, X } from 'lucide-react'
 import { api } from '../../api'
 import { ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
-import { Banner, Button, Field, Input, Modal, Segmented, Stepper, Switch, Textarea } from '../../ui'
+import { Banner, Button, Field, Input, Modal, Segmented, Stepper, Switch, Textarea, TimezoneSelect } from '../../ui'
+import { ask } from '../../confirm'
+import { notify } from '../../notify'
 import { SEVERITIES, SEVERITY_TONE, severityText, METHODS } from '../incidents/types'
-import { draftOf, inputOf, MAX_NETWORKS, networkOK, networksOf, opensToAll, publicURL, REFRESH_MAX, REFRESH_MIN, RESOLVED_MAX, slugOf, type Draft } from './model'
+import { draftOf, inputOf, MAX_NETWORKS, networkOK, networksOf, opensToAll, publicURL, REFRESH_MAX, REFRESH_MIN, RESOLVED_MAX, type Draft } from './model'
 import { strings } from './strings'
 import type { BoardLocale, BoardTheme, Ref, Sort, TargetKind, Targets, Wallboard } from './types'
 
@@ -51,7 +53,7 @@ export function WallboardEditor({
   const editing = value && value !== 'new' ? value : null
 
   const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }))
-  const setTitle = (title: string) => setD((prev) => ({ ...prev, title, slug: prev.slugTouched ? prev.slug : slugOf(title) }))
+  const setTitle = (title: string) => set({ title })
   const add = (kind: TargetKind, r: Ref) => setD((prev) => (prev[kind].some((x) => x.id === r.id) ? prev : { ...prev, [kind]: [...prev[kind], r] }))
   const drop = (kind: TargetKind, id: string) => setD((prev) => ({ ...prev, [kind]: prev[kind].filter((x) => x.id !== id) }))
 
@@ -67,9 +69,20 @@ export function WallboardEditor({
       onSaved()
     })
 
+  // rotate gives the board a new random address at once; the old link stops working.
+  const rotate = async () => {
+    if (!editing || !(await ask({ text: t('wb.rotate.confirm', { title: editing.title }) }))) return
+    const out = await save.run(() => api<Wallboard>('POST', `/api/wallboards/${encodeURIComponent(editing.id)}/rotate`))
+    if (!out) return
+    set({ slug: out.slug })
+    notify({ kind: 'ok', title: t('wb.rotated') })
+    onSaved()
+  }
+
   const results = found.data && query && q.trim() ? found.data : null
   const resultCount = results ? KINDS.reduce((n, k) => n + (results[k]?.length ?? 0), 0) : 0
   const url = publicURL({ path: '', slug: d.slug || '…' })
+  const slugPlaceholder = t('wb.slug.random')
 
   return (
     <Modal
@@ -98,10 +111,20 @@ export function WallboardEditor({
                 spellCheck={false}
                 autoCapitalize="off"
                 className="wb-mono"
+                placeholder={slugPlaceholder}
                 onChange={(e) => set({ slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''), slugTouched: true })}
               />
             )}
           </Field>
+          {editing && (
+            <div className="row wb-access-row">
+              <Button variant="secondary" busy={save.busy} onClick={() => void rotate()}>
+                <RefreshCw size={15} aria-hidden />
+                {t('wb.rotate')}
+              </Button>
+              <span className="hint muted">{t('wb.rotate.hint')}</span>
+            </div>
+          )}
           <Field label={t('wb.description')} hint={t('wb.description.hint')}>
             {(id) => <Textarea id={id} rows={2} maxLength={2000} value={d.description} onChange={(e) => set({ description: e.target.value })} />}
           </Field>
@@ -260,6 +283,9 @@ export function WallboardEditor({
                   onChange={(v) => set({ locale: v === 'auto' ? '' : v })}
                 />
               )}
+            </Field>
+            <Field label={t('wb.timezone')}>
+              {(id) => <TimezoneSelect id={id} value={d.timezone} defaultLabel={t('wb.timezone.auto')} onChange={(timezone) => set({ timezone })} />}
             </Field>
           </div>
         </section>
