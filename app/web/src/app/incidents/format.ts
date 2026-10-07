@@ -1,4 +1,4 @@
-import type { Entry, Severity } from './types'
+import { SEVERITY_TONE, type Entry, type Severity } from './types'
 
 type T = (key: string, vars?: Record<string, string | number>) => string
 
@@ -12,7 +12,7 @@ export function ago(t: T, v: string | undefined, now: number) {
 }
 
 export function severityTone(s: Severity | string) {
-  return s === 'critical' ? 'critical' : s === 'error' ? 'error' : s === 'warning' ? 'warn' : 'info'
+  return SEVERITY_TONE[s as Severity] ?? SEVERITY_TONE.info
 }
 
 // minutes renders a wait in seconds: "30 s", "2 min".

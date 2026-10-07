@@ -115,7 +115,7 @@ func firstNonEmpty(v ...string) string {
 // suppressed, and one whose mark was taken off is sent on. An alert is not moved onto an item
 // another active alert of the same signal already has.
 func (e *Engine) Reresolve(ctx context.Context) error {
-	rows, err := e.db.Query(ctx, "SELECT doc FROM alerts WHERE status <> 'resolved' ORDER BY seq")
+	rows, err := e.db.Query(ctx, "SELECT doc FROM alerts WHERE "+sqlActive+" ORDER BY seq")
 	if err != nil {
 		return err
 	}
@@ -225,11 +225,11 @@ func (e *Engine) reresolve(ctx context.Context, tx pgx.Tx, c *change, w *world, 
 	return e.pdCmd(a, PDTrigger, now), nil
 }
 
-// expireTests resolves the alerts of test events once they have lasted TestLifetime, with the
-// connector events that fed them.
-func (e *Engine) expireTests(ctx context.Context, now time.Time) error {
-	rows, err := e.db.Query(ctx, `SELECT id FROM alerts WHERE status <> 'resolved' AND doc->'labels'->>'umbrella_test' = 'true'
-		AND first_seen <= $1 ORDER BY seq`, now.Add(-TestLifetime))
+// expireTests resolves the alerts of test events once they have lasted their lifetime
+// (TestLifetime unless the alerting policy sets one), with the connector events that fed them.
+func (e *Engine) expireTests(ctx context.Context, now time.Time, lifetime time.Duration) error {
+	rows, err := e.db.Query(ctx, `SELECT id FROM alerts WHERE `+sqlActive+` AND doc->'labels'->>'`+TestLabel+`' = 'true'
+		AND first_seen <= $1 ORDER BY seq`, now.Add(-lifetime))
 	if err != nil {
 		return err
 	}
@@ -251,7 +251,7 @@ func (e *Engine) expireTests(ctx context.Context, now time.Time) error {
 			for _, s := range a.Sources {
 				s.Status, s.LastSeen = SourceResolved, now
 				if events {
-					if _, err := tx.Exec(ctx, "UPDATE connector_events SET status = 'resolved', last_seen = now() WHERE connector_id = $1 AND key = $2",
+					if _, err := tx.Exec(ctx, "UPDATE connector_events SET status = '"+SourceResolved+"', last_seen = now() WHERE connector_id = $1 AND key = $2",
 						s.ConnectorID, s.Key); err != nil {
 						return err
 					}

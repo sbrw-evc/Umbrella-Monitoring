@@ -150,18 +150,22 @@ func scanAlert(row pgx.Row) (*Alert, error) {
 	return a, nil
 }
 
+// sqlActive selects the alerts that are not resolved (open or acknowledged). The schema keeps
+// the literal in its partial index.
+const sqlActive = "status <> '" + StatusResolved + "'"
+
 func lockByID(ctx context.Context, tx pgx.Tx, id string) (*Alert, error) {
 	return scanAlert(tx.QueryRow(ctx, "SELECT doc FROM alerts WHERE id = $1 FOR UPDATE", id))
 }
 
 // current returns the alert of a key that is active or was resolved within the window.
 func current(ctx context.Context, tx pgx.Tx, key string, since time.Time) (*Alert, error) {
-	return scanAlert(tx.QueryRow(ctx, `SELECT doc FROM alerts WHERE dedup_key = $1 AND (status <> 'resolved' OR resolved_at >= $2)
-		ORDER BY (status <> 'resolved') DESC, last_seen DESC LIMIT 1 FOR UPDATE`, key, since))
+	return scanAlert(tx.QueryRow(ctx, `SELECT doc FROM alerts WHERE dedup_key = $1 AND (`+sqlActive+` OR resolved_at >= $2)
+		ORDER BY (`+sqlActive+`) DESC, last_seen DESC LIMIT 1 FOR UPDATE`, key, since))
 }
 
 func activeByKey(ctx context.Context, tx pgx.Tx, key string) (*Alert, error) {
-	return scanAlert(tx.QueryRow(ctx, "SELECT doc FROM alerts WHERE dedup_key = $1 AND status <> 'resolved' FOR UPDATE", key))
+	return scanAlert(tx.QueryRow(ctx, "SELECT doc FROM alerts WHERE dedup_key = $1 AND "+sqlActive+" FOR UPDATE", key))
 }
 
 func nextID(ctx context.Context, tx pgx.Tx) (string, int64, error) {
@@ -271,7 +275,7 @@ func (f Filter) where() (string, []any) {
 	}
 	switch f.Status {
 	case "active":
-		conds = append(conds, "status <> 'resolved'")
+		conds = append(conds, sqlActive)
 	case StatusOpen, StatusAcknowledged, StatusResolved:
 		conds = append(conds, "status = "+arg(f.Status))
 	}
@@ -301,7 +305,7 @@ func (f Filter) where() (string, []any) {
 		conds = append(conds, "search LIKE "+arg("%"+q+"%"))
 	}
 	if f.PD == "failed" {
-		conds = append(conds, "pd_state IN ('pending', 'failed') AND status <> 'resolved'")
+		conds = append(conds, "pd_state IN ('"+PDPending+"', '"+PDFailed+"') AND "+sqlActive)
 	}
 	if f.Fallback {
 		conds = append(conds, "(doc->>'fallback')::boolean")
@@ -334,7 +338,7 @@ func list(ctx context.Context, q querier, f Filter) (Page, error) {
 		limit = 200
 	}
 	where, args := f.where()
-	rows, err := q.Query(ctx, "SELECT doc FROM alerts WHERE "+where+fmt.Sprintf(" ORDER BY (status <> 'resolved') DESC, last_seen DESC LIMIT %d", limit+1), args...)
+	rows, err := q.Query(ctx, "SELECT doc FROM alerts WHERE "+where+fmt.Sprintf(" ORDER BY ("+sqlActive+") DESC, last_seen DESC LIMIT %d", limit+1), args...)
 	if err != nil {
 		return out, err
 	}

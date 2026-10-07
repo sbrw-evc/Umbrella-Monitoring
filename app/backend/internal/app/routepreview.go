@@ -6,6 +6,8 @@ import (
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pagerduty"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
@@ -25,6 +27,16 @@ type RoutePreview struct {
 	PagerDuty *PreviewPD `json:"pagerduty_route"`
 	// Elsewhere (service preview only): items of the service routed by a more critical service.
 	Elsewhere []alert.Elsewhere `json:"elsewhere,omitempty"`
+	// Backup is null when every backup notification channel is off.
+	Backup *PreviewBackup `json:"backup"`
+}
+
+// PreviewBackup is where backup notification would go: the addresses, after how long an
+// incident nobody took waits, and from which severity.
+type PreviewBackup struct {
+	Targets      []notify.Target `json:"targets"`
+	DelaySeconds int             `json:"delay_seconds"`
+	MinSeverity  string          `json:"min_severity"`
 }
 
 type PreviewPD struct {
@@ -38,7 +50,9 @@ type PreviewPD struct {
 func (a *App) previewOf(r alert.Route) RoutePreview {
 	out := RoutePreview{Services: r.Services, Service: r.Service, Team: r.Team, People: r.People, Channel: r.Channel, Owners: r.Owners, Via: r.Via}
 	var p *PreviewPD
+	var n model.Notify
 	a.deps.Store.Read(func(d *store.Data) {
+		n = d.Settings.Alerting.Notify
 		set := d.Settings.Alerting.PagerDuty
 		if !set.Enabled {
 			return
@@ -47,6 +61,20 @@ func (a *App) previewOf(r alert.Route) RoutePreview {
 		p = &PreviewPD{ID: id, Name: name, MinSeverity: set.MinSeverity, NoKey: id == pagerduty.DefaultRoute && set.RoutingKeyRef == ""}
 	})
 	out.PagerDuty = p
+	if notify.On(n) {
+		// The delay and the severity as the alert engine takes them.
+		b := &PreviewBackup{Targets: a.notifier.PreviewTargets(r), MinSeverity: n.MinSeverity}
+		switch {
+		case n.DelaySeconds != nil:
+			b.DelaySeconds = max(0, *n.DelaySeconds)
+		case p != nil:
+			b.DelaySeconds = int(alert.DefaultFallbackAfter.Seconds())
+		}
+		if alert.SeverityRank(b.MinSeverity) == 0 {
+			b.MinSeverity = alert.DefaultFallbackSeverity
+		}
+		out.Backup = b
+	}
 	return out
 }
 

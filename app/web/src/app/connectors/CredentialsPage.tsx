@@ -8,7 +8,7 @@ import { Link } from '../../router'
 import { Button, Field, formatDate, Input, Modal, Password, Select, Textarea } from '../../ui'
 import { useSession } from '../session'
 import { strings } from './strings'
-import { CREDENTIAL_KINDS, credentialUseLink, type Credential, type CredentialType, type CredentialUse } from './types'
+import { credentialUseLink, type Credential, type CredentialKind, type CredentialType, type CredentialUse } from './types'
 import './connectors.css'
 
 type Editing = { credential: Credential | null } | null
@@ -107,6 +107,7 @@ function CredentialDialog({ editing, editable, onClose, onSaved }: { editing: Ed
   const [fields, setFields] = useState<Record<string, string>>({})
   const [secrets, setSecrets] = useState<Record<string, string>>({})
   const action = useAction()
+  const kinds = useResource<CredentialKind[]>(editing !== null ? '/api/credentials/kinds' : '', 0)
 
   useEffect(() => {
     if (!editing) return
@@ -118,7 +119,7 @@ function CredentialDialog({ editing, editable, onClose, onSaved }: { editing: Ed
     action.clear()
   }, [editing])
 
-  const kind = CREDENTIAL_KINDS[type]
+  const kind = kinds.data?.find((k) => k.type === type) ?? { type, fields: [], secrets: [] }
   const submit = async () => {
     const body = { name, type, description, fields, secrets: Object.fromEntries(Object.entries(secrets).filter(([, v]) => v !== '')) }
     const ok = await action.run(() => (existing ? api('PUT', `/api/credentials/${existing.id}`, body) : api('POST', '/api/credentials', body)))
@@ -163,9 +164,9 @@ function CredentialDialog({ editing, editable, onClose, onSaved }: { editing: Ed
       <Field label={t('cred.type')} hint={t(`cred.type.${type}.hint`)}>
         {(id) => (
           <Select id={id} value={type} disabled={!!existing || !editable} onChange={(e) => setType(e.target.value as CredentialType)}>
-            {(Object.keys(CREDENTIAL_KINDS) as CredentialType[]).map((k) => (
-              <option key={k} value={k}>
-                {t(`cred.type.${k}`)}
+            {(kinds.data ?? [kind]).map((k) => (
+              <option key={k.type} value={k.type}>
+                {t(`cred.type.${k.type}`)}
               </option>
             ))}
           </Select>
@@ -205,7 +206,7 @@ function CredentialDialog({ editing, editable, onClose, onSaved }: { editing: Ed
           {t('cred.inUse')} <UsedBy uses={existing.used_by} />
         </p>
       )}
-      <ErrorBanner error={action.error} strings={strings} />
+      <ErrorBanner error={action.error ?? kinds.error} strings={strings} />
     </Modal>
   )
 }

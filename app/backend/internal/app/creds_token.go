@@ -46,7 +46,7 @@ func (a *App) createConnectorToken(w http.ResponseWriter, r *http.Request) {
 	}
 	v, token, err := a.creds.GenerateBearer(r.Context(), current(r).user.Username, name, "")
 	if err != nil {
-		credentialError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, tokenCreated{Credential: credentialChoice{ID: v.ID, Name: v.Name, Type: v.Type}, Token: token})

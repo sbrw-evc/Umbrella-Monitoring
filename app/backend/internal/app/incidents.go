@@ -37,6 +37,7 @@ func (a *App) registerIncidents(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/incidents/bulk", a.authed(a.can("incidents:ack", a.bulkIncidents)))
 	mux.HandleFunc("POST /api/incidents/{id}/create-ci", a.authed(a.can("incidents:view", a.can("cis:edit", a.createIncidentCI))))
 	mux.HandleFunc("POST /api/incidents/{id}/bind-ci", a.authed(a.can("incidents:view", a.can("cis:edit", a.bindIncidentCI))))
+	a.registerAlertPolicy(mux)
 }
 
 func (a *App) alertsReady(w http.ResponseWriter) bool {
@@ -107,7 +108,7 @@ func (a *App) getIncident(w http.ResponseWriter, r *http.Request) {
 		err = alert.ErrNotFound
 	}
 	if err != nil {
-		alertError(w, err)
+		writeError(w, err)
 		return
 	}
 	names := map[string]string{}
@@ -140,7 +141,7 @@ func (a *App) actIncident(w http.ResponseWriter, r *http.Request) {
 	u := current(r).user
 	out, err := a.alerts.ActIn(r.Context(), r.PathValue("id"), r.PathValue("action"), u.Username, in.Text, a.incidentScope(u))
 	if err != nil {
-		alertError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -183,33 +184,4 @@ func (a *App) bulkIncidents(w http.ResponseWriter, r *http.Request) {
 		out.Done = append(out.Done, id)
 	}
 	httpx.JSON(w, http.StatusOK, out)
-}
-
-func alertCode(err error) string {
-	switch {
-	case errors.Is(err, alert.ErrNotFound):
-		return "not_found"
-	case errors.Is(err, alert.ErrNotOpen):
-		return "not_open"
-	case errors.Is(err, alert.ErrNotActive):
-		return "not_active"
-	case errors.Is(err, alert.ErrEmptyComment):
-		return "empty_comment"
-	case errors.Is(err, alert.ErrBadAction):
-		return "bad_action"
-	}
-	return "internal"
-}
-
-func alertError(w http.ResponseWriter, err error) {
-	switch code := alertCode(err); code {
-	case "not_found":
-		httpx.Error(w, http.StatusNotFound, code, nil)
-	case "not_open", "not_active":
-		httpx.Error(w, http.StatusConflict, code, nil)
-	case "empty_comment", "bad_action":
-		httpx.Error(w, http.StatusBadRequest, code, nil)
-	default:
-		writeError(w, err)
-	}
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
@@ -18,8 +19,8 @@ func TestEventKeys(t *testing.T) {
 		"10.0.0.1:9100":             {"10.0.0.1:9100", "10.0.0.1"},
 		"SRV-APP-01":                {"srv-app-01"},
 	} {
-		if got := eventKeys(in); !slices.Equal(got, want) {
-			t.Errorf("eventKeys(%q) = %v, want %v", in, got, want)
+		if got := alert.EventKeys(in); !slices.Equal(got, want) {
+			t.Errorf("alert.EventKeys(%q) = %v, want %v", in, got, want)
 		}
 	}
 }

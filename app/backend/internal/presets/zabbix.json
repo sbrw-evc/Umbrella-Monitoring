@@ -5,6 +5,14 @@
     "en": "A Zabbix webhook media type that posts the event as JSON: severity 0–5, status 1 for a problem and 0 for recovery.",
     "ru": "Тип оповещения Zabbix webhook, отправляющий событие в JSON: severity 0–5, статус 1 для проблемы и 0 для восстановления."
   },
+  "quick": {
+    "order": 1,
+    "name": {"en": "Zabbix", "ru": "Zabbix"},
+    "monitoring_kinds": ["zabbix"],
+    "steps": 3,
+    "attachment": {"kind": "yaml", "name": "umbrella-mediatype.yaml", "template_file": "zabbix-mediatype.yaml.tmpl"},
+    "test_body": "{\"event_id\":\"umbrella-test-{{.Nonce}}\",\"host\":{{json .CI}},\"host_group\":\"Umbrella\",\"item_key\":\"umbrella.test\",\"severity\":\"2\",\"status\":\"1\",\"trigger\":{{json .Title}},\"value\":\"\"}"
+  },
   "document": {
     "format": "umbrella.connector",
     "format_version": 1,

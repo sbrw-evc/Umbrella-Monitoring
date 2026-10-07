@@ -59,6 +59,8 @@ type Engine struct {
 	FallbackAfter time.Duration
 	FallbackRetry time.Duration
 	RetryEvery    time.Duration
+	// Window, FallbackAfter and FallbackRetry are the defaults; the alerting policy of the
+	// settings (model.AlertPolicy) replaces them, and Retention and TestLifetime, when it sets them.
 
 	mu        sync.Mutex
 	cached    *world
@@ -85,17 +87,31 @@ func (e *Engine) SetNotifier(n Notifier)        { e.notify = n }
 func (e *Engine) SetClock(now func() time.Time) { e.now = now }
 func (e *Engine) DB() *pgxpool.Pool             { return e.db }
 
-// policy is what the alerting settings say about delivery right now.
+// policy is what the alerting settings say about delivery and the lifecycle right now.
 type policy struct {
 	pdOn bool
 	// delay and minSeverity: when backup notification goes out and for which alerts.
 	delay       time.Duration
 	minSeverity string
+	// window, fallbackRetry, retention and testLifetime: see model.AlertPolicy.
+	window        time.Duration
+	fallbackRetry time.Duration
+	retention     time.Duration
+	testLifetime  time.Duration
+}
+
+// orDefault is a number of units of the policy, the default when it is not set.
+func orDefault(n int, unit, def, limit time.Duration) time.Duration {
+	if n <= 0 {
+		return def
+	}
+	return min(time.Duration(n)*unit, limit)
 }
 
 func (e *Engine) policy() policy {
 	var p policy
 	var delay *int
+	var ap model.AlertPolicy
 	e.st.Read(func(d *store.Data) {
 		al := d.Settings.Alerting
 		p.pdOn, p.minSeverity = al.PagerDuty.Enabled, al.Notify.MinSeverity
@@ -103,12 +119,19 @@ func (e *Engine) policy() policy {
 			v := *al.Notify.DelaySeconds
 			delay = &v
 		}
+		if al.Policy != nil {
+			ap = *al.Policy
+		}
 	})
+	p.window = orDefault(ap.ReopenWindowSeconds, time.Second, e.Window, MaxWindow)
+	p.fallbackRetry = orDefault(ap.FallbackRetrySeconds, time.Second, e.FallbackRetry, MaxFallback)
+	p.retention = orDefault(ap.RetentionDays, 24*time.Hour, Retention, MaxRetention)
+	p.testLifetime = orDefault(ap.TestLifetimeSeconds, time.Second, TestLifetime, MaxTestLifetime)
 	switch {
 	case delay != nil:
 		p.delay = time.Duration(max(0, *delay)) * time.Second
 	case p.pdOn:
-		p.delay = e.FallbackAfter
+		p.delay = orDefault(ap.FallbackDelaySeconds, time.Second, e.FallbackAfter, MaxFallback)
 	}
 	if SeverityRank(p.minSeverity) == 0 {
 		p.minSeverity = DefaultFallbackSeverity
@@ -230,7 +253,8 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 		signal = in.Title
 	}
 	key := dedupKey(ci, name, signal)
-	a, err := current(ctx, tx, key, now.Add(-e.Window))
+	p := e.policy()
+	a, err := current(ctx, tx, key, now.Add(-p.window))
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +320,7 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 			Status: StatusOpen, Sources: map[string]*Source{}, Labels: map[string]string{}, FirstSeen: now, OpenedAt: now, LastSeen: now,
 			PD: PD{State: PDPending, Key: "umb-" + id}}
 		if a.Method == "" {
-			a.Method = "other"
+			a.Method = model.MethodOther
 		}
 		a.EventCI = name
 		c.a = a
@@ -312,21 +336,8 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 		}
 		opened = true
 	} else if !Active(a.Status) {
-		a.Status, a.ResolvedAt, a.ResolvedBy, a.AckedBy, a.AckedAt = StatusOpen, nil, "", "", nil
-		a.OpenedAt, a.Fallback, a.FallbackAt, a.FallbackState, a.FallbackTry = now, false, nil, "", nil
-		a.Notified, a.FollowUp, a.FollowUpTry = nil, "", nil
-		a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry, a.PD.AttemptAt = PDPending, "", "", "", nil
-		// PagerDuty opens a new incident for the trigger after a resolve: it goes by the current
-		// route, and the old incident is remembered so that its late webhooks are ignored.
-		a.PD.Route, a.PD.RouteID = "", ""
-		if a.PD.IncidentID != "" && !slices.Contains(a.PD.OldIncidents, a.PD.IncidentID) {
-			a.PD.OldIncidents = append(a.PD.OldIncidents, a.PD.IncidentID)
-			if len(a.PD.OldIncidents) > maxOldIncidents {
-				a.PD.OldIncidents = a.PD.OldIncidents[len(a.PD.OldIncidents)-maxOldIncidents:]
-			}
-		}
-		a.PD.IncidentID, a.PD.IncidentURL = "", ""
-		c.log(now, KindStatus, "reopened", map[string]string{"window": e.Window.String()}, "")
+		a.reopen(now)
+		c.log(now, KindStatus, "reopened", map[string]string{"window": p.window.String()}, "")
 		reopened = true
 	}
 
@@ -380,10 +391,29 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 			c.log(now, KindPagerDuty, "pd_skipped", map[string]string{"code": "test"}, "")
 		}
 	}
-	if e.fallbackDue(c, e.policy(), now) {
+	if e.fallbackDue(c, p, now) {
 		out.note(true, false, a)
 	}
 	return cmds, c.save(ctx, tx)
+}
+
+// reopen opens a resolved alert again: acknowledgement, backup notification and the PagerDuty
+// delivery start afresh.
+func (a *Alert) reopen(now time.Time) {
+	a.Status, a.ResolvedAt, a.ResolvedBy, a.AckedBy, a.AckedAt = StatusOpen, nil, "", "", nil
+	a.OpenedAt, a.Fallback, a.FallbackAt, a.FallbackState, a.FallbackTry = now, false, nil, "", nil
+	a.Notified, a.FollowUp, a.FollowUpTry = nil, "", nil
+	a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry, a.PD.AttemptAt = PDPending, "", "", "", nil
+	// PagerDuty opens a new incident for the trigger after a resolve: it goes by the current
+	// route, and the old incident is remembered so that its late webhooks are ignored.
+	a.PD.Route, a.PD.RouteID = "", ""
+	if a.PD.IncidentID != "" && !slices.Contains(a.PD.OldIncidents, a.PD.IncidentID) {
+		a.PD.OldIncidents = append(a.PD.OldIncidents, a.PD.IncidentID)
+		if len(a.PD.OldIncidents) > maxOldIncidents {
+			a.PD.OldIncidents = a.PD.OldIncidents[len(a.PD.OldIncidents)-maxOldIncidents:]
+		}
+	}
+	a.PD.IncidentID, a.PD.IncidentURL = "", ""
 }
 
 // firingSeverity is the highest severity of the sources that still fire.
@@ -441,22 +471,19 @@ func (e *Engine) reroute(c *change, w *world, ci *model.ConfigItem, now time.Tim
 // is the probable cause of the RED one.
 func (e *Engine) link(ctx context.Context, tx pgx.Tx, c *change, now time.Time) error {
 	a := c.a
-	if len(a.Route.Services) == 0 || (a.Method != "red" && a.Method != "use") {
+	other := model.MethodCounterpart(a.Method)
+	if len(a.Route.Services) == 0 || other == "" {
 		return nil
 	}
-	other := "use"
-	if a.Method == "use" {
-		other = "red"
-	}
-	o, err := scanAlert(tx.QueryRow(ctx, `SELECT doc FROM alerts WHERE status <> 'resolved' AND method = $1 AND service_ids && $2
-		AND first_seen >= $3 AND id <> $4 ORDER BY first_seen DESC LIMIT 1 FOR UPDATE`, other, a.Route.ServiceIDs(), now.Add(-e.Window), a.ID))
+	o, err := scanAlert(tx.QueryRow(ctx, `SELECT doc FROM alerts WHERE `+sqlActive+` AND method = $1 AND service_ids && $2
+		AND first_seen >= $3 AND id <> $4 ORDER BY first_seen DESC LIMIT 1 FOR UPDATE`, other, a.Route.ServiceIDs(), now.Add(-e.policy().window), a.ID))
 	if err != nil || o == nil {
 		return err
 	}
 	oc := &change{a: o}
 	a.RelatedID, o.RelatedID = o.ID, a.ID
 	red, use, redC, useC := a, o, c, oc
-	if a.Method == "use" {
+	if a.Method == model.MethodUSE {
 		red, use, redC, useC = o, a, oc, c
 	}
 	redC.log(now, KindStatus, "probable_cause", map[string]string{"alert": use.ID, "ci": use.CIName}, "")
@@ -856,7 +883,7 @@ func (e *Engine) Tick(ctx context.Context) error {
 					// Acknowledged in between (an older version did not cancel it then).
 					e.taken(c, now)
 				case (a.FallbackState == FallbackPending || a.FallbackState == FallbackSending) && !a.Suppressed &&
-					(a.FallbackTry == nil || now.Sub(*a.FallbackTry) >= e.FallbackRetry):
+					(a.FallbackTry == nil || now.Sub(*a.FallbackTry) >= p.fallbackRetry):
 					// The pending state is saved with the hand-over, so a notification lost with
 					// the process or dropped by a full queue goes out on a later tick.
 					t := now
@@ -865,7 +892,7 @@ func (e *Engine) Tick(ctx context.Context) error {
 					out.note(true, false, a)
 				}
 			}
-			if a.FollowUp != "" && (a.FollowUpTry == nil || now.Sub(*a.FollowUpTry) >= e.FallbackRetry) {
+			if a.FollowUp != "" && (a.FollowUpTry == nil || now.Sub(*a.FollowUpTry) >= p.fallbackRetry) {
 				t := now
 				a.FollowUpTry = &t
 				c.dirty = true
@@ -889,12 +916,12 @@ func (e *Engine) Tick(ctx context.Context) error {
 		}
 		out.send(e)()
 	}
-	if err := e.expireTests(ctx, now); err != nil && ctx.Err() == nil {
+	if err := e.expireTests(ctx, now, p.testLifetime); err != nil && ctx.Err() == nil {
 		slog.Error("test alerts not resolved", "err", err)
 	}
 	if now.Sub(e.purgedAt) >= time.Hour {
 		e.purgedAt = now
-		if _, err := e.db.Exec(ctx, "DELETE FROM alerts WHERE status = 'resolved' AND resolved_at < $1", now.Add(-Retention)); err != nil {
+		if _, err := e.db.Exec(ctx, "DELETE FROM alerts WHERE status = '"+StatusResolved+"' AND resolved_at < $1", now.Add(-p.retention)); err != nil {
 			slog.Error("old alerts not deleted", "err", err)
 		}
 	}
@@ -934,7 +961,7 @@ func (e *Engine) retry(a *Alert, now time.Time) *Command {
 // Reroute routes the active alerts of the given configuration items again, after the
 // catalog changed (an item moved to another service, a team got people).
 func (e *Engine) Reroute(ctx context.Context) error {
-	rows, err := e.db.Query(ctx, "SELECT id FROM alerts WHERE status <> 'resolved' AND ci_id <> ''")
+	rows, err := e.db.Query(ctx, "SELECT id FROM alerts WHERE "+sqlActive+" AND ci_id <> ''")
 	if err != nil {
 		return err
 	}
@@ -1010,7 +1037,7 @@ func (e *Engine) BindUnknown(ctx context.Context, actor string) ([]string, error
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(lockKey)); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, "SELECT id FROM alerts WHERE status <> 'resolved' AND ci_id = '' ORDER BY seq")
+		rows, err := tx.Query(ctx, "SELECT id FROM alerts WHERE "+sqlActive+" AND ci_id = '' ORDER BY seq")
 		if err != nil {
 			return err
 		}

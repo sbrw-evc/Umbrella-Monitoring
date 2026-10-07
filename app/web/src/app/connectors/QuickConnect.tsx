@@ -1,31 +1,51 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Check, Copy, Download, Send } from 'lucide-react'
 import { api } from '../../api'
 import { ErrorBanner } from '../../connections/ConnectionCard'
 import { mergeDicts } from '../../connections/connectionStrings'
-import { useAction } from '../../connections/useRequest'
-import { useT } from '../../i18n'
+import { useAction, useResource } from '../../connections/useRequest'
+import { useLocale, useT } from '../../i18n'
 import { Link, useRouter } from '../../router'
 import { Banner, Button, Field, Input, Modal, Segmented } from '../../ui'
 import { useSession } from '../session'
 import { strings as connectorStrings } from './strings'
 import { sourcesStrings } from './sourcesStrings'
-import type { Connector } from './types'
+import type { Connector, Preset } from './types'
 import './sources.css'
 
 const s = mergeDicts(connectorStrings, sourcesStrings)
-
-export type QuickPreset = 'zabbix' | 'alertmanager' | 'grafana' | 'webhook'
-const PRESETS: QuickPreset[] = ['zabbix', 'alertmanager', 'grafana', 'webhook']
 
 export type QuickResult = {
   connector: Connector
   credential_id: string
   ingest_url: string
   token: string
-  instructions: { preset: string; ingest_url: string; auth_header: string; snippet?: string; snippet_kind?: string }
+  instructions: { preset: string; ingest_url: string; auth_header: string; snippet?: string; snippet_kind?: string; snippet_file?: string }
+  attachment?: { name: string; kind?: string; content: string }
   mediatype_yaml?: string
   monitoring_id?: string
+}
+
+type QuickPreset = Preset & { quick: NonNullable<Preset['quick']> }
+
+// useQuickPresets: the presets quick connect offers, in their order, as the server describes
+// them; with a monitoring system kind, only those that can be its alert intake.
+function useQuickPresets(open: boolean, kind?: string) {
+  const presets = useResource<Preset[]>(open ? '/api/connectors/presets' : '', 0)
+  const list = useMemo(
+    () =>
+      (presets.data ?? [])
+        .filter((p): p is QuickPreset => !!p.quick && (!kind || p.quick.monitoring_kinds.includes(kind)))
+        .sort((a, b) => a.quick.order - b.quick.order),
+    [presets.data, kind],
+  )
+  return { list, loading: !presets.data && !presets.error, error: presets.error }
+}
+
+// presetText is the web string of a preset when there is one, otherwise the server's text.
+function presetText(t: (k: string) => string, key: string, fallback: string) {
+  const v = t(key)
+  return v === key ? fallback : v
 }
 
 // canQuickConnect: quick connect makes a credential and publishes a connector.
@@ -69,10 +89,10 @@ export function CopyField({ value, label, mono = true }: { value: string; label:
   )
 }
 
-function Snippet({ text, file }: { text: string; file?: string }) {
+function Snippet({ text, file, kind }: { text: string; file?: string; kind?: string }) {
   const t = useT(s)
   const download = () => {
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/yaml' }))
+    const url = URL.createObjectURL(new Blob([text], { type: kind === 'yaml' ? 'text/yaml' : 'text/plain' }))
     const a = document.createElement('a')
     a.href = url
     a.download = file ?? 'umbrella.txt'
@@ -98,13 +118,13 @@ function Snippet({ text, file }: { text: string; file?: string }) {
   )
 }
 
-const STEPS: Record<string, number> = { zabbix: 3, alertmanager: 2, grafana: 2, webhook: 1 }
-
 // QuickResultView shows what the source needs, once: address, token, steps and the ready
-// configuration, then the test event.
-export function QuickResultView({ r }: { r: QuickResult }) {
+// configuration, then the test event. The preset says how many steps there are; their text is
+// in the strings.
+export function QuickResultView({ r, steps }: { r: QuickResult; steps: number }) {
   const t = useT(s)
   const p = r.instructions.preset
+  const attachment = r.attachment ?? (r.mediatype_yaml ? { name: 'umbrella-mediatype.yaml', kind: 'yaml', content: r.mediatype_yaml } : undefined)
   return (
     <div className="stack">
       <Banner kind="ok" title={t('src.connect.done', { name: r.connector.name })} />
@@ -113,19 +133,19 @@ export function QuickResultView({ r }: { r: QuickResult }) {
       <p className="hint">{t('src.token.once')}</p>
       <h3 className="src-h">{t('src.steps')}</h3>
       <ol className="src-steps">
-        {Array.from({ length: STEPS[p] ?? 0 }, (_, i) => (
+        {Array.from({ length: steps }, (_, i) => (
           <li key={i}>{t(`src.steps.${p}.${i + 1}`)}</li>
         ))}
       </ol>
-      {r.mediatype_yaml && <Snippet text={r.mediatype_yaml} file="umbrella-mediatype.yaml" />}
-      {r.instructions.snippet && <Snippet text={r.instructions.snippet} file={r.instructions.snippet_kind === 'yaml' ? 'alertmanager-umbrella.yml' : undefined} />}
+      {attachment && <Snippet text={attachment.content} file={attachment.name} kind={attachment.kind} />}
+      {r.instructions.snippet && <Snippet text={r.instructions.snippet} file={r.instructions.snippet_file || undefined} kind={r.instructions.snippet_kind} />}
       <TestEvent connectorID={r.connector.id} />
     </div>
   )
 }
 
 // QuickConnectDialog: «Подключить источник». With a monitoring system the connector becomes the
-// system's alert intake and the template is chosen by the system kind.
+// system's alert intake and the templates offered are those made for the system kind.
 export function QuickConnectDialog({
   open,
   onClose,
@@ -135,15 +155,19 @@ export function QuickConnectDialog({
   open: boolean
   onClose: () => void
   onDone?: (r: QuickResult) => void
-  monitoring?: { id: string; name: string; kind: 'zabbix' | 'prometheus' }
+  monitoring?: { id: string; name: string; kind: string }
 }) {
   const t = useT(s)
+  const { locale } = useLocale()
   const { navigate } = useRouter()
-  const [preset, setPreset] = useState<QuickPreset>(monitoring?.kind === 'prometheus' ? 'alertmanager' : 'zabbix')
+  const presets = useQuickPresets(open, monitoring?.kind)
+  const [picked, setPicked] = useState('')
   const [name, setName] = useState('')
   const [result, setResult] = useState<QuickResult | null>(null)
   const action = useAction()
-  const choices = monitoring ? (monitoring.kind === 'prometheus' ? (['alertmanager', 'grafana'] as QuickPreset[]) : (['zabbix'] as QuickPreset[])) : PRESETS
+  const choices = presets.list
+  const current = choices.find((p) => p.id === picked) ?? choices[0]
+  const label = (p: QuickPreset) => presetText(t, `src.preset.${p.id}`, p.title[locale])
   const close = () => {
     setResult(null)
     setName('')
@@ -151,8 +175,10 @@ export function QuickConnectDialog({
     onClose()
   }
   const submit = async () => {
-    const chosen = choices.includes(preset) ? preset : choices[0]
-    const r = await action.run(() => api<QuickResult>('POST', '/api/connectors/quick', { preset: chosen, name: name.trim(), monitoring_id: monitoring?.id ?? '' }))
+    if (!current) return
+    const r = await action.run(() =>
+      api<QuickResult>('POST', '/api/connectors/quick', { preset: current.id, name: name.trim(), monitoring_id: monitoring?.id ?? '' }),
+    )
     if (r) {
       setResult(r)
       onDone?.(r)
@@ -176,7 +202,7 @@ export function QuickConnectDialog({
             <Button variant="ghost" onClick={close}>
               {t('src.connect.cancel')}
             </Button>
-            <Button variant="primary" busy={action.busy} onClick={() => void submit()}>
+            <Button variant="primary" busy={action.busy} disabled={!current} onClick={() => void submit()}>
               {t('src.connect.go')}
             </Button>
           </>
@@ -184,18 +210,31 @@ export function QuickConnectDialog({
       }
     >
       {result ? (
-        <QuickResultView r={result} />
+        <QuickResultView r={result} steps={choices.find((p) => p.id === result.instructions.preset)?.quick.steps ?? 0} />
       ) : (
         <>
           <p className="muted">{t('src.connect.hint')}</p>
-          {choices.length > 1 && (
-            <Segmented label={t('src.connect.preset')} value={preset} onChange={setPreset} options={choices.map((p) => ({ value: p, label: t(`src.preset.${p}`) }))} />
+          {presets.loading && <p className="muted">{t('loading')}</p>}
+          {choices.length > 1 && current && (
+            <Segmented
+              label={t('src.connect.preset')}
+              value={current.id}
+              onChange={setPicked}
+              options={choices.map((p) => ({ value: p.id, label: label(p) }))}
+            />
           )}
-          <p className="hint">{t(`src.preset.${choices.includes(preset) ? preset : choices[0]}.hint`)}</p>
+          {current && <p className="hint">{presetText(t, `src.preset.${current.id}.hint`, current.description[locale])}</p>}
           <Field label={t('src.connect.name')} hint={t('src.connect.name.hint')}>
-            {(id) => <Input id={id} value={name} placeholder={monitoring?.name ?? t(`src.preset.${preset}`)} onChange={(e) => setName(e.target.value)} />}
+            {(id) => (
+              <Input
+                id={id}
+                value={name}
+                placeholder={monitoring?.name ?? (current ? current.quick.name[locale] : '')}
+                onChange={(e) => setName(e.target.value)}
+              />
+            )}
           </Field>
-          <ErrorBanner error={action.error} strings={s} />
+          <ErrorBanner error={action.error ?? presets.error} strings={s} />
         </>
       )}
     </Modal>

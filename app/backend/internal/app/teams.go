@@ -13,7 +13,8 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
-const MaxTeamDepth = 8
+// MaxTeamDepth is model.MaxTeamDepth, kept for callers of this package.
+const MaxTeamDepth = model.MaxTeamDepth
 
 var (
 	ErrTeamNameTaken     = errors.New("a sibling team with this name already exists")

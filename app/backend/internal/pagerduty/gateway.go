@@ -33,12 +33,7 @@ var (
 	ErrBreaker    = &alert.DeliveryError{Code: "breaker", Msg: "the circuit breaker is open after a series of failures"}
 )
 
-const (
-	breakerThreshold = 5
-	breakerPause     = 60 * time.Second
-	DefaultRoute     = "default"
-	queueSize        = 10000
-)
+const DefaultRoute = "default"
 
 // Resolver reads a secret by its openbao:// reference.
 type Resolver interface {
@@ -81,8 +76,8 @@ type Gateway struct {
 }
 
 func New(st *store.Store, sec Resolver) *Gateway {
-	return &Gateway{st: st, sec: sec, client: &http.Client{Timeout: 15 * time.Second}, queue: make(chan alert.Command, queueSize),
-		Retries: 3, Backoff: 500 * time.Millisecond}
+	return &Gateway{st: st, sec: sec, client: &http.Client{Timeout: DefaultHTTPTimeout}, queue: make(chan alert.Command, DefaultQueueSize),
+		Retries: DefaultRetries, Backoff: DefaultBackoff}
 }
 
 func (g *Gateway) SetResults(r Results) { g.results = r }
@@ -262,8 +257,8 @@ func (g *Gateway) fail(err error) {
 	g.stat.ConsecFails++
 	now := time.Now().UTC()
 	g.stat.LastError, g.stat.LastErrorAt = err.Error(), &now
-	if g.stat.ConsecFails >= breakerThreshold {
-		g.breakerTill = now.Add(breakerPause)
+	if g.stat.ConsecFails >= DefaultBreakerThreshold {
+		g.breakerTill = now.Add(DefaultBreakerPause)
 		g.stat.ConsecFails = 0
 		slog.Warn("pagerduty circuit breaker opened", "err", err)
 	}
@@ -316,7 +311,7 @@ func Build(publicURL string, grafana bool, routingKey string, cmd alert.Command)
 	ev := Event{RoutingKey: routingKey, EventAction: string(cmd.Action), DedupKey: a.PD.Key, Client: "Umbrella"}
 	base := strings.TrimRight(publicURL, "/")
 	if base != "" {
-		ev.ClientURL = base + "/incidents?id=" + a.ID
+		ev.ClientURL = model.IncidentURL(base, a.ID)
 	}
 	if cmd.Action != alert.PDTrigger {
 		return ev
@@ -371,9 +366,9 @@ func Build(publicURL string, grafana bool, routingKey string, cmd alert.Command)
 		CustomDetails: details,
 	}
 	if base != "" {
-		ev.Links = []Link{{Href: base + "/incidents?id=" + a.ID, Text: "Umbrella incident"}}
+		ev.Links = []Link{{Href: model.IncidentURL(base, a.ID), Text: "Umbrella incident"}}
 		if grafana {
-			ev.Links = append(ev.Links, Link{Href: base + "/go/incidents/" + a.ID + "/grafana", Text: "Incident context in Grafana"})
+			ev.Links = append(ev.Links, Link{Href: model.GrafanaHopURL(base, a.ID), Text: "Incident context in Grafana"})
 		}
 	}
 	return ev

@@ -26,7 +26,6 @@ import (
 
 const (
 	maxHeaderValue = 2000
-	processTimeout = 30 * time.Second
 	IdempotencyHdr = "Idempotency-Key"
 	maxIdempotency = 200
 	tokenHeader    = "X-Umbrella-Token"
@@ -274,7 +273,8 @@ func (a *App) process(ctx context.Context, r ingest.Request) (out ingest.Outcome
 	if err != nil {
 		return out, err
 	}
-	cctx, cancel := context.WithTimeout(ctx, processTimeout)
+	timeout := a.opt.Ingest.ProcessTimeout
+	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	res, err := p.Run(cctx, flow.Input{RequestID: strconv.FormatInt(r.ID, 10), Body: r.Body, Headers: r.Headers, Query: r.Query,
 		RemoteIP: r.RemoteIP, Method: r.Method, Connector: a.connectors.connectorScope(r.ConnectorID)}, flow.RunOptions{})
@@ -282,7 +282,7 @@ func (a *App) process(ctx context.Context, r ingest.Request) (out ingest.Outcome
 		if ctx.Err() != nil {
 			return out, ctx.Err()
 		}
-		return out, fmt.Errorf("processing took longer than %s", processTimeout)
+		return out, fmt.Errorf("processing took longer than %s", timeout)
 	}
 	markTestEvents(r, res)
 	out.Result = res

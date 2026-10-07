@@ -24,9 +24,7 @@ import (
 var Ops = []string{">", ">=", "<", "<=", "==", "!="}
 
 const (
-	MinInterval     = 10 * time.Second
-	DefaultInterval = 30 * time.Second
-	maxPreview      = 200
+	maxPreview = 200
 	// ConnectorPrefix marks the alert sources of rules: rule:<id>.
 	ConnectorPrefix = "rule:"
 )
@@ -100,13 +98,13 @@ func Normalize(r *model.Rule) error {
 	r.CILabel = strings.TrimSpace(r.CILabel)
 	r.Title = strings.TrimSpace(r.Title)
 	switch {
-	case r.Name == "" || len(r.Name) > 200:
+	case r.Name == "" || len(r.Name) > RuleLimits.MaxName:
 		return errors.New("name")
-	case r.Method != model.MethodRED && r.Method != model.MethodUSE:
+	case !slices.Contains(model.RuleMethods, r.Method):
 		return errors.New("method")
 	case r.SourceID == "":
 		return errors.New("source")
-	case r.Query == "" || len(r.Query) > 8000:
+	case r.Query == "" || len(r.Query) > RuleLimits.MaxQuery:
 		return errors.New("query")
 	case !slices.Contains(Ops, r.Op):
 		return errors.New("op")
@@ -119,22 +117,22 @@ func Normalize(r *model.Rule) error {
 		r.Signal = r.Method + "." + strings.ToLower(strings.Join(strings.Fields(r.Name), "_"))
 	}
 	if r.For == "" {
-		r.For = "0s"
+		r.For = RuleDefaults.For
 	}
-	if d, err := time.ParseDuration(r.For); err != nil || d < 0 || d > 24*time.Hour {
+	if d, err := time.ParseDuration(r.For); err != nil || d < 0 || d > MaxFor {
 		return errors.New("for")
 	}
 	if r.Interval == "" {
-		r.Interval = DefaultInterval.String()
+		r.Interval = RuleDefaults.Interval
 	}
-	if d, err := time.ParseDuration(r.Interval); err != nil || d < MinInterval || d > time.Hour {
+	if d, err := time.ParseDuration(r.Interval); err != nil || d < MinInterval || d > MaxInterval {
 		return errors.New("interval")
 	}
 	if r.CILabel == "" {
-		r.CILabel = "instance"
+		r.CILabel = RuleDefaults.CILabel
 	}
 	if r.Title == "" {
-		r.Title = r.Name + ": ${ci} = ${value}"
+		r.Title = RuleDefaults.title(r.Name)
 	}
 	return nil
 }
@@ -569,24 +567,5 @@ func (e *Engine) Release(ctx context.Context, r model.Rule) {
 		e.mu.Lock()
 		e.unsent = append(e.unsent, unsent{rule: r.ID, events: events, since: e.now()})
 		e.mu.Unlock()
-	}
-}
-
-// Templates are ready rules for node_exporter, cAdvisor and HTTP services.
-func Templates() []model.Rule {
-	t := func(method, signal, name, query, label, op string, thr float64, hold string, sev, title string) model.Rule {
-		return model.Rule{Method: method, Signal: signal, Name: name, Query: query, CILabel: label, Op: op, Threshold: thr, For: hold,
-			Interval: "30s", Severity: sev, Title: title, Enabled: true}
-	}
-	return []model.Rule{
-		t(model.MethodUSE, "use.cpu.utilization", "CPU utilization", `100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])))`, "instance", ">", 90, "5m", "warning", "CPU ${ci}: ${value}% (threshold ${threshold}%)"),
-		t(model.MethodUSE, "use.mem.utilization", "Memory utilization", `100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`, "instance", ">", 90, "5m", "warning", "Memory ${ci}: ${value}% used"),
-		t(model.MethodUSE, "use.disk.utilization", "Disk space", `100 * (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"})`, "instance", ">", 85, "5m", "error", "Disk ${labels.mountpoint} on ${ci}: ${value}%"),
-		t(model.MethodUSE, "use.cpu.saturation", "CPU saturation (load per core)", `node_load5 / on (instance) count by (instance) (node_cpu_seconds_total{mode="idle"})`, "instance", ">", 2, "10m", "error", "Load per core ${ci}: ${value}"),
-		t(model.MethodUSE, "use.net.errors", "Network errors", `sum by (instance) (increase(node_network_receive_errs_total[5m]) + increase(node_network_transmit_errs_total[5m]))`, "instance", ">", 0, "0s", "warning", "Network errors on ${ci}: ${value} in 5 min"),
-		t(model.MethodUSE, "use.container.cpu", "Container CPU", `100 * sum by (name) (rate(container_cpu_usage_seconds_total{name!=""}[2m]))`, "name", ">", 80, "5m", "warning", "CPU of container ${ci}: ${value}%"),
-		t(model.MethodRED, "red.rate", "No requests", `sum by (job) (rate(http_requests_total[5m]))`, "job", "<", 0.1, "10m", "error", "Requests to ${ci}: ${value}/s"),
-		t(model.MethodRED, "red.errors", "5xx error ratio", `100 * sum by (job) (rate(http_requests_total{code=~"5.."}[5m])) / sum by (job) (rate(http_requests_total[5m]))`, "job", ">", 5, "5m", "critical", "5xx errors ${ci}: ${value}%"),
-		t(model.MethodRED, "red.duration", "p99 latency", `histogram_quantile(0.99, sum by (job, le) (rate(http_request_duration_seconds_bucket[5m])))`, "job", ">", 1, "5m", "error", "p99 of ${ci}: ${value} s"),
 	}
 }

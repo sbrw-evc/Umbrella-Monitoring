@@ -5,7 +5,26 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 )
+
+// The intake settings default to the built-in values, and a bad value keeps its default.
+func TestIngestConfig(t *testing.T) {
+	if got := ingestConfig(); got != ingest.DefaultConfig() {
+		t.Errorf("defaults = %+v", got)
+	}
+	t.Setenv("UMBRELLA_INGEST_WORKERS", "4")
+	t.Setenv("UMBRELLA_INGEST_BATCH_SIZE", "-1")
+	t.Setenv("UMBRELLA_INGEST_TEST_WAIT", "40s")
+	t.Setenv("UMBRELLA_INGEST_KEEP_REQUESTS", "soon")
+	got := ingestConfig()
+	want := ingest.DefaultConfig()
+	want.Workers, want.TestEventWait = 4, 40*time.Second
+	if got != want {
+		t.Errorf("config = %+v", got)
+	}
+}
 
 // A switch waits for the requests the old application still serves, except the one asking for it.
 func TestSwitchHandlerDrain(t *testing.T) {

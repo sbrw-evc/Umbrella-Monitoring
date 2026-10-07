@@ -19,6 +19,8 @@ type Alerting struct {
 	PagerDuty PagerDuty `json:"pagerduty"`
 	Notify    Notify    `json:"notify"`
 	Grafana   Grafana   `json:"grafana"`
+	// Policy tunes the lifecycle of alerts; nil keeps the defaults of the alert engine.
+	Policy *AlertPolicy `json:"policy,omitempty"`
 }
 
 // NormalizePublicURL checks the address Umbrella is reached at and drops trailing slashes. An
@@ -104,6 +106,9 @@ type Notify struct {
 	ExtraTelegram []string   `json:"extra_telegram"`
 	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
 	UpdatedBy     string     `json:"updated_by,omitempty"`
+	// Templates replace built-in message templates by name ("fallback.text", "followup.html"…);
+	// nil keeps the built-in ones.
+	Templates map[string]string `json:"templates,omitempty"`
 }
 
 const (
@@ -140,4 +145,25 @@ type Grafana struct {
 	WindowMinute int        `json:"window_minutes"`
 	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
 	UpdatedBy    string     `json:"updated_by,omitempty"`
+}
+
+// AlertPolicy tunes the lifecycle of alerts. A zero field keeps the default of the alert
+// engine: reopen window 10 minutes, fallback delay 2 minutes, fallback retry 5 minutes,
+// retention 90 days, test incidents 5 minutes.
+type AlertPolicy struct {
+	// ReopenWindowSeconds: an alert resolved this long ago opens again on a new firing event
+	// instead of a new alert, and RED and USE alerts of one service opened within it are linked.
+	ReopenWindowSeconds int `json:"reopen_window_seconds,omitempty"`
+	// FallbackDelaySeconds: how long backup notification waits for PagerDuty to take an alert
+	// while PagerDuty is on and Notify.DelaySeconds is not set.
+	FallbackDelaySeconds int `json:"fallback_delay_seconds,omitempty"`
+	// FallbackRetrySeconds: a backup notification or follow-up not reported as attempted this
+	// long after it was handed to the notifier is handed over again.
+	FallbackRetrySeconds int `json:"fallback_retry_seconds,omitempty"`
+	// RetentionDays: resolved alerts older than this are deleted with their timelines.
+	RetentionDays int `json:"retention_days,omitempty"`
+	// TestLifetimeSeconds: a test incident of a connector resolves itself after this long.
+	TestLifetimeSeconds int        `json:"test_lifetime_seconds,omitempty"`
+	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
+	UpdatedBy           string     `json:"updated_by,omitempty"`
 }

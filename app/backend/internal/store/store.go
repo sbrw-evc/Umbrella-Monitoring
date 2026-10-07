@@ -230,6 +230,16 @@ func (d *Data) RoleOf(u *model.User) *model.Role {
 	return nil
 }
 
+// IsAdmin reports whether u holds the administrator role, the one role that has every
+// permission and sees everything.
+func (d *Data) IsAdmin(u *model.User) bool {
+	if u == nil {
+		return false
+	}
+	r := d.RoleOf(u)
+	return r != nil && r.ID == model.RoleAdmin
+}
+
 func (d *Data) UserByName(username string) *model.User {
 	for _, u := range d.Users {
 		if strings.EqualFold(u.Username, username) {

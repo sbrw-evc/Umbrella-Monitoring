@@ -44,6 +44,8 @@ type Options struct {
 	// client address (sign-in limits, audit, connector and TV wallboard networks); nil reads
 	// UMBRELLA_TRUSTED_PROXIES.
 	TrustedProxies TrustedProxies
+	// Ingest tunes the intake queue and workers; zero fields are the defaults.
+	Ingest ingest.Config
 }
 
 type Deps struct {
@@ -101,6 +103,7 @@ func New(opt Options, deps Deps) *App {
 	if opt.Web == nil {
 		opt.Web = http.NotFoundHandler()
 	}
+	opt.Ingest = opt.Ingest.WithDefaults()
 	passwords := credentials.NewPasswords(deps.Vault)
 	dir := ldapDirectory{}
 	users := NewUserService(deps.Store, passwords)
@@ -113,7 +116,7 @@ func New(opt Options, deps Deps) *App {
 	var queue *ingest.Queue
 	var db Database
 	if deps.Backend != nil {
-		queue = ingest.New(deps.Backend.Pool())
+		queue = ingest.NewWithConfig(deps.Backend.Pool(), opt.Ingest)
 		db = deps.Backend
 	}
 	var sessions SessionCounter
@@ -251,7 +254,7 @@ func (a *App) Run(ctx context.Context) {
 	wg.Go(func() { a.pdGateway.Run(ctx) })
 	wg.Go(func() { a.notifier.Run(ctx) })
 	wg.Go(func() { a.ruleEngine.Run(ctx) })
-	a.queue.Run(ctx, 2, a.process)
+	a.queue.Run(ctx, a.opt.Ingest.Workers, a.process)
 }
 
 func (a *App) ingestReady() bool { return a.queue != nil && a.ready.Load() }

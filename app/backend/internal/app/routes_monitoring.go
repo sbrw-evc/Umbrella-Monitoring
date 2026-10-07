@@ -46,7 +46,7 @@ func (a *App) createMonitoringSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.monitoring.Create(current(r).user.Username, in)
-	respond(w, http.StatusCreated, out, err)
+	reply(w, http.StatusCreated, out, err)
 }
 
 func (a *App) updateMonitoringSource(w http.ResponseWriter, r *http.Request) {
@@ -55,7 +55,7 @@ func (a *App) updateMonitoringSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.monitoring.Update(current(r).user.Username, r.PathValue("id"), in)
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) deleteMonitoringSource(w http.ResponseWriter, r *http.Request) {
@@ -72,13 +72,13 @@ func (a *App) testMonitoringSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.monitoring.Test(r.Context(), in)
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) syncMonitoringSource(w http.ResponseWriter, r *http.Request) {
 	// The reading finishes even if the browser stops waiting.
 	out, err := a.monitoring.Sync(context.WithoutCancel(r.Context()), current(r).user.Username, r.PathValue("id"))
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) monitoringHosts(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +95,7 @@ func (a *App) linkHost(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		a.reresolveAlerts(r.Context())
 	}
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) createCIFromHost(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +107,7 @@ func (a *App) createCIFromHost(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		a.reresolveAlerts(r.Context())
 	}
-	respondNetBox(w, http.StatusCreated, out, err)
+	reply(w, http.StatusCreated, out, err)
 }
 
 func (a *App) bulkCreateCIs(w http.ResponseWriter, r *http.Request) {
@@ -120,7 +120,7 @@ func (a *App) bulkCreateCIs(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		a.reresolveAlerts(r.Context())
 	}
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 // reresolveAlerts finds the configuration items of the open alerts again right after the

@@ -21,8 +21,6 @@ const (
 	StatusPending = "pending"
 	StatusDone    = "done"
 	StatusFailed  = "failed"
-
-	claimBatch = 50
 )
 
 var ErrNotFound = errors.New("not found")
@@ -60,6 +58,7 @@ type Sink func(ctx context.Context, tx pgx.Tx, connectorID string, events []flow
 
 type Queue struct {
 	pool *pgxpool.Pool
+	cfg  Config
 	wake chan struct{}
 	sink Sink
 
@@ -67,9 +66,17 @@ type Queue struct {
 	rejected map[string]int
 }
 
-func New(pool *pgxpool.Pool) *Queue {
-	return &Queue{pool: pool, wake: make(chan struct{}, 1), rejected: map[string]int{}}
+// New is a queue with the default configuration.
+func New(pool *pgxpool.Pool) *Queue { return NewWithConfig(pool, Config{}) }
+
+// NewWithConfig is a queue with the batch size, attempts and retention of cfg (zero fields
+// are the defaults).
+func NewWithConfig(pool *pgxpool.Pool, cfg Config) *Queue {
+	return &Queue{pool: pool, cfg: cfg.WithDefaults(), wake: make(chan struct{}, 1), rejected: map[string]int{}}
 }
+
+// Config is the queue's configuration with the defaults filled in.
+func (q *Queue) Config() Config { return q.cfg }
 
 // Enqueue stores a request durably. With an idempotency key, a request seen before is not
 // stored again and dup is true.
@@ -151,7 +158,7 @@ func (q *Queue) Run(ctx context.Context, workers int, process Processor) {
 				if err != nil && ctx.Err() == nil {
 					slog.Error("ingest batch failed", "err", err)
 				}
-				if n == claimBatch {
+				if n == q.cfg.BatchSize {
 					continue
 				}
 				select {
@@ -178,7 +185,7 @@ func (q *Queue) Run(ctx context.Context, workers int, process Processor) {
 			case <-tick.C:
 				q.flushRejected(ctx)
 			case <-upkeep.C:
-				if err := Maintain(ctx, q.pool, time.Now().UTC(), DefaultRetention); err != nil && ctx.Err() == nil {
+				if err := Maintain(ctx, q.pool, time.Now().UTC(), q.cfg.Retention); err != nil && ctx.Err() == nil {
 					slog.Error("ingest maintenance failed", "err", err)
 				}
 			}
@@ -208,9 +215,6 @@ const (
 	// drainLockKey makes batches run one at a time across workers and Umbrella instances, so
 	// events are folded into alerts in the order the requests were received.
 	drainLockKey = 0x756d622d696e6773
-	// maxAttempts bounds the retries of a request whose storing or folding failed for a
-	// reason that may pass (a lock timeout, the alert tables not ready yet).
-	maxAttempts = 3
 )
 
 // Drain claims one batch of pending requests and processes it. It returns how many it took.
@@ -226,7 +230,7 @@ const (
 // which covers requests reprocessed or committed late.
 //
 // Isolation: every request runs in a savepoint of its own. A request that cannot be stored or
-// folded is rolled back alone and retried up to maxAttempts times, or at once marked failed
+// folded is rolled back alone and retried up to Config.MaxAttempts times, or at once marked failed
 // with a failure record when the error is about its data; the rest of the batch goes on.
 func (q *Queue) Drain(ctx context.Context, process Processor) (int, error) {
 	n := 0
@@ -237,7 +241,7 @@ func (q *Queue) Drain(ctx context.Context, process Processor) (int, error) {
 			return err
 		}
 		rows, err := tx.Query(ctx, `SELECT id, received_at, connector_id, version, attempts, remote_ip, method, headers, query, body
-			FROM ingest_requests WHERE status = 'pending' ORDER BY received_at, id LIMIT $1 FOR UPDATE SKIP LOCKED`, claimBatch)
+			FROM ingest_requests WHERE status = 'pending' ORDER BY received_at, id LIMIT $1 FOR UPDATE SKIP LOCKED`, q.cfg.BatchSize)
 		if err != nil {
 			return err
 		}
@@ -336,7 +340,7 @@ func (q *Queue) handleIsolated(ctx context.Context, tx pgx.Tx, r Request, proces
 // with a failure record, which Reprocess can put back into the queue.
 func (q *Queue) fail(ctx context.Context, tx pgx.Tx, r Request, cause error) error {
 	msg := clip(cleanText(cause.Error()), 2000)
-	if r.Attempts+1 < maxAttempts && !permanent(cause) {
+	if r.Attempts+1 < q.cfg.MaxAttempts && !permanent(cause) {
 		slog.Warn("ingest request will be retried", "connector", r.ConnectorID, "request", r.ID, "attempt", r.Attempts+1, "err", cause)
 		_, err := tx.Exec(ctx, "UPDATE ingest_requests SET attempts = attempts + 1, error = $3 WHERE id = $1 AND received_at = $2",
 			r.ID, r.ReceivedAt, msg)

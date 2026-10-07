@@ -10,9 +10,6 @@ import (
 	"time"
 )
 
-// LinkTTL is how long an acknowledgement link in a notification works.
-const LinkTTL = 24 * time.Hour
-
 var ErrBadLink = errors.New("the link is not valid or has expired")
 
 // Links signs acknowledgement links: who got the notification and which incident it is about,

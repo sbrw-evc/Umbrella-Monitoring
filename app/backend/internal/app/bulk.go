@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -39,25 +40,11 @@ type BulkSummary map[string]int
 // errorCode is the code a request would answer with for the error, and the cause when there
 // is one worth showing.
 func errorCode(err error) (string, string) {
-	var nf netboxFailure
-	var ie *InputError
-	switch {
-	case errors.Is(err, netbox.ErrDefaults):
-		return "netbox_defaults", err.Error()
-	case errors.As(err, &nf):
-		return "netbox_failed", nf.err.Error()
-	case errors.As(err, &ie):
-		if ie.Err != nil {
-			return ie.Code, ie.Err.Error()
-		}
-		return ie.Code, ""
+	a := answerOf(err)
+	if a.detail == nil || a.status == http.StatusInternalServerError {
+		return a.code, ""
 	}
-	for _, s := range statuses {
-		if errors.Is(err, s.err) {
-			return s.code, ""
-		}
-	}
-	return "internal", ""
+	return a.code, a.detail.Error()
 }
 
 // giveUp counts failures in a row with the same code.

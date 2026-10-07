@@ -144,7 +144,7 @@ func (g *Gateway) keysFor(ctx context.Context, incidentKey, incidentID string) [
 	if strings.HasPrefix(incidentKey, "umb-") {
 		return []string{incidentKey}
 	}
-	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, DefaultLookupTimeout)
 	defer cancel()
 	found, err := g.IncidentAlertKeys(cctx, incidentID)
 	if err != nil {

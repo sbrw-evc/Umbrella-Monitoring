@@ -85,7 +85,7 @@ func (a *App) unboundIncident(w http.ResponseWriter, r *http.Request) (alert.Ale
 		err = alert.ErrNotFound
 	}
 	if err != nil {
-		alertError(w, err)
+		writeError(w, err)
 		return al, false
 	}
 	if al.CIID != "" {
@@ -116,7 +116,7 @@ func (a *App) rebind(w http.ResponseWriter, r *http.Request, ci CIView, status i
 	}
 	al, _, err := a.alerts.Get(r.Context(), r.PathValue("id"))
 	if err != nil {
-		alertError(w, err)
+		writeError(w, err)
 		return
 	}
 	if al.CIID == "" {
@@ -166,18 +166,18 @@ func (a *App) createIncidentCI(w http.ResponseWriter, r *http.Request) {
 	}
 	ci, err := a.cis.Create(r.Context(), u.Username, in.CIInput)
 	if err != nil {
-		netboxError(w, err)
+		writeError(w, err)
 		return
 	}
 	if !knownAs(&ci.ConfigItem, al.CIName) {
 		if ci, err = a.cis.AddAlias(u.Username, ci.ID, al.CIName); err != nil {
-			ciAliasError(w, err)
+			writeError(w, err)
 			return
 		}
 	}
 	if in.ServiceID != "" {
 		if _, err := a.services.BindCIs(r.Context(), u.Username, in.ServiceID, []string{ci.ID}); err != nil {
-			serviceError(w, err)
+			writeError(w, err)
 			return
 		}
 		if ci, err = a.cis.Get(ci.ID); err != nil {
@@ -205,7 +205,7 @@ func (a *App) bindIncidentCI(w http.ResponseWriter, r *http.Request) {
 	}
 	ci, err := a.cis.AddAlias(current(r).user.Username, in.CIID, al.CIName)
 	if err != nil {
-		ciAliasError(w, err)
+		writeError(w, err)
 		return
 	}
 	a.rebind(w, r, ci, http.StatusOK)

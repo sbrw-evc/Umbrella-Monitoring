@@ -15,7 +15,6 @@ import (
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/credentials"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/netbox"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
@@ -44,18 +43,6 @@ type netboxFailure struct{ err error }
 
 func (e netboxFailure) Error() string { return e.err.Error() }
 func (e netboxFailure) Unwrap() error { return e.err }
-
-func netboxError(w http.ResponseWriter, err error) {
-	var nf netboxFailure
-	switch {
-	case errors.Is(err, netbox.ErrDefaults):
-		httpx.Error(w, http.StatusBadRequest, "netbox_defaults", err)
-	case errors.As(err, &nf):
-		httpx.Error(w, http.StatusBadGateway, "netbox_failed", nf.err)
-	default:
-		writeError(w, err)
-	}
-}
 
 // NetBoxService keeps the NetBox connection and synchronizes configuration items, their
 // responsible people and the matching computer objects of the domain controller.

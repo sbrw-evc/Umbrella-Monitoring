@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 )
 
 // BoardLimit is the most incidents a wallboard shows.
@@ -31,11 +33,8 @@ type BoardFilter struct {
 
 // BoardCounts count every matching alert, not only the ones returned.
 type BoardCounts struct {
-	Total        int `json:"total"`
-	Critical     int `json:"critical"`
-	Error        int `json:"error"`
-	Warning      int `json:"warning"`
-	Info         int `json:"info"`
+	Total int `json:"total"`
+	model.SeverityCounts
 	Acknowledged int `json:"acknowledged"`
 	Open         int `json:"open"`
 	Resolved     int `json:"resolved"`
@@ -67,12 +66,12 @@ func (f BoardFilter) where(now time.Time) (string, []any) {
 	if len(scope) > 0 {
 		conds = append(conds, "("+strings.Join(scope, " OR ")+")")
 	}
-	statuses := []string{"status = 'open'"}
+	statuses := []string{"status = '" + StatusOpen + "'"}
 	if f.ShowAcknowledged {
-		statuses = append(statuses, "status = 'acknowledged'")
+		statuses = append(statuses, "status = '"+StatusAcknowledged+"'")
 	}
 	if f.ResolvedMinutes > 0 {
-		statuses = append(statuses, "(status = 'resolved' AND resolved_at >= "+arg(now.Add(-time.Duration(f.ResolvedMinutes)*time.Minute))+")")
+		statuses = append(statuses, "(status = '"+StatusResolved+"' AND resolved_at >= "+arg(now.Add(-time.Duration(f.ResolvedMinutes)*time.Minute))+")")
 	}
 	conds = append(conds, "("+strings.Join(statuses, " OR ")+")")
 	if len(f.Severities) > 0 {
@@ -87,8 +86,19 @@ func (f BoardFilter) where(now time.Time) (string, []any) {
 	return strings.Join(conds, " AND "), args
 }
 
-const boardOrder = ` ORDER BY CASE severity WHEN 'critical' THEN 4 WHEN 'error' THEN 3 WHEN 'warning' THEN 2 WHEN 'info' THEN 1 ELSE 0 END DESC,
-	CASE status WHEN 'open' THEN 0 WHEN 'acknowledged' THEN 1 ELSE 2 END, (doc->>'opened_at')::timestamptz %s, seq %s`
+// severityRankSQL is the rank of the severity column by model.Severities; unknown ones rank 0.
+func severityRankSQL() string {
+	var b strings.Builder
+	b.WriteString("CASE severity")
+	for _, s := range model.Severities {
+		fmt.Fprintf(&b, " WHEN '%s' THEN %d", s.Name, s.Rank)
+	}
+	b.WriteString(" ELSE 0 END")
+	return b.String()
+}
+
+var boardOrder = " ORDER BY " + severityRankSQL() + " DESC,\n\tCASE status WHEN '" + StatusOpen + "' THEN 0 WHEN '" + StatusAcknowledged +
+	"' THEN 1 ELSE 2 END, (doc->>'opened_at')::timestamptz %s, seq %s"
 
 // Board returns the alerts of a wallboard: most severe first, open before acknowledged and
 // resolved ones last, then by the time they opened.
@@ -143,16 +153,7 @@ func (e *Engine) Board(ctx context.Context, f BoardFilter) (BoardPage, error) {
 		case StatusResolved:
 			c.Resolved += n
 		}
-		switch sev {
-		case "critical":
-			c.Critical += n
-		case "error":
-			c.Error += n
-		case "warning":
-			c.Warning += n
-		case "info":
-			c.Info += n
-		}
+		c.Add(sev, n)
 	}
 	return out, rows.Err()
 }

@@ -1,6 +1,7 @@
 import { Avatar } from '../../Avatar'
 import { useT } from '../../i18n'
 import { Banner } from '../../ui'
+import { ADMIN } from '../roles/permissions'
 import { useSession } from '../session'
 import { strings } from '../strings'
 import { fullName } from '../types'
@@ -13,7 +14,7 @@ import { TimezoneCard } from './TimezoneCard'
 export function ProfilePage() {
   const t = useT(strings)
   const { user } = useSession()
-  const noAccess = user.role !== 'admin' && (user.permissions?.length ?? 0) === 0
+  const noAccess = user.role !== ADMIN && (user.permissions?.length ?? 0) === 0
   const admins = user.admins ?? []
   return (
     <>

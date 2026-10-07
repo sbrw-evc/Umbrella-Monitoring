@@ -2,19 +2,61 @@ import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStor
 import { createPortal } from 'react-dom'
 import { Building2, ChevronDown, LayoutGrid, Settings, Workflow, type LucideIcon } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useT } from '../i18n'
+import { api } from '../api'
+import { useLocale, useT } from '../i18n'
 import { Link, useRouter } from '../router'
 import { spring } from '../ui'
 import { navStrings } from './navStrings'
-import { GROUPS, owns, visiblePages, type Group, type PageDef } from './pages'
+import { owns, visiblePages, type PageDef } from './pages'
+import type { Catalog } from './roles/permissions'
 import { useSession } from './session'
 
 const COMPACT = '(max-width: 860px)'
-const openKey = (group: Group) => `umbrella.sidebar.${group}`
+const openKey = (group: string) => `umbrella.sidebar.${group}`
 const collapsedKey = (user: string) => `umbrella.sidebar.collapsed.${user}`
-const GROUP_ICONS: Record<Group, LucideIcon> = { overview: LayoutGrid, automation: Workflow, org: Building2, settings: Settings }
-// Groups shown open the first time, before the user has opened or closed them.
-const OPEN_BY_DEFAULT: Group[] = ['overview']
+// The groups, their titles and order come from the access catalog; only the icons are here.
+const GROUP_ICONS: Record<string, LucideIcon> = { overview: LayoutGrid, automation: Workflow, org: Building2, settings: Settings }
+
+// NavGroup is a group of the menu with the pages of it the user sees.
+type NavGroup = { id: string; title: string; pages: PageDef[] }
+
+let catalogLoad: Promise<Catalog> | null = null
+
+// loadCatalog reads the access catalog once; it is the same for every user.
+function loadCatalog() {
+  catalogLoad ??= api<Catalog>('GET', '/api/access/catalog').catch((e: unknown) => {
+    catalogLoad = null
+    throw e
+  })
+  return catalogLoad
+}
+
+// useMenu groups the pages as the access catalog does, in its order. Without the catalog the
+// pages are one group.
+function useMenu(pages: PageDef[], fallbackTitle: string): NavGroup[] {
+  const { locale } = useLocale()
+  const [catalog, setCatalog] = useState<Catalog | 'failed' | null>(null)
+  useEffect(() => {
+    let live = true
+    loadCatalog().then(
+      (c) => live && setCatalog(c),
+      () => live && setCatalog('failed'),
+    )
+    return () => {
+      live = false
+    }
+  }, [])
+  if (catalog === null) return []
+  if (catalog === 'failed') return pages.length > 0 ? [{ id: 'all', title: fallbackTitle, pages }] : []
+  const byID = new Map(pages.map((p) => [p.id, p]))
+  return catalog.groups
+    .map((g) => ({
+      id: g.id,
+      title: g.title[locale],
+      pages: catalog.pages.filter((p) => p.group === g.id).flatMap((p) => byID.get(p.id) ?? []),
+    }))
+    .filter((g) => g.pages.length > 0)
+}
 
 function useCompact() {
   return useSyncExternalStore(
@@ -27,12 +69,13 @@ function useCompact() {
   )
 }
 
-function readOpen(group: Group) {
+// readOpen: a group the user has not opened or closed yet is open when it is the first one.
+function readOpen(group: string, first: boolean) {
   try {
     const v = window.localStorage.getItem(openKey(group))
-    return v === null ? OPEN_BY_DEFAULT.includes(group) : v === '1'
+    return v === null ? first : v === '1'
   } catch {
-    return OPEN_BY_DEFAULT.includes(group)
+    return first
   }
 }
 
@@ -83,7 +126,7 @@ function Tip({ anchor, children }: { anchor: HTMLElement | null; children: React
   )
 }
 
-function writeOpen(group: Group, v: boolean) {
+function writeOpen(group: string, v: boolean) {
   try {
     window.localStorage.setItem(openKey(group), v ? '1' : '0')
   } catch {
@@ -121,11 +164,12 @@ function SideLink({ page, active, rail }: { page: PageDef; active: boolean; rail
   )
 }
 
-function GroupAccordion({ group, icon: Icon, pages, path }: { group: Group; icon: LucideIcon; pages: PageDef[]; path: string }) {
-  const t = useT(navStrings)
+function GroupAccordion({ group, first, path }: { group: NavGroup; first: boolean; path: string }) {
   const compact = useCompact()
+  const { pages } = group
+  const Icon = GROUP_ICONS[group.id] ?? LayoutGrid
   const hasActive = pages.some((p) => owns(p, path))
-  const [open, setOpen] = useState(() => hasActive || readOpen(group))
+  const [open, setOpen] = useState(() => hasActive || readOpen(group.id, first))
 
   useEffect(() => {
     if (hasActive) setOpen(true)
@@ -133,7 +177,7 @@ function GroupAccordion({ group, icon: Icon, pages, path }: { group: Group; icon
 
   const toggle = () =>
     setOpen((v) => {
-      writeOpen(group, !v)
+      writeOpen(group.id, !v)
       return !v
     })
   const shown = open || compact
@@ -142,7 +186,7 @@ function GroupAccordion({ group, icon: Icon, pages, path }: { group: Group; icon
     <div className="side-group">
       <button type="button" className={`side-accordion ${hasActive ? 'has-active' : ''}`} aria-expanded={shown} onClick={toggle}>
         <Icon size={17} aria-hidden />
-        <span>{t(`group.${group}`)}</span>
+        <span>{group.title}</span>
         <motion.span className="side-chevron" animate={{ rotate: shown ? 180 : 0 }} transition={spring}>
           <ChevronDown size={16} />
         </motion.span>
@@ -173,8 +217,7 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   const { path } = useRouter()
   const { can } = useSession()
   const nav = useRef<HTMLElement>(null)
-  const pages = visiblePages(can)
-  const groups = GROUPS.map((g) => ({ group: g, pages: pages.filter((p) => p.group === g) })).filter((g) => g.pages.length > 0)
+  const groups = useMenu(visiblePages(can), t('nav.label'))
 
   useEffect(() => {
     const el = nav.current
@@ -188,17 +231,17 @@ export function Sidebar({ collapsed }: { collapsed: boolean }) {
   return (
     <nav ref={nav} id="app-sidebar" className={`sidebar ${collapsed ? 'collapsed' : ''}`} aria-label={t('nav.label')}>
       {collapsed
-        ? groups.map(({ group, pages }, i) => (
-            <Fragment key={group}>
+        ? groups.map((g, i) => (
+            <Fragment key={g.id}>
               {i > 0 && <span className="side-sep" aria-hidden />}
-              <div className="side-group" role="group" aria-label={t(`group.${group}`)}>
-                {pages.map((p) => (
+              <div className="side-group" role="group" aria-label={g.title}>
+                {g.pages.map((p) => (
                   <SideLink key={p.id} page={p} active={owns(p, path)} rail />
                 ))}
               </div>
             </Fragment>
           ))
-        : groups.map(({ group, pages }) => <GroupAccordion key={group} group={group} icon={GROUP_ICONS[group]} pages={pages} path={path} />)}
+        : groups.map((g, i) => <GroupAccordion key={g.id} group={g} first={i === 0} path={path} />)}
     </nav>
   )
 }

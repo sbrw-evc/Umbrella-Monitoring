@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { GrafanaCard } from './GrafanaCard'
 import { NotifyCard } from './NotifyCard'
 import { PagerDutyCard } from './PagerDutyCard'
+import { PolicyCard } from './PolicyCard'
 import { PublicURLCard } from './PublicURLCard'
 import './alerting.css'
 
@@ -15,6 +16,7 @@ export function AlertingSettings() {
       <PagerDutyCard reloadKey={epoch} />
       <NotifyCard key={epoch} />
       <GrafanaCard />
+      <PolicyCard />
     </>
   )
 }
