@@ -16,6 +16,8 @@ import { sourcesStrings } from '../connectors/sourcesStrings'
 import { strings as connectorStrings } from '../connectors/strings'
 import { Link } from '../../router'
 import { strings } from './strings'
+import { ContextTab } from './ContextTab'
+import { contextStrings } from './contextStrings'
 import '../services/services.css'
 import '../connectors/connectors.css'
 import '../cis/cis.css'
@@ -97,9 +99,12 @@ const query = () => new URLSearchParams(window.location.search)
 export function MonitoringPage() {
   const t = useT(strings)
   const ts = useT(sourcesStrings)
+  const tc = useT(contextStrings)
   const { can } = useSession()
   const quick = useCanQuickConnect()
-  const [tab, setTab] = useState<'hosts' | 'sources'>(() => (query().get('system') || query().get('connect') ? 'sources' : 'hosts'))
+  const [tab, setTab] = useState<'hosts' | 'sources' | 'context'>(() =>
+    query().get('tab') === 'context' ? 'context' : query().get('system') || query().get('connect') ? 'sources' : 'hosts',
+  )
   const [epoch, setEpoch] = useState(0)
   const view = useResource<View>('/api/monitoring', epoch)
   const [editing, setEditing] = useState<Source | 'new' | null>(null)
@@ -109,7 +114,7 @@ export function MonitoringPage() {
   const reload = useCallback(() => setEpoch((e) => e + 1), [])
   const v = view.data
   useEffect(() => {
-    if (v && v.sources.length === 0) setTab('sources')
+    if (v && v.sources.length === 0) setTab((cur) => (cur === 'context' ? cur : 'sources'))
   }, [v])
   const showHosts = (id: string) => {
     setHostSource(id)
@@ -127,6 +132,7 @@ export function MonitoringPage() {
           options={[
             { value: 'hosts', label: t('mon.tab.hosts') },
             { value: 'sources', label: `${t('mon.tab.sources')} (${v?.sources.length ?? 0})` },
+            { value: 'context', label: tc('mon.tab.context') },
           ]}
         />
         {tab === 'sources' && (
@@ -148,6 +154,7 @@ export function MonitoringPage() {
       </div>
       <ErrorBanner error={view.error} strings={strings} />
       {v && tab === 'sources' && <SourcesTable v={v} onOpen={setEditing} onChanged={reload} onHosts={showHosts} />}
+      {tab === 'context' && <ContextTab />}
       {v && tab === 'hosts' && <HostsTab key={hostEpoch} initialSource={hostSource} sources={v.sources} epoch={epoch} onChanged={reload} />}
       <QuickConnectDialog open={connecting} onClose={() => setConnecting(false)} onDone={reload} />
       {v && <SourceEditor value={editing} defaults={v.defaults} onClose={() => setEditing(null)} onSaved={() => (setEditing(null), reload())} />}

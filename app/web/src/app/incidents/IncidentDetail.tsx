@@ -7,6 +7,8 @@ import { useLocale, useT } from '../../i18n'
 import { Link } from '../../router'
 import { Banner, Button, formatDate, Modal, Rows, Segmented, Textarea } from '../../ui'
 import { ResponseTab } from '../response/ResponseTab'
+import { MachineTab } from './MachineTab'
+import { machineStrings } from './machineStrings'
 import { useSession } from '../session'
 import { BindCIForm, CreateCIForm, ResolveConfirm } from './CatalogForms'
 import { entryText, severityTone } from './format'
@@ -41,7 +43,7 @@ export function PDPill({ state }: { state: PD['state'] }) {
 
 type Props = { id: string | null; actor: boolean; onClose: () => void; onChanged: () => void; onOpen: (id: string) => void }
 
-type Tab = 'main' | 'timeline' | 'sources' | 'response'
+type Tab = 'main' | 'machine' | 'timeline' | 'sources' | 'response'
 
 // Mode: the card shows the incident, or one of the forms it leads to.
 type Mode = null | 'create' | 'bind' | 'resolve'
@@ -64,6 +66,7 @@ export function maintenanceURL(d: Detail, title: string) {
 
 export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props) {
   const t = useT(strings)
+  const tm = useT(machineStrings)
   const { can } = useSession()
   const [epoch, setEpoch] = useState(0)
   const [tab, setTab] = useState<Tab>('main')
@@ -165,6 +168,7 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
             onChange={setTab}
             options={[
               { value: 'main', label: t('inc.tab.main') },
+              { value: 'machine', label: tm('inc.tab.machine') },
               { value: 'timeline', label: `${t('inc.tab.timeline')} (${d.timeline.length})` },
               { value: 'sources', label: `${t('inc.tab.sources')} (${Object.keys(a.sources).length})` },
               ...(can('response:view') ? [{ value: 'response' as Tab, label: t('inc.tab.response') }] : []),
@@ -177,6 +181,7 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
               {actor && <CommentBox busy={act.busy} onComment={(text) => run('comment', { text })} />}
             </>
           )}
+          {tab === 'machine' && <MachineTab d={d} onOpen={onOpen} />}
           {tab === 'timeline' && <Timeline d={d} actor={actor} busy={act.busy} onComment={(text) => run('comment', { text })} />}
           {tab === 'sources' && <Sources d={d} />}
           {tab === 'response' && <ResponseTab id={a.id} status={a.status} actor={actor} epoch={epoch} />}

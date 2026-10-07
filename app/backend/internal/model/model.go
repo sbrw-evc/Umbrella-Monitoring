@@ -145,6 +145,8 @@ type Settings struct {
 	Alerting      Alerting         `json:"alerting"`
 	// Response is incident response: impact, priority policies, escalation, war rooms, Jira.
 	Response Response `json:"response"`
+	// HostContext is how the incident card shows the machine of the incident.
+	HostContext HostContext `json:"host_context"`
 	// NewUserRole is the role of accounts created by a directory sign-in or synchronization or by
 	// NetBox when no group mapping gives one. Empty or unknown: the system role "user".
 	NewUserRole string `json:"new_user_role"`
