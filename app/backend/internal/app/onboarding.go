@@ -10,6 +10,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/access"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
@@ -83,7 +84,11 @@ func readOnboardingFacts(d *store.Data) onboardingFacts {
 	}
 	al := d.Settings.Alerting
 	f.publicURL = al.PublicURL != ""
-	f.delivery = pagerDutyDelivers(al.PagerDuty) || backupDelivers(al.Notify, people)
+	var teams []*model.Team
+	for _, t := range d.Teams {
+		teams = append(teams, t)
+	}
+	f.delivery = pagerDutyDelivers(al.PagerDuty) || backupDelivers(al.Notify, people, teams)
 	return f
 }
 
@@ -103,20 +108,11 @@ func pagerDutyDelivers(pd model.PagerDuty) bool {
 	return false
 }
 
-// backupDelivers: e-mail or Telegram is configured and somebody would get the message: an
-// "always notify" recipient or a team member with an address or a chat.
-func backupDelivers(n model.Notify, people []*model.User) bool {
-	mail := n.Email.Enabled && n.Email.Host != ""
-	tg := n.Telegram.Enabled && n.Telegram.TokenRef != ""
-	if mail && len(n.ExtraEmails) > 0 || tg && len(n.ExtraTelegram) > 0 {
-		return true
-	}
-	for _, u := range people {
-		if mail && u.Email != "" || tg && u.Telegram != "" {
-			return true
-		}
-	}
-	return false
+// backupDelivers: a backup notification channel is set up and somebody would get the message:
+// an "always notify" recipient, a team member with an address or a chat, or a team's own
+// channel (a mailbox, a chat, a Teams or Zoom webhook).
+func backupDelivers(n model.Notify, people []*model.User, teams []*model.Team) bool {
+	return notify.Reaches(n, people, teams)
 }
 
 // anyEvent reports whether an event was ever received (by a connector or made by a rule).

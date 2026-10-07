@@ -124,7 +124,7 @@ func (a *App) rebind(w http.ResponseWriter, r *http.Request, ci CIView, status i
 		httpx.Error(w, http.StatusConflict, "incident_unbound", errIncidentUnbound)
 		return
 	}
-	httpx.JSON(w, status, incidentCIResult{CI: ci, Alert: al, Bound: bound})
+	httpx.JSON(w, status, incidentCIResult{CI: ci, Alert: al.Redacted(), Bound: bound})
 }
 
 type incidentNewCI struct {

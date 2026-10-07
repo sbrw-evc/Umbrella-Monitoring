@@ -26,8 +26,9 @@ const (
 	maxFallbackDelay = 3600
 )
 
-// NotificationsService keeps the settings of backup notification; the SMTP password and the
-// bot token are kept in OpenBao.
+// NotificationsService keeps the settings of backup notification; the SMTP password, the bot
+// token and the Zoom verification token are kept in OpenBao. Webhook URLs of Teams and Zoom are
+// settings like other addresses: administrators see them to edit them.
 type NotificationsService struct {
 	st      *store.Store
 	secrets Secrets
@@ -40,9 +41,11 @@ func NewNotificationsService(st *store.Store, secrets Secrets, n *notify.Service
 
 type NotifyView struct {
 	model.Notify
-	HasPassword bool   `json:"has_password"`
-	HasToken    bool   `json:"has_token"`
-	PublicURL   string `json:"public_url"`
+	HasPassword bool `json:"has_password"`
+	HasToken    bool `json:"has_token"`
+	// HasZoomToken: the Zoom verification token is stored (it is never shown).
+	HasZoomToken bool   `json:"has_zoom_token"`
+	PublicURL    string `json:"public_url"`
 	// Links: acknowledgement links are put in messages (the public address is set and the
 	// signing key is ready).
 	Links bool `json:"links"`
@@ -62,6 +65,8 @@ func (s *NotificationsService) View() NotifyView {
 		n = d.Settings.Alerting.Notify
 		n.ExtraEmails = slices.Clone(n.ExtraEmails)
 		n.ExtraTelegram = slices.Clone(n.ExtraTelegram)
+		n.ExtraTeams = slices.Clone(n.ExtraTeams)
+		n.ExtraZoom = slices.Clone(n.ExtraZoom)
 		n.Templates = maps.Clone(n.Templates)
 		pub = d.Settings.Alerting.PublicURL
 		pdOn = d.Settings.Alerting.PagerDuty.Enabled
@@ -76,13 +81,19 @@ func (s *NotificationsService) View() NotifyView {
 	if n.ExtraTelegram == nil {
 		n.ExtraTelegram = []string{}
 	}
+	if n.ExtraTeams == nil {
+		n.ExtraTeams = []string{}
+	}
+	if n.ExtraZoom == nil {
+		n.ExtraZoom = []string{}
+	}
 	if n.Email.Security == "" {
 		n.Email.Security = model.SMTPStartTLS
 	}
 	if n.MinSeverity == "" {
 		n.MinSeverity = alert.DefaultFallbackSeverity
 	}
-	return NotifyView{Notify: n, HasPassword: n.Email.PasswordRef != "", HasToken: n.Telegram.TokenRef != "", PublicURL: pub,
+	return NotifyView{Notify: n, HasPassword: n.Email.PasswordRef != "", HasToken: n.Telegram.TokenRef != "", HasZoomToken: n.Zoom.TokenRef != "", PublicURL: pub,
 		Links: pub != "" && s.n.Links() != nil, PDEnabled: pdOn, AutoDelaySeconds: auto, DefaultTemplates: notify.DefaultTemplates()}
 }
 
@@ -104,11 +115,27 @@ type TelegramInput struct {
 	APIURL  string `json:"api_url"`
 }
 
+type TeamsInput struct {
+	Enabled bool `json:"enabled"`
+}
+
+// ZoomInput: Token is the verification token of the Incoming Webhook app; empty keeps the stored
+// one.
+type ZoomInput struct {
+	Enabled bool   `json:"enabled"`
+	Token   string `json:"token"`
+}
+
 type NotifyInput struct {
 	Email         EmailInput    `json:"email"`
 	Telegram      TelegramInput `json:"telegram"`
+	Teams         TeamsInput    `json:"teams"`
+	Zoom          ZoomInput     `json:"zoom"`
 	ExtraEmails   []string      `json:"extra_emails"`
 	ExtraTelegram []string      `json:"extra_telegram"`
+	// ExtraTeams and ExtraZoom: webhook URLs (https).
+	ExtraTeams []string `json:"extra_teams"`
+	ExtraZoom  []string `json:"extra_zoom"`
 	// DelaySeconds: null is automatic (2 minutes with PagerDuty, at once without it), 0 at once.
 	DelaySeconds *int `json:"delay_seconds"`
 	// MinSeverity: empty is error.
@@ -188,6 +215,14 @@ func (s *NotificationsService) Save(ctx context.Context, actor string, in Notify
 	if err != nil {
 		return NotifyView{}, err
 	}
+	extraTeams, err := cleanList(in.ExtraTeams, validWebhook, "teams_invalid")
+	if err != nil {
+		return NotifyView{}, err
+	}
+	extraZoom, err := cleanList(in.ExtraZoom, validWebhook, "zoom_invalid")
+	if err != nil {
+		return NotifyView{}, err
+	}
 	if in.DelaySeconds != nil && (*in.DelaySeconds < 0 || *in.DelaySeconds > maxFallbackDelay) {
 		return NotifyView{}, invalid("delay_invalid", nil)
 	}
@@ -204,7 +239,11 @@ func (s *NotificationsService) Save(ctx context.Context, actor string, in Notify
 	if in.Telegram.Enabled && token == "" && n.Telegram.TokenRef == "" {
 		return NotifyView{}, invalid("token_required", nil)
 	}
-	pwRef, tokenRef := n.Email.PasswordRef, n.Telegram.TokenRef
+	zoomToken := strings.TrimSpace(in.Zoom.Token)
+	if in.Zoom.Enabled && zoomToken == "" && n.Zoom.TokenRef == "" {
+		return NotifyView{}, invalid("zoom_token_required", nil)
+	}
+	pwRef, tokenRef, zoomRef := n.Email.PasswordRef, n.Telegram.TokenRef, n.Zoom.TokenRef
 	if in.Email.ClearPassword || strings.TrimSpace(e.Username) == "" {
 		pwRef = ""
 	}
@@ -218,18 +257,27 @@ func (s *NotificationsService) Save(ctx context.Context, actor string, in Notify
 			return NotifyView{}, err
 		}
 	}
+	if zoomToken != "" {
+		if zoomRef, err = s.put(ctx, "zoom_token", zoomToken); err != nil {
+			return NotifyView{}, err
+		}
+	}
 	n.Email = model.EmailChannel{Enabled: e.Enabled, Host: e.Host, Port: e.Port, Security: e.Security, SkipVerify: e.SkipVerify,
 		Username: strings.TrimSpace(e.Username), PasswordRef: pwRef, From: e.From}
 	if n.Email.Security == "" {
 		n.Email.Security = model.SMTPStartTLS
 	}
 	n.Telegram = model.TelegramChannel{Enabled: in.Telegram.Enabled, TokenRef: tokenRef, APIURL: api}
+	n.Teams = model.TeamsChannel{Enabled: in.Teams.Enabled}
+	n.Zoom = model.ZoomChannel{Enabled: in.Zoom.Enabled, TokenRef: zoomRef}
 	n.ExtraEmails, n.ExtraTelegram = extraEmails, extraTelegram
+	n.ExtraTeams, n.ExtraZoom = extraTeams, extraZoom
 	n.DelaySeconds, n.MinSeverity = in.DelaySeconds, in.MinSeverity
 	n.Templates = templates
 	now := time.Now().UTC()
 	n.UpdatedAt, n.UpdatedBy = &now, actor
-	detail := fmt.Sprintf("email=%v telegram=%v delay=%s min_severity=%s", n.Email.Enabled, n.Telegram.Enabled, delayText(n.DelaySeconds), n.MinSeverity)
+	detail := fmt.Sprintf("email=%v telegram=%v teams=%v zoom=%v delay=%s min_severity=%s", n.Email.Enabled, n.Telegram.Enabled, n.Teams.Enabled, n.Zoom.Enabled,
+		delayText(n.DelaySeconds), n.MinSeverity)
 	if len(n.Templates) > 0 {
 		names := slices.Sorted(maps.Keys(n.Templates))
 		detail += " templates=" + strings.Join(names, ",")
@@ -246,6 +294,19 @@ func delayText(v *int) string {
 		return "auto"
 	}
 	return fmt.Sprintf("%ds", *v)
+}
+
+// validWebhook: an incoming webhook URL of Teams or Zoom; the API takes https only.
+func validWebhook(v string) bool {
+	return strings.HasPrefix(v, "https://") && notify.ValidWebhook(v)
+}
+
+// validAddress checks an address of a channel as the API takes it: webhook URLs are https.
+func validAddress(kind, v string) bool {
+	if kind == notify.ChannelTeams || kind == notify.ChannelZoom {
+		return validWebhook(v)
+	}
+	return notify.ValidAddress(kind, v)
 }
 
 func validFrom(v string) bool {
@@ -347,7 +408,7 @@ func (a *App) notifyTest(w http.ResponseWriter, r *http.Request) {
 	if to == "" {
 		to = notify.UserAddress(in.Channel, u)
 	}
-	if !notify.ValidAddress(in.Channel, to) {
+	if !validAddress(in.Channel, to) {
 		writeError(w, invalid(in.Channel+"_invalid", nil))
 		return
 	}
@@ -355,6 +416,7 @@ func (a *App) notifyTest(w http.ResponseWriter, r *http.Request) {
 	for k, v := range info {
 		out[k] = v
 	}
+	shown := notify.ShowAddress(in.Channel, to)
 	switch {
 	case errors.Is(err, notify.ErrDisabled):
 		writeError(w, invalid("channel_disabled", nil))
@@ -363,7 +425,7 @@ func (a *App) notifyTest(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		httpx.Error(w, http.StatusBadGateway, "notify_failed", err)
 	default:
-		out["to"] = to
+		out["to"] = shown
 		httpx.JSON(w, http.StatusOK, out)
 	}
 }
@@ -478,6 +540,10 @@ func (a *App) linkActor(who string) string {
 		return v
 	case "t":
 		return "telegram " + v
+	case "ms":
+		return "teams " + v
+	case "zm":
+		return "zoom " + v
 	}
 	return "link"
 }

@@ -48,7 +48,12 @@ type PreviewPD struct {
 }
 
 func (a *App) previewOf(r alert.Route) RoutePreview {
-	out := RoutePreview{Services: r.Services, Service: r.Service, Team: r.Team, People: r.People, Channel: r.Channel, Owners: r.Owners, Via: r.Via}
+	out := RoutePreview{Services: r.Services, Service: r.Service, Team: r.Team, People: r.People, Owners: r.Owners, Via: r.Via}
+	if r.Channel != nil {
+		// Webhook URLs carry a secret: the preview shows them redacted.
+		ch := r.Channel.Redacted()
+		out.Channel = &ch
+	}
 	var p *PreviewPD
 	var n model.Notify
 	a.deps.Store.Read(func(d *store.Data) {
