@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ExternalLink, Link2, Link2Off, Plus, Search, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Button, formatDate, Input } from '../../ui'
@@ -184,7 +184,7 @@ export function CIBindings({ service, editable, onChanged }: Props) {
         )}
       </AnimatePresence>
       {report && <BulkResults rows={ciRows(report)} columns={[t('bulk.col.item'), t('bulk.col.service')]} summary={report.summary} />}
-      <ErrorBanner error={act.error} strings={strings} />
+      <ErrorFlash error={act.error} strings={strings} />
     </section>
   )
 }
@@ -223,7 +223,8 @@ export function DependencyBindings({ service, editable, onChanged }: Props) {
       {editable && options.length > 0 && (
         <OptionSelect value="" options={options} placeholder={t('svc.field.dependencies.add')} onChange={add} disabled={act.busy} />
       )}
-      <ErrorBanner error={act.error ?? all.error} strings={strings} />
+      <ErrorBanner error={all.error} strings={strings} />
+      <ErrorFlash error={act.error} strings={strings} />
     </section>
   )
 }
@@ -269,7 +270,7 @@ export function NetBoxLink({ service, editable, onChanged }: Props) {
       ) : (
         <p className="muted">{t('svc.netbox.none')}</p>
       )}
-      <ErrorBanner error={act.error} strings={strings} />
+      <ErrorFlash error={act.error} strings={strings} />
     </section>
   )
 }

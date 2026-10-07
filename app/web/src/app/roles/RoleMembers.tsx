@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { UserPlus } from 'lucide-react'
 import { api } from '../../api'
 import { useT } from '../../i18n'
-import { Banner, Button, Select } from '../../ui'
+import { Button, Select } from '../../ui'
 import { roleLabel } from '../types'
 import { MemberList } from '../org/MemberList'
 import { MemberPicker } from '../org/MemberPicker'
@@ -10,6 +10,7 @@ import { pickable, type UserRef } from '../org/types'
 import { useAction } from '../profile/useAction'
 import { ADMIN, type Role } from './permissions'
 import { strings } from './strings'
+import { Flash } from '../../notify'
 
 export function RoleMembers({
   role,
@@ -49,10 +50,10 @@ export function RoleMembers({
           </Button>
         )}
       </div>
-      {!picking && action.error && (
-        <Banner kind="error" title={action.error.message}>
+      {action.error && (
+        <Flash kind="error" title={action.error.message}>
           {action.error.detail}
-        </Banner>
+        </Flash>
       )}
       <MemberList
         members={role.members}

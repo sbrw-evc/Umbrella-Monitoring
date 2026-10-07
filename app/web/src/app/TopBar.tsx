@@ -4,6 +4,8 @@ import { Link } from '../router'
 import { Brand } from '../ui'
 import { navStrings } from './navStrings'
 import { HOME_PATH } from './pages'
+import { IncidentLights } from './IncidentLights'
+import { NotificationCenter } from './NotificationCenter'
 import { UserMenu } from './UserMenu'
 
 export function TopBar({ onSignOut, sidebar }: { onSignOut: () => void; sidebar?: { collapsed: boolean; toggle: () => void } }) {
@@ -21,7 +23,11 @@ export function TopBar({ onSignOut, sidebar }: { onSignOut: () => void; sidebar?
           <Brand />
         </Link>
       </div>
-      <UserMenu onSignOut={onSignOut} />
+      <div className="topbar-end">
+        <IncidentLights />
+        <NotificationCenter />
+        <UserMenu onSignOut={onSignOut} />
+      </div>
     </header>
   )
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Search } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
 import { Banner, Button, Field, Input, Modal, Select, Textarea } from '../../ui'
@@ -99,7 +99,7 @@ export function CreateCIForm({ a, onCancel, onDone }: { a: Incident; onCancel: (
       <Field label={t('inc.ci.descr')} optional={t('inc.optional')}>
         {(id) => <Textarea id={id} rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />}
       </Field>
-      <ErrorBanner error={save.error} strings={errStrings} />
+      <ErrorFlash error={save.error} strings={errStrings} />
       <div className="row inc-form-actions">
         <Button onClick={onCancel}>{t('inc.cancel')}</Button>
         <Button variant="primary" busy={save.busy} disabled={!name.trim()} onClick={submit}>
@@ -169,7 +169,7 @@ export function BindCIForm({ a, onCancel, onDone }: { a: Incident; onCancel: () 
         </ul>
       )}
       {chosen && <Banner kind="info" title={t('inc.ci.bind.effect', { name: a.ci_name, ci: chosen.name })} />}
-      <ErrorBanner error={save.error} strings={errStrings} />
+      <ErrorFlash error={save.error} strings={errStrings} />
       <div className="row inc-form-actions">
         <Button onClick={onCancel}>{t('inc.cancel')}</Button>
         <Button variant="primary" busy={save.busy} disabled={!chosen} onClick={() => void submit()}>

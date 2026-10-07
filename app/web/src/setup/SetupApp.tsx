@@ -30,6 +30,7 @@ import {
 import { PostgresCheckResult, PostgresForm } from '../connections/PostgresForm'
 import { postgresStrings } from '../connections/postgresStrings'
 import { originOf } from '../fx'
+import { Toaster } from '../notify'
 
 const TOKEN_HEADER = 'X-Setup-Token'
 
@@ -788,6 +789,7 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
           </main>
         </div>
       </div>
+      <Toaster />
     </MotionConfig>
   )
 }

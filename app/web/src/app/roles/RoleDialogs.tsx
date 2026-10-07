@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api'
 import { useT } from '../../i18n'
-import { Banner, Button, Field, Input, Modal, Select, Textarea } from '../../ui'
+import { Button, Field, Input, Modal, Select, Textarea } from '../../ui'
 import { roleLabel } from '../types'
 import { useAction } from '../profile/useAction'
 import type { Role } from './permissions'
 import { strings } from './strings'
+import { Flash } from '../../notify'
 
 export function CreateRoleDialog({
   open,
@@ -73,9 +74,9 @@ export function CreateRoleDialog({
         )}
       </Field>
       {action.error && (
-        <Banner kind="error" title={action.error.message}>
+        <Flash kind="error" title={action.error.message}>
           {action.error.detail}
-        </Banner>
+        </Flash>
       )}
     </Modal>
   )
@@ -146,9 +147,9 @@ export function DeleteRoleDialog({
         </>
       )}
       {action.error && (
-        <Banner kind="error" title={action.error.message}>
+        <Flash kind="error" title={action.error.message}>
           {action.error.detail}
-        </Banner>
+        </Flash>
       )}
     </Modal>
   )

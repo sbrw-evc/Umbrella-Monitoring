@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Copy, KeyRound } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction } from '../../connections/useRequest'
 import { useT } from '../../i18n'
 import { Banner, Button } from '../../ui'
@@ -72,7 +72,7 @@ export function CreateToken({ name, onCreated }: { name: string; onCreated: (c: 
           </div>
         </Banner>
       )}
-      <ErrorBanner error={action.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
     </div>
   )
 }

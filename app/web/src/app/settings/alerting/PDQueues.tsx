@@ -7,6 +7,7 @@ import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { strings } from './strings'
 import type { PagerDutyView, QueueLinks, QueuesView } from './types'
+import { Flash } from '../../../notify'
 
 const tone: Record<string, string> = { active: 'ok', warning: 'warn', critical: 'error', maintenance: 'warn', disabled: 'off' }
 
@@ -49,8 +50,8 @@ export function PDQueues({ view, queues, onQueues, dirty, reloadKey }: Props) {
       <p className="hint">{t('pd.queues.hint')}</p>
       <Switch checked={queues} onChange={onQueues} label={t('pd.queues.auto')} hint={t('pd.queues.auto.hint')} />
       {data?.error && <Banner kind="error" title={t('pd.queues.error')}>{data.error}</Banner>}
-      {action.error && <Banner kind="error" title={action.error.message}>{action.error.detail}</Banner>}
-      {action.notice && <Banner kind="ok" title={action.notice} />}
+      {action.error && <Flash kind="error" title={action.error.message}>{action.error.detail}</Flash>}
+      {action.notice && <Flash kind="ok" title={action.notice} />}
       {gone.length > 0 && <Banner kind="warn" title={t('pd.queues.gone', { list: gone.join(', ') })} />}
       {data && data.queues.length > 0 ? (
         <div className="cn-table-wrap">

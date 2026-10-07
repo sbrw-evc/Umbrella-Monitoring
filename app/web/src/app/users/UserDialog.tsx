@@ -15,6 +15,7 @@ import { SourcePill, StatusPill } from './Badges'
 import { adminOf, scopeModeOf, type ManagedUser, type Refs } from './model'
 import { freshPassword, NewPasswordFields, usePasswordValid, type NewPassword } from './NewPasswordFields'
 import { strings } from './strings'
+import { Flash, notify } from '../../notify'
 
 type Mode = 'edit' | 'password' | 'delete'
 
@@ -36,7 +37,6 @@ export function UserDialog({
 }) {
   const t = useT(strings)
   const [mode, setMode] = useState<Mode>('edit')
-  const [flash, setFlash] = useState('')
   const [last, setLast] = useState(user)
   const shown = user ?? last
   const name = shown?.display_name ?? ''
@@ -52,13 +52,9 @@ export function UserDialog({
 
   useEffect(() => {
     setMode('edit')
-    setFlash('')
   }, [user?.id])
 
-  const switchTo = (m: Mode) => {
-    setFlash('')
-    setMode(m)
-  }
+  const switchTo = (m: Mode) => setMode(m)
 
   return (
     <Modal open={!!user} title={titles[mode]} onClose={onClose}>
@@ -72,7 +68,7 @@ export function UserDialog({
             exit={{ opacity: 0, x: mode === 'edit' ? 12 : -12 }}
             transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
           >
-            {mode === 'edit' && <EditView user={shown} refs={refs} flash={flash} onChanged={onChanged} onMode={switchTo} />}
+            {mode === 'edit' && <EditView user={shown} refs={refs} onChanged={onChanged} onMode={switchTo} />}
             {mode === 'password' && (
               <PasswordView
                 user={shown}
@@ -80,7 +76,7 @@ export function UserDialog({
                 onDone={(u) => {
                   onChanged(u)
                   setMode('edit')
-                  setFlash(t('usr.password.set'))
+                  notify({ kind: 'ok', title: t('usr.password.set') })
                 }}
               />
             )}
@@ -92,15 +88,14 @@ export function UserDialog({
   )
 }
 
-function Outcome({ action, flash }: { action: Action; flash?: string }) {
-  const notice = action.notice || (action.error || action.busy ? '' : flash)
+function Outcome({ action }: { action: Action }) {
   return (
     <>
-      {notice && <Banner kind="ok" title={notice} />}
+      {action.notice && <Flash kind="ok" title={action.notice} />}
       {action.error && (
-        <Banner kind="error" title={action.error.message}>
+        <Flash kind="error" title={action.error.message}>
           {action.error.detail}
-        </Banner>
+        </Flash>
       )}
     </>
   )
@@ -162,13 +157,11 @@ function UserSummary({ user }: { user: ManagedUser }) {
 function EditView({
   user,
   refs,
-  flash,
   onChanged,
   onMode,
 }: {
   user: ManagedUser
   refs: Refs
-  flash: string
   onChanged: (u: ManagedUser) => void
   onMode: (m: Mode) => void
 }) {
@@ -265,7 +258,7 @@ function EditView({
           </div>
         </section>
       )}
-      <Outcome action={action} flash={flash} />
+      <Outcome action={action} />
       {rights.edit && (
         <Footer>
           <Button variant="primary" onClick={save} busy={action.busy} disabled={!dirty}>

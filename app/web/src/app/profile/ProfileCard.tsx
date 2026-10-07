@@ -1,6 +1,7 @@
 import type { FormEvent, ReactNode } from 'react'
-import { Banner } from '../../ui'
 import type { Action } from './useAction'
+import { Flash } from '../../notify'
+import { Banner } from '../../ui'
 
 export function ProfileCard({
   title,
@@ -9,6 +10,7 @@ export function ProfileCard({
   footer,
   onSubmit,
   wide,
+  inline,
   children,
 }: {
   title: string
@@ -17,6 +19,9 @@ export function ProfileCard({
   footer?: ReactNode
   onSubmit?: () => void
   wide?: boolean
+  // inline: the error stays in the card instead of popping up, for a card whose content could not
+  // be loaded.
+  inline?: boolean
   children: ReactNode
 }) {
   const body = (
@@ -26,12 +31,17 @@ export function ProfileCard({
         {badge}
       </header>
       {children}
-      {action?.notice && <Banner kind="ok" title={action.notice} />}
-      {action?.error && (
-        <Banner kind="error" title={action.error.message}>
-          {action.error.detail}
-        </Banner>
-      )}
+      {action?.notice && <Flash kind="ok" title={action.notice} />}
+      {action?.error &&
+        (inline ? (
+          <Banner kind="error" title={action.error.message}>
+            {action.error.detail}
+          </Banner>
+        ) : (
+          <Flash kind="error" title={action.error.message}>
+            {action.error.detail}
+          </Flash>
+        ))}
       {footer && <div className="card-actions">{footer}</div>}
     </>
   )

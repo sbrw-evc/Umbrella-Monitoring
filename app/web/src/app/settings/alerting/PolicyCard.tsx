@@ -59,7 +59,7 @@ export function PolicyCard() {
   }, [load])
   if (!saved) {
     return (
-      <ProfileCard title={t('ap.title')} action={loader}>
+      <ProfileCard title={t('ap.title')} action={loader} inline>
         {!loader.error && <p className="muted">{t('loading')}</p>}
       </ProfileCard>
     )

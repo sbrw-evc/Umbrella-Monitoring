@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Check, Copy, Download, Send } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { mergeDicts } from '../../connections/connectionStrings'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
@@ -12,6 +12,7 @@ import { strings as connectorStrings } from './strings'
 import { sourcesStrings } from './sourcesStrings'
 import type { Connector, Preset } from './types'
 import './sources.css'
+import { Flash } from '../../notify'
 
 const s = mergeDicts(connectorStrings, sourcesStrings)
 
@@ -234,7 +235,8 @@ export function QuickConnectDialog({
               />
             )}
           </Field>
-          <ErrorBanner error={action.error ?? presets.error} strings={s} />
+          <ErrorBanner error={presets.error} strings={s} />
+          <ErrorFlash error={action.error} strings={s} />
         </>
       )}
     </Modal>
@@ -288,11 +290,11 @@ export function TestEvent({ connectorID }: { connectorID: string }) {
           {t('src.test')}
         </Button>
       </div>
-      <ErrorBanner error={action.error} strings={s} />
-      {res && res.status === 'failed' && <Banner kind="error" title={t('src.test.failed')}>{res.error}</Banner>}
-      {res && res.status !== 'failed' && !res.incident_id && <Banner kind="info" title={t('src.test.queued')} />}
+      <ErrorFlash error={action.error} strings={s} />
+      {res && res.status === 'failed' && <Flash kind="error" title={t('src.test.failed')} trigger={res}>{res.error}</Flash>}
+      {res && res.status !== 'failed' && !res.incident_id && <Flash kind="info" title={t('src.test.queued')} trigger={res} />}
       {res && res.incident_id && (
-        <Banner kind="ok" title={t('src.test.sent', { id: res.incident_id })}>
+        <Flash kind="ok" title={t('src.test.sent', { id: res.incident_id })} link={`/incidents?id=${encodeURIComponent(res.incident_id)}`} trigger={res}>
           {inc && (
             <ul className="src-route">
               <li>{inc.ci_id ? t('src.test.route.ci', { ci: inc.ci_name }) : t('src.test.route.unknown', { ci: inc.ci_name })}</li>
@@ -301,8 +303,7 @@ export function TestEvent({ connectorID }: { connectorID: string }) {
               <li>{people.length > 0 ? t('src.test.route.people', { people: people.map((p) => p.name).join(', ') }) : t('src.test.route.nobody')}</li>
             </ul>
           )}
-          <Link to={`/incidents?id=${encodeURIComponent(res.incident_id)}`}>{t('src.test.open')}</Link>
-        </Banner>
+        </Flash>
       )}
     </div>
   )
