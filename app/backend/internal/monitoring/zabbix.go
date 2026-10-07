@@ -16,7 +16,9 @@ import (
 )
 
 // zabbix talks to the JSON-RPC API. An API token or a session goes in the Authorization header
-// from Zabbix 6.4 on and in the auth field before (Zabbix 7.2 no longer accepts the field).
+// from Zabbix 6.4 on and in the auth field before (Zabbix 7.2 and 8.0 no longer accept the field).
+// The calls below are the same on 6.0 to 8.0; the version only picks the login field, the auth
+// place and the host group selector.
 type zabbix struct {
 	endpoint string
 	web      string

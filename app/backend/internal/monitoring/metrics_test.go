@@ -43,36 +43,40 @@ func TestHostSelectorWithoutEndpoints(t *testing.T) {
 }
 
 func TestZabbixMetrics(t *testing.T) {
-	z := monitoringtest.StartZabbix(t, "7.0.5")
-	z.AddHost(10101, "srv-db-01", "DB server", false, nil)
-	z.AddItem(10101, 1, "CPU utilization", "system.cpu.util", "%", 0, [2]float64{1_700_000_000, 10}, [2]float64{1_700_000_060, 95}, [2]float64{1_600_000_000, 1})
-	z.AddItem(10101, 2, "CPU iowait", "system.cpu.util[,iowait]", "%", 0, [2]float64{1_700_000_000, 3})
-	z.AddItem(10101, 3, "/: Space utilization", "vfs.fs.dependent.size[/,pused]", "%", 0, [2]float64{1_700_000_000, 70})
-	z.AddItem(10101, 4, "/var: Space utilization", "vfs.fs.dependent.size[/var,pused]", "%", 0, [2]float64{1_700_000_030, 80})
-	z.AddItem(10102, 5, "CPU utilization", "system.cpu.util", "%", 0, [2]float64{1_700_000_000, 50})
-	src := model.MonitoringSource{Kind: model.MonitoringZabbix, URL: z.URL}
-	auth := &monitoring.Auth{Type: "bearer", Secrets: map[string]string{"token": "zbx-token"}}
-	host := model.MonitoringHost{Key: "10101", Host: "srv-db-01"}
-	from := time.Unix(1_699_999_000, 0)
-	panels := model.DefaultHostPanels()
-	cpu, err := monitoring.Metrics(context.Background(), src, auth, host, monitoring.MetricQuery{Panel: panels[0], From: from, To: from.Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cpu) != 1 || cpu[0].Name != "CPU utilization" || len(cpu[0].Points) != 2 || cpu[0].Points[1][1] != 95 {
-		t.Fatalf("cpu %+v", cpu)
-	}
-	disk, err := monitoring.Metrics(context.Background(), src, auth, host, monitoring.MetricQuery{Panel: panels[3], From: from, To: from.Add(time.Hour)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(disk) != 2 || disk[0].Name != "/: Space utilization" || disk[1].Name != "/var: Space utilization" {
-		t.Fatalf("disk %+v", disk)
-	}
-	// Three days are read from trends.
-	long, err := monitoring.Metrics(context.Background(), src, auth, host, monitoring.MetricQuery{Panel: panels[0], From: from, To: from.Add(72 * time.Hour)})
-	if err != nil || len(long) != 1 || len(long[0].Points) != 2 || z.Calls[len(z.Calls)-1] != "trend.get" {
-		t.Fatalf("trends %+v %v %v", long, err, z.Calls)
+	for _, version := range []string{"8.0.0", "7.0.5"} {
+		t.Run(version, func(t *testing.T) {
+			z := monitoringtest.StartZabbix(t, version)
+			z.AddHost(10101, "srv-db-01", "DB server", false, nil)
+			z.AddItem(10101, 1, "CPU utilization", "system.cpu.util", "%", 0, [2]float64{1_700_000_000, 10}, [2]float64{1_700_000_060, 95}, [2]float64{1_600_000_000, 1})
+			z.AddItem(10101, 2, "CPU iowait", "system.cpu.util[,iowait]", "%", 0, [2]float64{1_700_000_000, 3})
+			z.AddItem(10101, 3, "/: Space utilization", "vfs.fs.dependent.size[/,pused]", "%", 0, [2]float64{1_700_000_000, 70})
+			z.AddItem(10101, 4, "/var: Space utilization", "vfs.fs.dependent.size[/var,pused]", "%", 0, [2]float64{1_700_000_030, 80})
+			z.AddItem(10102, 5, "CPU utilization", "system.cpu.util", "%", 0, [2]float64{1_700_000_000, 50})
+			src := model.MonitoringSource{Kind: model.MonitoringZabbix, URL: z.URL}
+			auth := &monitoring.Auth{Type: "bearer", Secrets: map[string]string{"token": "zbx-token"}}
+			host := model.MonitoringHost{Key: "10101", Host: "srv-db-01"}
+			from := time.Unix(1_699_999_000, 0)
+			panels := model.DefaultHostPanels()
+			cpu, err := monitoring.Metrics(context.Background(), src, auth, host, monitoring.MetricQuery{Panel: panels[0], From: from, To: from.Add(time.Hour)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(cpu) != 1 || cpu[0].Name != "CPU utilization" || len(cpu[0].Points) != 2 || cpu[0].Points[1][1] != 95 {
+				t.Fatalf("cpu %+v", cpu)
+			}
+			disk, err := monitoring.Metrics(context.Background(), src, auth, host, monitoring.MetricQuery{Panel: panels[3], From: from, To: from.Add(time.Hour)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(disk) != 2 || disk[0].Name != "/: Space utilization" || disk[1].Name != "/var: Space utilization" {
+				t.Fatalf("disk %+v", disk)
+			}
+			// Three days are read from trends.
+			long, err := monitoring.Metrics(context.Background(), src, auth, host, monitoring.MetricQuery{Panel: panels[0], From: from, To: from.Add(72 * time.Hour)})
+			if err != nil || len(long) != 1 || len(long[0].Points) != 2 || z.Calls[len(z.Calls)-1] != "trend.get" {
+				t.Fatalf("trends %+v %v %v", long, err, z.Calls)
+			}
+		})
 	}
 }
 
