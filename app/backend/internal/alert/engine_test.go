@@ -22,6 +22,14 @@ type recorder struct {
 	cmds     []alert.Command
 	fallback []alert.Alert
 	followUp []alert.Alert
+	// channels: the notifier has a channel turned on (alert.Notifier.On).
+	channels bool
+}
+
+func (r *recorder) On() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.channels
 }
 
 func (r *recorder) FollowUp(a alert.Alert) {

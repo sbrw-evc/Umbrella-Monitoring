@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Mail is a message the fake SMTP server took.
@@ -146,18 +147,34 @@ func readAll(msg *mail.Message) (string, error) {
 
 // Message is a message the fake Telegram bot was asked to send.
 type Message struct {
+	ID        int
 	ChatID    string
 	Text      string
 	ParseMode string
+	// Keyboard is the reply_markup as sent; ReplyTo the message it answers.
+	Keyboard json.RawMessage
+	ReplyTo  int
 }
 
-// Telegram is a fake Bot API: getMe and sendMessage for the token Token. Chats in Blocked
-// answer 403 like a user who blocked the bot.
+// Edit is a change of the buttons of a message; Answer an answer to a button press.
+type Edit struct {
+	ChatID   string
+	ID       int
+	Keyboard json.RawMessage
+}
+
+// Telegram is a fake Bot API: getMe, sendMessage, editMessageReplyMarkup, answerCallbackQuery
+// and getUpdates (updates queued with Push) for the token Token. Chats in Blocked answer 403
+// like a user who blocked the bot.
 type Telegram struct {
 	srv      *httptest.Server
 	Token    string
 	mu       sync.Mutex
 	messages []Message
+	edits    []Edit
+	answers  []string
+	updates  []map[string]any
+	nextID   int
 	Blocked  map[string]bool
 }
 
@@ -174,6 +191,34 @@ func (f *Telegram) Messages() []Message {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]Message(nil), f.messages...)
+}
+
+func (f *Telegram) Edits() []Edit {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]Edit(nil), f.edits...)
+}
+
+func (f *Telegram) Answers() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.answers...)
+}
+
+// Push queues an update (its update_id is set) for getUpdates.
+func (f *Telegram) Push(u map[string]any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextID++
+	u["update_id"] = 1000 + f.nextID
+	f.updates = append(f.updates, u)
+}
+
+// Pending is how many queued updates were not confirmed by a later offset.
+func (f *Telegram) Pending() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.updates)
 }
 
 func (f *Telegram) handle(w http.ResponseWriter, r *http.Request) {
@@ -194,6 +239,10 @@ func (f *Telegram) handle(w http.ResponseWriter, r *http.Request) {
 			ChatID    json.RawMessage `json:"chat_id"`
 			Text      string          `json:"text"`
 			ParseMode string          `json:"parse_mode"`
+			Markup    json.RawMessage `json:"reply_markup"`
+			Reply     struct {
+				MessageID int `json:"message_id"`
+			} `json:"reply_parameters"`
 		}
 		json.NewDecoder(r.Body).Decode(&in)
 		chat := strings.Trim(string(in.ChatID), `"`)
@@ -202,9 +251,55 @@ func (f *Telegram) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.mu.Lock()
-		f.messages = append(f.messages, Message{ChatID: chat, Text: in.Text, ParseMode: in.ParseMode})
+		id := len(f.messages) + 1
+		f.messages = append(f.messages, Message{ID: id, ChatID: chat, Text: in.Text, ParseMode: in.ParseMode, Keyboard: in.Markup, ReplyTo: in.Reply.MessageID})
 		f.mu.Unlock()
-		reply(http.StatusOK, map[string]any{"ok": true, "result": map[string]any{"message_id": 1}})
+		reply(http.StatusOK, map[string]any{"ok": true, "result": map[string]any{"message_id": id}})
+	case "editMessageReplyMarkup":
+		var in struct {
+			ChatID    json.RawMessage `json:"chat_id"`
+			MessageID int             `json:"message_id"`
+			Markup    json.RawMessage `json:"reply_markup"`
+		}
+		json.NewDecoder(r.Body).Decode(&in)
+		f.mu.Lock()
+		f.edits = append(f.edits, Edit{ChatID: strings.Trim(string(in.ChatID), `"`), ID: in.MessageID, Keyboard: in.Markup})
+		f.mu.Unlock()
+		reply(http.StatusOK, map[string]any{"ok": true, "result": true})
+	case "answerCallbackQuery":
+		var in struct {
+			Text string `json:"text"`
+		}
+		json.NewDecoder(r.Body).Decode(&in)
+		f.mu.Lock()
+		f.answers = append(f.answers, in.Text)
+		f.mu.Unlock()
+		reply(http.StatusOK, map[string]any{"ok": true, "result": true})
+	case "deleteWebhook", "setMyCommands":
+		reply(http.StatusOK, map[string]any{"ok": true, "result": true})
+	case "getUpdates":
+		var in struct {
+			Offset int `json:"offset"`
+		}
+		json.NewDecoder(r.Body).Decode(&in)
+		var out []map[string]any
+		for i := 0; i < 20; i++ {
+			f.mu.Lock()
+			keep := f.updates[:0]
+			for _, u := range f.updates {
+				if u["update_id"].(int) >= in.Offset {
+					keep = append(keep, u)
+				}
+			}
+			f.updates = keep
+			out = append([]map[string]any(nil), f.updates...)
+			f.mu.Unlock()
+			if len(out) > 0 {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		reply(http.StatusOK, map[string]any{"ok": true, "result": out})
 	default:
 		reply(http.StatusNotFound, map[string]any{"ok": false, "error_code": 404, "description": "Not Found"})
 	}

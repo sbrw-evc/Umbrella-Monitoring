@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/credentials"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
@@ -155,17 +155,6 @@ func (s *ResponseService) SavePolicy(actor string, in ResponsePolicyInput) (Resp
 	return s.View(), nil
 }
 
-func (s *ResponseService) put(ctx context.Context, key, value string) (string, error) {
-	if s.secrets == nil {
-		return "", credentials.ErrUnavailable
-	}
-	ref, err := s.secrets.PutRef(ctx, responseSecretPath, key, value)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", credentials.ErrUnavailable, err)
-	}
-	return ref, nil
-}
-
 func modeOf(v string) (string, error) {
 	if v == "" {
 		return model.ModeOff, nil
@@ -237,7 +226,7 @@ func (s *ResponseService) SaveJira(ctx context.Context, actor string, in JiraInp
 	}
 	ref := cur.TokenRef
 	if t := strings.TrimSpace(in.Token); t != "" {
-		if ref, err = s.put(ctx, "jira_token", t); err != nil {
+		if ref, err = putSecret(ctx, s.secrets, responseSecretPath, "jira_token", t); err != nil {
 			return ResponseView{}, err
 		}
 	}
@@ -246,20 +235,13 @@ func (s *ResponseService) SaveJira(ctx context.Context, actor string, in JiraInp
 	}
 	def := model.DefaultJira()
 	j := model.JiraSettings{Mode: mode, BaseURL: base, Email: email, TokenRef: ref, Project: project,
-		TaskType: nonEmpty(strings.TrimSpace(in.TaskType), def.TaskType), PostmortemType: nonEmpty(strings.TrimSpace(in.PostmortemType), def.PostmortemType),
+		TaskType: cmp.Or(strings.TrimSpace(in.TaskType), def.TaskType), PostmortemType: cmp.Or(strings.TrimSpace(in.PostmortemType), def.PostmortemType),
 		Priorities: prios, Labels: labels, LinkType: strings.TrimSpace(in.LinkType), DoneTransition: strings.TrimSpace(in.DoneTransition)}
 	s.st.Write(func(d *store.Data) {
 		d.Settings.Response.Jira = j
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "settings.response.jira", Detail: fmt.Sprintf("mode=%s site=%s project=%s", mode, base, project)})
 	})
 	return s.View(), nil
-}
-
-func nonEmpty(v, def string) string {
-	if v == "" {
-		return def
-	}
-	return v
 }
 
 type GraphInput struct {
@@ -296,12 +278,12 @@ func (s *ResponseService) SaveGraph(ctx context.Context, actor string, in GraphI
 	}
 	secretRef, refreshRef := cur.ClientSecretRef, cur.RefreshTokenRef
 	if v := strings.TrimSpace(in.ClientSecret); v != "" {
-		if secretRef, err = s.put(ctx, "graph_client_secret", v); err != nil {
+		if secretRef, err = putSecret(ctx, s.secrets, responseSecretPath, "graph_client_secret", v); err != nil {
 			return ResponseView{}, err
 		}
 	}
 	if v := strings.TrimSpace(in.RefreshToken); v != "" {
-		if refreshRef, err = s.put(ctx, "graph_refresh_token", v); err != nil {
+		if refreshRef, err = putSecret(ctx, s.secrets, responseSecretPath, "graph_refresh_token", v); err != nil {
 			return ResponseView{}, err
 		}
 	}
@@ -348,14 +330,14 @@ func (s *ResponseService) SaveZoom(ctx context.Context, actor string, in ZoomAPI
 	}
 	ref := cur.ClientSecretRef
 	if v := strings.TrimSpace(in.ClientSecret); v != "" {
-		if ref, err = s.put(ctx, "zoom_client_secret", v); err != nil {
+		if ref, err = putSecret(ctx, s.secrets, responseSecretPath, "zoom_client_secret", v); err != nil {
 			return ResponseView{}, err
 		}
 	}
 	if mode == model.ModeLive && (account == "" || client == "" || ref == "") {
 		return ResponseView{}, invalid("zoom_incomplete", nil)
 	}
-	z := model.ZoomAPISettings{Mode: mode, AccountID: account, ClientID: client, ClientSecretRef: ref, User: nonEmpty(user, "me"), OAuthURL: oauth, APIURL: api}
+	z := model.ZoomAPISettings{Mode: mode, AccountID: account, ClientID: client, ClientSecretRef: ref, User: cmp.Or(user, "me"), OAuthURL: oauth, APIURL: api}
 	s.st.Write(func(d *store.Data) {
 		d.Settings.Response.ZoomAPI = z
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "settings.response.zoom", Detail: fmt.Sprintf("mode=%s account=%s", mode, account)})
@@ -427,7 +409,7 @@ func (s *ResponseService) Simulate(in SimulateInput) (SimulateView, error) {
 					if u.ID == t.LeadID {
 						role = "lead"
 					}
-					a.Route.People = append(a.Route.People, alert.Person{UserID: u.ID, Name: nonEmpty(u.Name, u.Username), Email: u.Email, Telegram: u.Telegram, Role: role})
+					a.Route.People = append(a.Route.People, alert.Person{UserID: u.ID, Name: cmp.Or(u.Name, u.Username), Email: u.Email, Telegram: u.Telegram, Role: role})
 				}
 			}
 			if ch := alert.TeamChannel(t); !ch.Empty() {

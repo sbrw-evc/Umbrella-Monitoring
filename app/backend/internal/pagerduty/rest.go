@@ -43,6 +43,11 @@ func (g *Gateway) rest(ctx context.Context, token, method, path string, q url.Va
 }
 
 func (g *Gateway) restWith(ctx context.Context, set model.PagerDuty, token, method, path string, q url.Values, body, out any) error {
+	return g.restAs(ctx, set, token, "", method, path, q, body, out)
+}
+
+// restAs is restWith on behalf of a PagerDuty user (the From header writes need).
+func (g *Gateway) restAs(ctx context.Context, set model.PagerDuty, token, from, method, path string, q url.Values, body, out any) error {
 	if token == "" {
 		if set.APITokenRef == "" {
 			return ErrNoAPIToken
@@ -69,6 +74,9 @@ func (g *Gateway) restWith(ctx context.Context, set model.PagerDuty, token, meth
 	req.Header.Set("Accept", "application/vnd.pagerduty+json;version=2")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if from != "" {
+		req.Header.Set("From", from)
 	}
 	resp, err := g.client.Do(req)
 	if err != nil {

@@ -27,6 +27,9 @@ const (
 	// PDOff: PagerDuty is turned off, so the alert is not sent there. It is not a failure: backup
 	// notification is the main channel then.
 	PDOff = "off"
+	// PDStandby: PagerDuty is the backup of the notification channels (model.PDModeBackup):
+	// the incident goes there only if nobody takes it in time.
+	PDStandby = "standby"
 
 	// Backup notification states of an alert.
 	FallbackPending = "pending"
@@ -200,6 +203,9 @@ type PD struct {
 	// OldIncidents are the PagerDuty incidents of earlier openings of the alert: their late
 	// webhooks must not change the reopened alert.
 	OldIncidents []string `json:"old_incidents,omitempty"`
+	// Escalated: the incident left standby (or was sent by hand or by an escalation step), so a
+	// new trigger goes to PagerDuty whatever the mode says. Cleared when the alert reopens.
+	Escalated bool `json:"escalated,omitempty"`
 }
 
 type Alert struct {
@@ -239,6 +245,8 @@ type Alert struct {
 	// survives a restart or a full queue. FallbackTry is when it was last handed over.
 	FallbackState string     `json:"fallback_state,omitempty"`
 	FallbackTry   *time.Time `json:"fallback_try,omitempty"`
+	// SendingAt is when a notifier claimed the sending (FallbackSending).
+	SendingAt *time.Time `json:"sending_at,omitempty"`
 	// Notified are the addresses backup notification reached; they get a follow-up when the
 	// alert is acknowledged or resolved.
 	Notified []Notified `json:"notified,omitempty"`
@@ -264,6 +272,8 @@ type Notified struct {
 	// Recipient is who the address belongs to (see notify.UserRecipient), for the time zone of
 	// the follow-up.
 	Recipient string `json:"recipient,omitempty"`
+	// Ref names the message sent where the channel can answer it (the Telegram message ID).
+	Ref string `json:"ref,omitempty"`
 }
 
 func (a *Alert) Clone() Alert {
@@ -310,12 +320,17 @@ const (
 	PDTrigger     Action = "trigger"
 	PDAcknowledge Action = "acknowledge"
 	PDResolve     Action = "resolve"
+	// PDNote adds Command.Text as a note of the PagerDuty incident (REST API); it does not
+	// change the delivery state of the alert.
+	PDNote Action = "note"
 )
 
 // Command asks the PagerDuty gateway to deliver an action for a copy of the alert.
 type Command struct {
 	Action Action
 	Alert  Alert
+	// Text and Actor: the note of PDNote and who wrote it.
+	Text, Actor string
 }
 
 // Sender delivers commands to PagerDuty and reports the outcome back with Engine.PDResult.
@@ -331,6 +346,8 @@ type Sender interface {
 type Notifier interface {
 	Fallback(a Alert)
 	FollowUp(a Alert)
+	// On tells whether any channel is turned on, so the channels can go before PagerDuty.
+	On() bool
 }
 
 // DeliveryError is a failed PagerDuty delivery with a code the interface translates: no_key,

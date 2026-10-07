@@ -60,3 +60,42 @@ func (l *Links) Verify(token string, now time.Time) (alertID, recipient string, 
 	}
 	return parts[0], parts[1], nil
 }
+
+// compactMAC is the length of the signature of a compact token (16 characters of base64url).
+const compactMAC = 12
+
+// SignCompact makes a short token for subject and purpose until exp, made of the characters
+// Telegram allows in a start parameter (A-Z a-z 0-9 _ -, at most 64): the bot link that ties a
+// Telegram account to a user.
+func (l *Links) SignCompact(purpose, subject string, exp time.Time) string {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(subject + "\n" + strconv.FormatInt(exp.Unix(), 36)))
+	return payload + l.compactMAC(purpose, payload)
+}
+
+func (l *Links) compactMAC(purpose, payload string) string {
+	m := hmac.New(sha256.New, l.key)
+	m.Write([]byte(purpose + "\n" + payload))
+	return base64.RawURLEncoding.EncodeToString(m.Sum(nil)[:compactMAC])
+}
+
+// VerifyCompact checks a token of SignCompact and returns its subject.
+func (l *Links) VerifyCompact(purpose, token string, now time.Time) (string, error) {
+	n := base64.RawURLEncoding.EncodedLen(compactMAC)
+	if l == nil || len(l.key) == 0 || len(token) <= n {
+		return "", ErrBadLink
+	}
+	payload, sig := token[:len(token)-n], token[len(token)-n:]
+	if !hmac.Equal([]byte(sig), []byte(l.compactMAC(purpose, payload))) {
+		return "", ErrBadLink
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(payload)
+	if err != nil {
+		return "", ErrBadLink
+	}
+	subject, expS, ok := strings.Cut(string(raw), "\n")
+	exp, err := strconv.ParseInt(expS, 36, 64)
+	if !ok || err != nil || now.Unix() > exp {
+		return "", ErrBadLink
+	}
+	return subject, nil
+}

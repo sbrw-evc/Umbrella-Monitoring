@@ -45,6 +45,10 @@ type Results interface {
 	PDResult(ctx context.Context, alertID string, action alert.Action, route, routeID string, err error)
 	PDInbound(ctx context.Context, u alert.PDUpdate) error
 	PDKeys(ctx context.Context, incidentKey, incidentID string) ([]string, error)
+	// PDActive lists active alerts PagerDuty has an incident for, for the read-back.
+	PDActive(ctx context.Context, limit int) ([]alert.Alert, error)
+	// Note records a line on the timeline of an alert.
+	Note(ctx context.Context, id, kind, code string, args map[string]string) error
 }
 
 type Status struct {
@@ -59,6 +63,12 @@ type Status struct {
 	LastError     string     `json:"last_error,omitempty"`
 	LastErrorAt   *time.Time `json:"last_error_at,omitempty"`
 	LastWebhookAt *time.Time `json:"last_webhook_at,omitempty"`
+	// Read-back of incident states through the REST API.
+	LastSyncAt    *time.Time `json:"last_sync_at,omitempty"`
+	LastSyncError string     `json:"last_sync_error,omitempty"`
+	SyncApplied   int        `json:"sync_applied"`
+	// OnCallAt is when the on-call people were last read.
+	OnCallAt *time.Time `json:"on_call_at,omitempty"`
 }
 
 type Gateway struct {
@@ -73,7 +83,18 @@ type Gateway struct {
 	mu          sync.Mutex
 	stat        Status
 	breakerTill time.Time
+	// onCall is who is on call for each route (DefaultRoute for the default integration).
+	onCall map[string][]OnCall
+	// priorities are the IDs of the PagerDuty priorities by lower-case name.
+	priorities map[string]string
+	// syncMu serializes the read-back runs (the loop and «Synchronize now»).
+	syncMu sync.Mutex
+	// users finds Umbrella users by e-mail, for the on-call people.
+	users UserFinder
 }
+
+// UserFinder finds the Umbrella user of a PagerDuty user by e-mail; nil without one.
+type UserFinder func(email string) *model.User
 
 func New(st *store.Store, sec Resolver) *Gateway {
 	return &Gateway{st: st, sec: sec, client: &http.Client{Timeout: DefaultHTTPTimeout}, queue: make(chan alert.Command, DefaultQueueSize),
@@ -128,6 +149,10 @@ type permanent struct{ error }
 func (p permanent) Unwrap() error { return p.error }
 
 func (g *Gateway) deliver(ctx context.Context, cmd alert.Command) {
+	if cmd.Action == alert.PDNote {
+		g.note(ctx, cmd)
+		return
+	}
 	set, all := g.settings()
 	if !set.Enabled {
 		g.report(cmd, "", "", ErrDisabled)
@@ -160,6 +185,9 @@ func (g *Gateway) deliver(ctx context.Context, cmd alert.Command) {
 			break
 		}
 		g.fail(err)
+		if attempt == g.Retries-1 {
+			break
+		}
 		select {
 		case <-ctx.Done():
 			return

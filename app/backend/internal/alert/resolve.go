@@ -1,6 +1,7 @@
 package alert
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"slices"
@@ -90,7 +91,7 @@ func (e *Engine) exclude(c *change, excluded bool, now time.Time) bool {
 		return false
 	}
 	if !a.Excluded {
-		c.log(now, KindRoute, "host_excluded", map[string]string{"ci": firstNonEmpty(a.EventCI, a.CIName)}, "")
+		c.log(now, KindRoute, "host_excluded", map[string]string{"ci": cmp.Or(a.EventCI, a.CIName)}, "")
 	}
 	a.Excluded, a.Suppressed, a.MaintenanceID = true, true, ""
 	if !pdHas(a) {
@@ -98,15 +99,6 @@ func (e *Engine) exclude(c *change, excluded bool, now time.Time) bool {
 	}
 	c.dirty = true
 	return true
-}
-
-func firstNonEmpty(v ...string) string {
-	for _, s := range v {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 // Reresolve finds the configuration item of every active alert again, after the hand-made
@@ -162,7 +154,7 @@ func (e *Engine) Reresolve(ctx context.Context) error {
 
 // resolutionChanged: the item or the exclusion of the alert is not what its events resolve to now.
 func (w *world) resolutionChanged(a *Alert) bool {
-	ci, excluded := w.resolveCI(firstNonEmpty(a.EventCI, a.CIName), a.Labels)
+	ci, excluded := w.resolveCI(cmp.Or(a.EventCI, a.CIName), a.Labels)
 	id := ""
 	if ci != nil {
 		id = ci.ID
@@ -172,10 +164,7 @@ func (w *world) resolutionChanged(a *Alert) bool {
 
 func (e *Engine) reresolve(ctx context.Context, tx pgx.Tx, c *change, w *world, now time.Time) (*Command, error) {
 	a := c.a
-	name := a.EventCI
-	if name == "" {
-		name = a.CIName
-	}
+	name := cmp.Or(a.EventCI, a.CIName)
 	ci, excluded := w.resolveCI(name, a.Labels)
 	newID := ""
 	if ci != nil {
@@ -187,9 +176,14 @@ func (e *Engine) reresolve(ctx context.Context, tx pgx.Tx, c *change, w *world, 
 		if err != nil {
 			return nil, err
 		}
-		if other != nil && other.ID != a.ID && ci != nil {
-			// The item already has an alert of this signal: this one joins it.
-			return e.mergeInto(ctx, tx, c, other, ci.Name, "", now)
+		if other != nil && other.ID != a.ID {
+			// The item (or, when the item is gone, the name) already has an alert of this
+			// signal: this one joins it, otherwise it would stay bound to a stale item.
+			target := name
+			if ci != nil {
+				target = ci.Name
+			}
+			return e.mergeInto(ctx, tx, c, other, target, "", now)
 		}
 		if other == nil || other.ID == a.ID {
 			a.DedupKey = key
@@ -212,8 +206,7 @@ func (e *Engine) reresolve(ctx context.Context, tx pgx.Tx, c *change, w *world, 
 	}
 	// The host is no longer excluded: the alert goes on as a new one would.
 	if m := w.maintenanceFor(a, now); m != nil {
-		a.Suppressed, a.MaintenanceID = true, m.ID
-		c.log(now, KindMaintenance, "suppressed", map[string]string{"window": m.Title, "id": m.ID}, "")
+		suppress(c, m, now)
 		return nil, nil
 	}
 	if a.PD.State == PDSkipped {

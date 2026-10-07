@@ -1,6 +1,7 @@
 package alert
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -29,6 +30,9 @@ const (
 	// Retention: resolved alerts older than this are deleted with their timelines.
 	Retention = 90 * 24 * time.Hour
 	tickBatch = 1000
+	// SendLease: a backup notification being sent is not handed to another notifier for this
+	// long (a slow SMTP server, several targets), so it is not sent twice.
+	SendLease = 15 * time.Minute
 	// maxOldIncidents bounds PD.OldIncidents of an alert that reopens again and again.
 	maxOldIncidents = 20
 )
@@ -76,6 +80,7 @@ type nopNotifier struct{}
 
 func (nopNotifier) Fallback(Alert) {}
 func (nopNotifier) FollowUp(Alert) {}
+func (nopNotifier) On() bool       { return false }
 
 func New(db *pgxpool.Pool, st *store.Store) *Engine {
 	return &Engine{db: db, st: st, pd: nopSender{}, notify: nopNotifier{}, now: func() time.Time { return time.Now().UTC() },
@@ -90,8 +95,14 @@ func (e *Engine) DB() *pgxpool.Pool             { return e.db }
 // policy is what the alerting settings say about delivery and the lifecycle right now.
 type policy struct {
 	pdOn bool
-	// delay and minSeverity: when backup notification goes out and for which alerts.
+	// pd is the PagerDuty settings: the mode for each severity and the backup delay.
+	pd model.PagerDuty
+	// notifyOn: a notification channel of Umbrella is turned on.
+	notifyOn bool
+	// delay and minSeverity: when backup notification goes out and for which alerts; ownDelay
+	// is the delay the settings name (nil: automatic).
 	delay       time.Duration
+	ownDelay    *time.Duration
 	minSeverity string
 	// window, fallbackRetry, retention and testLifetime: see model.AlertPolicy.
 	window        time.Duration
@@ -115,6 +126,9 @@ func (e *Engine) policy() policy {
 	e.st.Read(func(d *store.Data) {
 		al := d.Settings.Alerting
 		p.pdOn, p.minSeverity = al.PagerDuty.Enabled, al.Notify.MinSeverity
+		p.pd = al.PagerDuty
+		p.pd.Modes = maps.Clone(al.PagerDuty.Modes)
+		p.pd.Routes = nil
 		if al.Notify.DelaySeconds != nil {
 			v := *al.Notify.DelaySeconds
 			delay = &v
@@ -127,9 +141,12 @@ func (e *Engine) policy() policy {
 	p.fallbackRetry = orDefault(ap.FallbackRetrySeconds, time.Second, e.FallbackRetry, MaxFallback)
 	p.retention = orDefault(ap.RetentionDays, 24*time.Hour, Retention, MaxRetention)
 	p.testLifetime = orDefault(ap.TestLifetimeSeconds, time.Second, TestLifetime, MaxTestLifetime)
+	p.notifyOn = e.notify.On()
 	switch {
 	case delay != nil:
 		p.delay = time.Duration(max(0, *delay)) * time.Second
+		d := p.delay
+		p.ownDelay = &d
 	case p.pdOn:
 		p.delay = orDefault(ap.FallbackDelaySeconds, time.Second, e.FallbackAfter, MaxFallback)
 	}
@@ -137,6 +154,45 @@ func (e *Engine) policy() policy {
 		p.minSeverity = DefaultFallbackSeverity
 	}
 	return p
+}
+
+// pdMode is the role of PagerDuty for alerts of a severity; off while PagerDuty is off.
+func (p policy) pdMode(severity string) string {
+	if !p.pdOn {
+		return model.PDModeOff
+	}
+	return p.pd.ModeFor(severity)
+}
+
+// channelsFirst: the channels of Umbrella take the alert at once, without waiting for
+// PagerDuty: the mode of its severity says so (backup, parallel), or keeps it from PagerDuty
+// (off, while PagerDuty itself is on), or PagerDuty skipped it (below its threshold).
+func (p policy) channelsFirst(a *Alert) bool {
+	if !p.pdOn {
+		return false
+	}
+	switch p.pdMode(a.Severity) {
+	case model.PDModeBackup, model.PDModeParallel, model.PDModeOff:
+		return true
+	}
+	return a.PD.State == PDSkipped
+}
+
+// standby: the alert waits for the channels of Umbrella before PagerDuty. That needs backup
+// mode and channels that will take the alert; otherwise it goes to PagerDuty at once.
+func (p policy) standby(a *Alert) bool {
+	return p.pdMode(a.Severity) == model.PDModeBackup && p.notifyOn && SeverityRank(a.Severity) >= SeverityRank(p.minSeverity)
+}
+
+// fallbackDelay is how long an open alert waits before the channels of Umbrella.
+func (p policy) fallbackDelay(a *Alert) time.Duration {
+	if !p.channelsFirst(a) {
+		return p.delay
+	}
+	if p.ownDelay != nil {
+		return *p.ownDelay
+	}
+	return 0
 }
 
 func (e *Engine) world() *world {
@@ -370,31 +426,63 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 		return nil, c.save(ctx, tx)
 	}
 	if m := w.maintenanceFor(a, now); m != nil {
-		if !a.Suppressed {
-			c.log(now, KindMaintenance, "suppressed", map[string]string{"window": m.Title, "id": m.ID}, "")
-		}
-		a.Suppressed, a.MaintenanceID = true, m.ID
-		if !pdHas(a) && a.PD.State != PDOff {
-			a.PD.State = PDSkipped
-		}
+		suppress(c, m, now)
 		return nil, c.save(ctx, tx)
 	}
 	wasSuppressed := a.Suppressed
-	a.Suppressed, a.MaintenanceID = false, ""
+	unsuppress(c, now)
 	if opened || reopened || raised || wasSuppressed || a.PD.State == PDSkipped || a.PD.State == PDFailed || a.PD.State == PDOff {
-		wasTest := a.PD.State == PDSkipped && a.PD.ErrorCode == "test"
+		before := a.PD
 		if a.PD.State == PDSkipped || a.PD.State == PDOff {
 			a.PD.State = PDPending
 		}
 		add(e.pdCmd(a, PDTrigger, now))
-		if a.PD.ErrorCode == "test" && !wasTest {
-			c.log(now, KindPagerDuty, "pd_skipped", map[string]string{"code": "test"}, "")
-		}
+		e.logHold(c, before, p, now)
 	}
 	if e.fallbackDue(c, p, now) {
 		out.note(true, false, a)
 	}
 	return cmds, c.save(ctx, tx)
+}
+
+// logHold records on the timeline that a trigger was held back: the alert is a test, the
+// mode of its severity keeps it from PagerDuty, or PagerDuty waits in standby.
+func (e *Engine) logHold(c *change, before PD, p policy, now time.Time) {
+	a := c.a
+	switch {
+	case a.PD.State == PDStandby && before.State != PDStandby:
+		after := p.pd.BackupAfter()
+		c.log(now, KindPagerDuty, "pd_standby", map[string]string{"after": after.String(), "after_s": fmt.Sprint(int(after.Seconds()))}, "")
+	case a.PD.State == PDSkipped && a.PD.ErrorCode != "" && (before.State != PDSkipped || before.ErrorCode != a.PD.ErrorCode):
+		c.log(now, KindPagerDuty, "pd_skipped", map[string]string{"code": a.PD.ErrorCode}, "")
+	}
+}
+
+// suppress puts an alert under a maintenance window: no trigger goes to PagerDuty (one waiting
+// or failed waits for the end of the window) and no backup notification.
+func suppress(c *change, m *model.Maintenance, now time.Time) {
+	a := c.a
+	if !a.Suppressed || a.MaintenanceID != m.ID {
+		c.log(now, KindMaintenance, "suppressed", map[string]string{"window": m.Title, "id": m.ID}, "")
+	}
+	a.Suppressed, a.MaintenanceID = true, m.ID
+	if a.PD.State == PDPending || a.PD.State == PDFailed {
+		a.PD.State, a.PD.Retry = PDSkipped, ""
+	}
+	c.dirty = true
+}
+
+// unsuppress ends the maintenance window of an alert: a trigger held back is sent again.
+func unsuppress(c *change, now time.Time) {
+	a := c.a
+	if !a.Suppressed || a.Excluded {
+		return
+	}
+	a.Suppressed, a.MaintenanceID = false, ""
+	if a.PD.State == PDSkipped && a.PD.ErrorCode == "" {
+		a.PD.State, a.PD.AttemptAt = PDPending, nil
+	}
+	c.log(now, KindMaintenance, "maintenance_over", nil, "")
 }
 
 // reopen opens a resolved alert again: acknowledgement, backup notification and the PagerDuty
@@ -403,7 +491,7 @@ func (a *Alert) reopen(now time.Time) {
 	a.Status, a.ResolvedAt, a.ResolvedBy, a.AckedBy, a.AckedAt = StatusOpen, nil, "", "", nil
 	a.OpenedAt, a.Fallback, a.FallbackAt, a.FallbackState, a.FallbackTry = now, false, nil, "", nil
 	a.Notified, a.FollowUp, a.FollowUpTry = nil, "", nil
-	a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry, a.PD.AttemptAt = PDPending, "", "", "", nil
+	a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry, a.PD.AttemptAt, a.PD.Escalated = PDPending, "", "", "", nil, false
 	// PagerDuty opens a new incident for the trigger after a resolve: it goes by the current
 	// route, and the old incident is remembered so that its late webhooks are ignored.
 	a.PD.Route, a.PD.RouteID = "", ""
@@ -505,6 +593,7 @@ func (e *Engine) acknowledge(c *change, now time.Time, actor string) (followUp b
 	a := c.a
 	t := now
 	a.Status, a.AckedBy, a.AckedAt = StatusAcknowledged, actor, &t
+	c.log(now, KindStatus, "acknowledged", nil, actor)
 	return e.taken(c, now)
 }
 
@@ -532,23 +621,27 @@ func (e *Engine) taken(c *change, now time.Time) bool {
 // reports whether the notification is to be handed to the notifier now.
 func (e *Engine) fallbackDue(c *change, p policy, now time.Time) bool {
 	a := c.a
+	first := p.channelsFirst(a)
+	delay := p.fallbackDelay(a)
 	switch {
 	case a.Fallback, a.Status != StatusOpen, a.Suppressed, a.IsTest(),
 		SeverityRank(a.Severity) < SeverityRank(p.minSeverity),
-		pdHas(a) || (p.pdOn && a.PD.State == PDOff),
-		now.Sub(a.OpenedAt) < p.delay:
+		!first && (pdHas(a) || (p.pdOn && a.PD.State == PDOff)),
+		now.Sub(a.OpenedAt) < delay:
 		return false
 	}
 	reason := "pd_not_taken"
-	switch a.PD.State {
-	case PDOff:
+	switch m := p.pdMode(a.Severity); {
+	case a.PD.State == PDOff:
 		reason = "pd_off"
-	case PDSkipped:
+	case a.PD.State == PDSkipped:
 		reason = "pd_skipped"
+	case m == model.PDModeBackup, m == model.PDModeParallel:
+		reason = "pd_" + m
 	}
 	t := now
 	a.Fallback, a.FallbackAt, a.FallbackState, a.FallbackTry = true, &t, FallbackPending, &t
-	c.log(now, KindFallback, "fallback", map[string]string{"after": p.delay.String(), "after_s": fmt.Sprint(int(p.delay.Seconds())),
+	c.log(now, KindFallback, "fallback", map[string]string{"after": delay.String(), "after_s": fmt.Sprint(int(delay.Seconds())),
 		"reason": reason, "people": fmt.Sprint(len(a.Route.Recipients()))}, "")
 	return true
 }
@@ -566,6 +659,10 @@ func (e *Engine) pdCmd(a *Alert, action Action, now time.Time) *Command {
 	if a.Suppressed && (action == PDTrigger || !pdHas(a)) {
 		return nil
 	}
+	if action != PDTrigger && a.PD.State == PDStandby {
+		// PagerDuty never got the alert: there is nothing to acknowledge or resolve there.
+		return nil
+	}
 	if a.IsTest() {
 		// A test event never reaches PagerDuty.
 		if !pdHas(a) {
@@ -573,13 +670,24 @@ func (e *Engine) pdCmd(a *Alert, action Action, now time.Time) *Command {
 		}
 		return nil
 	}
-	if !e.policy().pdOn {
+	p := e.policy()
+	if !p.pdOn {
 		if !pdHas(a) {
 			a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry = PDOff, "", "", ""
 		} else if action != PDTrigger {
 			a.PD.Retry = string(action)
 		}
 		return nil
+	}
+	if action == PDTrigger && !pdHas(a) && !a.PD.Escalated {
+		switch {
+		case p.pdMode(a.Severity) == model.PDModeOff:
+			a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry = PDSkipped, "", "mode_off", ""
+			return nil
+		case p.standby(a):
+			a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry = PDStandby, "", "", ""
+			return nil
+		}
 	}
 	t := now
 	a.PD.AttemptAt = &t
@@ -621,7 +729,6 @@ func (e *Engine) ActIn(ctx context.Context, id, action, actor, text string, scop
 				return ErrNotOpen
 			}
 			followUp = e.acknowledge(c, now, actor)
-			c.log(now, KindStatus, "acknowledged", nil, actor)
 			cmd = e.pdCmd(a, PDAcknowledge, now)
 		case "resolve":
 			if !Active(a.Status) {
@@ -637,6 +744,9 @@ func (e *Engine) ActIn(ctx context.Context, id, action, actor, text string, scop
 			// The limit counts characters, not bytes, so a cut never splits one.
 			text = textx.Runes(text, 4000)
 			c.log(now, KindComment, "comment", map[string]string{"text": text}, actor)
+			if pdHas(a) {
+				cmd = &Command{Action: PDNote, Alert: a.Clone(), Text: text, Actor: actor}
+			}
 		default:
 			return ErrBadAction
 		}
@@ -755,6 +865,24 @@ func (e *Engine) PDKeys(ctx context.Context, incidentKey, incidentID string) ([]
 	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
+// PDActive lists active alerts PagerDuty has an incident for, oldest first.
+func (e *Engine) PDActive(ctx context.Context, limit int) ([]Alert, error) {
+	rows, err := e.db.Query(ctx, "SELECT doc FROM alerts WHERE "+sqlActive+" AND pd_state IN ($1, $2) ORDER BY seq LIMIT $3", PDAccepted, PDAcked, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Alert
+	for rows.Next() {
+		a, err := scanAlert(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *a)
+	}
+	return out, rows.Err()
+}
+
 // PDInbound applies a status change made in PagerDuty: acknowledging or resolving the
 // incident there acknowledges or resolves the alert here.
 func (e *Engine) PDInbound(ctx context.Context, u PDUpdate) error {
@@ -814,8 +942,13 @@ func (e *Engine) PDInbound(ctx context.Context, u PDUpdate) error {
 				followUp = &cp
 			}
 		case "incident.unacknowledged", "incident.reopened":
-			if a.Status == StatusAcknowledged {
+			switch a.Status {
+			case StatusAcknowledged:
 				a.Status, a.AckedBy, a.AckedAt = StatusOpen, "", nil
+			case StatusResolved:
+				// The alert stays resolved here: the incident is resolved in PagerDuty again
+				// (Tick retries the resolve), so it does not stay open there for ever.
+				a.PD.Retry = string(PDResolve)
 			}
 			a.PD.State = PDAccepted
 			add("pd_incident_reopened")
@@ -864,17 +997,9 @@ func (e *Engine) Tick(ctx context.Context) error {
 				m := w.maintenanceFor(a, now)
 				switch {
 				case m != nil && !a.Suppressed:
-					a.Suppressed, a.MaintenanceID = true, m.ID
-					if a.PD.State == PDPending || a.PD.State == PDFailed {
-						a.PD.State, a.PD.Retry = PDSkipped, ""
-					}
-					c.log(now, KindMaintenance, "suppressed", map[string]string{"window": m.Title, "id": m.ID}, "")
+					suppress(c, m, now)
 				case m == nil && a.Suppressed && !a.Excluded:
-					a.Suppressed, a.MaintenanceID = false, ""
-					if a.PD.State == PDSkipped {
-						a.PD.State, a.PD.AttemptAt = PDPending, nil
-					}
-					c.log(now, KindMaintenance, "maintenance_over", nil, "")
+					unsuppress(c, now)
 				}
 				switch {
 				case e.fallbackDue(c, p, now):
@@ -891,6 +1016,14 @@ func (e *Engine) Tick(ctx context.Context) error {
 					c.dirty = true
 					out.note(true, false, a)
 				}
+				if a.PD.State == PDStandby && !p.pdOn {
+					a.PD.State = PDOff
+				}
+				if reason := e.escalationDue(a, p, now); reason != "" {
+					if cmd := e.escalate(c, reason, "", now); cmd != nil {
+						out.cmds = append(out.cmds, *cmd)
+					}
+				}
 			}
 			if a.FollowUp != "" && (a.FollowUpTry == nil || now.Sub(*a.FollowUpTry) >= p.fallbackRetry) {
 				t := now
@@ -898,10 +1031,12 @@ func (e *Engine) Tick(ctx context.Context) error {
 				c.dirty = true
 				out.note(false, true, a)
 			}
+			before := a.PD
 			if cmd := e.retry(a, now); cmd != nil {
 				c.dirty = true
 				out.cmds = append(out.cmds, *cmd)
 			}
+			e.logHold(c, before, p, now)
 			if a.PD.State+"|"+a.PD.Retry != pdBefore {
 				c.dirty = true
 			}
@@ -926,6 +1061,67 @@ func (e *Engine) Tick(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// escalationDue tells why an alert in standby goes to PagerDuty now: nobody took it within
+// the backup delay, backup notification reached nobody, or the settings no longer keep it in
+// standby. Empty: it stays.
+func (e *Engine) escalationDue(a *Alert, p policy, now time.Time) string {
+	switch {
+	case a.PD.State != PDStandby, a.Status != StatusOpen, a.Suppressed:
+		return ""
+	case !p.standby(a):
+		return "settings"
+	case a.FallbackState == FallbackSent && len(a.Notified) == 0:
+		return "nobody_reached"
+	case now.Sub(a.OpenedAt) >= p.pd.BackupAfter():
+		return "not_taken"
+	}
+	return ""
+}
+
+// escalate sends an alert PagerDuty does not have yet there, whatever the mode says.
+func (e *Engine) escalate(c *change, reason, actor string, now time.Time) *Command {
+	a := c.a
+	a.PD.Escalated = true
+	a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry = PDPending, "", "", ""
+	c.log(now, KindPagerDuty, "pd_escalated", map[string]string{"reason": reason}, actor)
+	return e.pdCmd(a, PDTrigger, now)
+}
+
+// ErrPDHas: PagerDuty already has the incident.
+var ErrPDHas = errors.New("PagerDuty already has the incident")
+
+// EscalatePD sends an active alert to PagerDuty now, whatever the mode of its severity says
+// (a person asked for it, or an escalation step of incident response). scope as in ActIn.
+func (e *Engine) EscalatePD(ctx context.Context, id, reason, actor string, scope []string) (Alert, error) {
+	now := e.now()
+	var out Alert
+	var cmd *Command
+	err := pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
+		cmd = nil
+		a, err := lockByID(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if a == nil || !a.InScope(scope) {
+			return ErrNotFound
+		}
+		switch {
+		case !Active(a.Status):
+			return ErrNotActive
+		case pdHas(a) || (a.PD.Escalated && a.PD.State == PDPending):
+			return ErrPDHas
+		}
+		c := &change{a: a}
+		cmd = e.escalate(c, reason, actor, now)
+		out = a.Clone()
+		return c.save(ctx, tx)
+	})
+	if err == nil && cmd != nil {
+		e.pd.Send(*cmd)
+	}
+	return out, err
 }
 
 // pdHas: PagerDuty took a trigger of the alert, so it has an incident to acknowledge or resolve.
@@ -1053,7 +1249,7 @@ func (e *Engine) BindUnknown(ctx context.Context, actor string) ([]string, error
 			if a == nil || !Active(a.Status) || a.CIID != "" {
 				continue
 			}
-			name := firstNonEmpty(a.EventCI, a.CIName)
+			name := cmp.Or(a.EventCI, a.CIName)
 			ci, excluded := w.resolveCI(name, a.Labels)
 			if ci == nil || excluded {
 				continue
@@ -1145,6 +1341,10 @@ func (e *Engine) FallbackDue(ctx context.Context, id string) (bool, error) {
 		if (a.FallbackState != FallbackPending && a.FallbackState != FallbackSending) || a.Suppressed {
 			return nil
 		}
+		if a.FallbackState == FallbackSending && a.SendingAt != nil && now.Sub(*a.SendingAt) < SendLease {
+			// Another notifier (this or another instance) is sending it right now.
+			return nil
+		}
 		c := &change{a: a, dirty: true}
 		if a.Status != StatusOpen {
 			// A sending one left by a stopped process is cancelled the same way.
@@ -1152,7 +1352,8 @@ func (e *Engine) FallbackDue(ctx context.Context, id string) (bool, error) {
 			e.taken(c, now)
 			return c.save(ctx, tx)
 		}
-		a.FallbackState = FallbackSending
+		t := now
+		a.FallbackState, a.SendingAt = FallbackSending, &t
 		due = true
 		return c.save(ctx, tx)
 	})

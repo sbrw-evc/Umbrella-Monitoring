@@ -1,6 +1,7 @@
 package response
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -40,6 +41,9 @@ const (
 	ActionPostmortem = "postmortem"
 )
 
+// defaultPostmortemDays is the due date of a postmortem when the policy names none.
+const defaultPostmortemDays = 10
+
 var (
 	ErrOff       = errors.New("incident response is turned off")
 	ErrBadAction = errors.New("unknown action")
@@ -59,6 +63,18 @@ type Messenger interface {
 	SendDirect(ctx context.Context, m notify.Direct, to []notify.Target) []notify.Outcome
 }
 
+// PagerDuty is what response needs of PagerDuty: sending an incident there at an escalation
+// step and keeping the priority of its PagerDuty incident in step with the response priority.
+type PagerDuty interface {
+	// Escalate sends an active incident to PagerDuty; ErrPDHas when it is already there.
+	Escalate(ctx context.Context, id string) error
+	// SetPriority sets the priority of the PagerDuty incident; ErrPDSyncOff when that is off.
+	SetPriority(ctx context.Context, a alert.Alert, priority string) error
+}
+
+// ErrPDSyncOff: the priority is not synchronized with PagerDuty.
+var ErrPDSyncOff = errors.New("the PagerDuty priority is not synchronized")
+
 // Secrets resolves and stores secrets (OpenBao).
 type Secrets interface {
 	Resolve(ref string) (string, error)
@@ -70,6 +86,7 @@ type Service struct {
 	st     *store.Store
 	inc    Incidents
 	msg    Messenger
+	pd     PagerDuty
 	sec    Secrets
 	client *http.Client
 	now    func() time.Time
@@ -90,7 +107,10 @@ func New(db *pgxpool.Pool, st *store.Store, inc Incidents, msg Messenger, sec Se
 }
 
 func (s *Service) SetClock(now func() time.Time) { s.now = now }
-func (s *Service) SetHTTPClient(c *http.Client)  { s.client = c }
+
+// SetPagerDuty connects response to PagerDuty.
+func (s *Service) SetPagerDuty(pd PagerDuty)    { s.pd = pd }
+func (s *Service) SetHTTPClient(c *http.Client) { s.client = c }
 
 // snap is the settings and the catalog one pass works with.
 type snap struct {
@@ -375,8 +395,10 @@ func (s *Service) handle(ctx context.Context, sn snap, a alert.Alert, st *State,
 	}
 	active := alert.Active(a.Status)
 	if a.IsTest() || a.Excluded {
+		// Nothing is done for them; the state is written once, not on every pass.
+		was := st.Finished
 		st.Finished = true
-		return st, true
+		return st, fresh || !was
 	}
 	if active && !fresh && !st.OpenedAt.Equal(a.OpenedAt) {
 		st.OpenedAt, st.Steps, st.Finished, st.Transitioned, st.Failures = a.OpenedAt, []StepRun{}, false, false, nil
@@ -402,6 +424,9 @@ func (s *Service) handle(ctx context.Context, sn snap, a alert.Alert, st *State,
 		p.note("response_priority_raised", map[string]string{"from": from, "to": as.Priority, "impact": as.Impact})
 		p.roomPost(p.v.t("upd.raised", "from", p.v.t(from), "to", p.v.t(as.Priority)))
 		p.comment("comment.raised", "from", p.v.t(from), "to", p.v.t(as.Priority))
+	}
+	if active && s.pd != nil && st.PDPriority != st.Priority && !p.dry && (a.PD.State == alert.PDAccepted || a.PD.State == alert.PDAcked) {
+		p.attempt("pd_priority", p.syncPDPriority)
 	}
 	pol, ok := sn.set.PolicyFor(st.Priority)
 	if !ok && len(force) == 0 {
@@ -465,9 +490,9 @@ func (s *Service) handle(ctx context.Context, sn snap, a alert.Alert, st *State,
 	if st.Status != a.Status {
 		switch a.Status {
 		case alert.StatusAcknowledged:
-			p.roomPost(p.v.t("upd.ack", "who", nonEmpty(a.AckedBy, "PagerDuty")))
+			p.roomPost(p.v.t("upd.ack", "who", cmp.Or(a.AckedBy, "PagerDuty")))
 			if pol.Jira.Comment {
-				p.comment("comment.ack", "who", nonEmpty(a.AckedBy, "PagerDuty"))
+				p.comment("comment.ack", "who", cmp.Or(a.AckedBy, "PagerDuty"))
 			}
 		case alert.StatusResolved:
 			who := ""
@@ -485,7 +510,7 @@ func (s *Service) handle(ctx context.Context, sn snap, a alert.Alert, st *State,
 	if !active {
 		if st.Postmortem == nil && (pol.Jira.Postmortem || p.forced(ActionPostmortem)) {
 			if p.attempt(ActionPostmortem, func() error { return p.createPostmortem(pol) }) {
-				p.roomPost(p.v.t("upd.postmortem", "key", st.Postmortem.Key, "url", nonEmpty(st.Postmortem.URL, st.Postmortem.Key)))
+				p.roomPost(p.v.t("upd.postmortem", "key", st.Postmortem.Key, "url", cmp.Or(st.Postmortem.URL, st.Postmortem.Key)))
 			}
 		}
 		if t := sn.set.Jira.DoneTransition; t != "" && st.Task != nil && !st.Transitioned && !st.Task.DryRun {
@@ -691,11 +716,19 @@ func (p *pass) runStep(pol model.ResponsePolicy, i int) {
 			}
 		}
 	}
+	if slices.Contains(step.Methods, model.CommPagerDuty) {
+		switch err := p.escalatePD(); {
+		case err != nil:
+			run.Failed = append(run.Failed, "pagerduty ("+err.Error()+")")
+		default:
+			run.Reached = append(run.Reached, "pagerduty")
+		}
+	}
 	if slices.Contains(step.Methods, model.CommWarRoom) && p.st.Room != nil {
 		if pol.WarRoom.AddEscalated && level > 1 {
 			p.addMembers(au.people)
 		}
-		p.roomPost(p.v.t("upd.step", "level", fmt.Sprint(level), "people", nonEmpty(strings.Join(au.names(), ", "), p.v.t("none"))))
+		p.roomPost(p.v.t("upd.step", "level", fmt.Sprint(level), "people", cmp.Or(strings.Join(au.names(), ", "), p.v.t("none"))))
 		run.Reached = append(run.Reached, "war_room")
 	}
 	if b := p.st.Bridge; b != nil && (slices.Contains(step.Methods, model.CommCallTeams) || slices.Contains(step.Methods, model.CommCallZoom)) {
@@ -717,6 +750,35 @@ func (p *pass) runStep(pol model.ResponsePolicy, i int) {
 	for _, f := range run.Failed {
 		p.note("response_step_failed", map[string]string{"level": fmt.Sprint(level), "to": f})
 	}
+}
+
+// escalatePD sends the incident to PagerDuty at an escalation step; one PagerDuty already has
+// counts as reached.
+func (p *pass) escalatePD() error {
+	switch {
+	case p.s.pd == nil:
+		return errIntegrationOff
+	case p.dry:
+		return nil
+	}
+	if err := p.s.pd.Escalate(p.ctx, p.a.ID); err != nil && !errors.Is(err, alert.ErrPDHas) {
+		return err
+	}
+	return nil
+}
+
+// syncPDPriority sets the response priority on the PagerDuty incident.
+func (p *pass) syncPDPriority() error {
+	err := p.s.pd.SetPriority(p.ctx, p.a, p.st.Priority)
+	switch {
+	case errors.Is(err, ErrPDSyncOff):
+		return errIntegrationOff
+	case err != nil:
+		return err
+	}
+	p.st.PDPriority = p.st.Priority
+	p.note("response_pd_priority", map[string]string{"priority": p.st.Priority})
+	return nil
 }
 
 // graphClient is the Microsoft Graph client of the settings; dry when the integration or the
@@ -777,7 +839,7 @@ func (s *Service) TestGraph(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return nonEmpty(me.UPN, me.Name), nil
+	return cmp.Or(me.UPN, me.Name), nil
 }
 
 func (s *Service) zoomClient(set model.Response) (*Zoom, bool, error) {
@@ -1032,14 +1094,14 @@ func (p *pass) createPostmortem(pol model.ResponsePolicy) error {
 	}
 	set := p.sn.set.Jira
 	issue := Issue{Key: "DRY-PM-" + p.a.ID}
+	days := pol.Jira.PostmortemDays
+	if days <= 0 {
+		days = defaultPostmortemDays
+	}
 	if !dry {
 		_, entries, err := p.s.inc.Get(p.ctx, p.a.ID)
 		if err != nil {
 			return err
-		}
-		days := pol.Jira.PostmortemDays
-		if days <= 0 {
-			days = 10
 		}
 		issue, err = j.Create(p.ctx, NewIssue{Type: set.PostmortemType, Summary: p.v.t("pm.summary", "id", p.a.ID, "title", p.a.Title),
 			Priority: set.Priorities[p.st.Priority], Labels: append(slices.Clone(set.Labels), "postmortem"),
@@ -1054,7 +1116,7 @@ func (p *pass) createPostmortem(pol model.ResponsePolicy) error {
 		}
 	}
 	p.st.Postmortem = &JiraIssue{Key: issue.Key, URL: issue.URL, At: p.now, DryRun: dry}
-	args := map[string]string{"key": issue.Key, "days": fmt.Sprint(pol.Jira.PostmortemDays)}
+	args := map[string]string{"key": issue.Key, "days": fmt.Sprint(days)}
 	if issue.URL != "" {
 		args["url"] = issue.URL
 	}

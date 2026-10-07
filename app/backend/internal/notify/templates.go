@@ -164,6 +164,8 @@ type Message struct {
 	Opened string
 	// PDState: pending, failed, skipped, off…; PDErrorCode is translated with t "err.<code>".
 	PDState, PDErrorCode, PDError string
+	// PDMode is the role of PagerDuty for the severity (model.PDMode*); empty while it is off.
+	PDMode string
 	// Links (empty when the public address is not set, Ack also when links are off).
 	Ack, Open, Grafana string
 	// Follow-up: Event is acknowledged or resolved.
