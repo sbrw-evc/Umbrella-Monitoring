@@ -2236,6 +2236,9 @@ code {
 }
 
 .nc-list ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -2258,15 +2261,14 @@ code {
 .nc-item {
   display: flex;
   gap: 10px;
-  padding: 10px;
-  border-radius: 8px;
-}
-
-.nc-item + .nc-item {
-  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
 }
 
 .nc-fresh {
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   background: var(--accent-soft);
 }
 
@@ -2362,4 +2364,34 @@ code {
 
 .link-btn:hover {
   text-decoration: underline;
+}
+
+/* The confirmation dialog of the application, above pages, their dialogs and notifications. */
+.confirm-backdrop {
+  z-index: 80;
+}
+
+.confirm {
+  width: min(460px, 100%);
+}
+
+.confirm-text {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.confirm-text p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.confirm-danger > svg {
+  flex: none;
+  color: var(--error);
+}
+
+.btn-primary.btn-danger {
+  background: var(--error);
+  color: var(--surface);
 }

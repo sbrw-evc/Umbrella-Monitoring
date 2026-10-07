@@ -25,6 +25,7 @@ import '../rules/rules.css'
 import './monitoring.css'
 import '../bulk/bulk.css'
 import { Flash, notify } from '../../notify'
+import { ask } from '../../confirm'
 
 type Kind = 'zabbix' | 'prometheus' | 'grafana'
 type Poll = { at: string; ok: boolean; error?: string; firing: number; sent: number }
@@ -857,9 +858,9 @@ function SourceEditor({
     test.run(async () => {
       setReport(await api<Report>('POST', '/api/monitoring/test', d))
     })
-  const remove = () =>
+  const remove = async () =>
     editing &&
-    window.confirm(t('mon.delete.confirm', { name: editing.name })) &&
+    (await ask({ text: t('mon.delete.confirm', { name: editing.name }), danger: true })) &&
     save.run(async () => {
       await api('DELETE', `/api/monitoring/sources/${editing.id}`)
       onSaved()

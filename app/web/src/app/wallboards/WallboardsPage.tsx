@@ -18,6 +18,7 @@ import '../maintenance/maintenance.css'
 import './wallboards.css'
 import { WallboardEditor } from './WallboardEditor'
 import { notify } from '../../notify'
+import { ask } from '../../confirm'
 
 type T = (key: string, vars?: Record<string, string | number>) => string
 
@@ -41,8 +42,8 @@ export function WallboardsPage() {
     const ok = await copyText(url)
     notify(ok ? { kind: 'ok', title: t('wb.copied') } : { kind: 'warn', title: t('wb.copy.failed', { url }) })
   }
-  const remove = (w: Wallboard) =>
-    window.confirm(t('wb.delete.confirm', { title: w.title })) &&
+  const remove = async (w: Wallboard) =>
+    (await ask({ text: t('wb.delete.confirm', { title: w.title }), danger: true })) &&
     void act.run(async () => {
       await api('DELETE', `/api/wallboards/${encodeURIComponent(w.id)}`)
       reload()

@@ -13,6 +13,7 @@ import { RULE_METHODS, SEVERITIES, severityText, type RuleMethod } from '../inci
 import '../connectors/connectors.css'
 import './rules.css'
 import { notify } from '../../notify'
+import { ask } from '../../confirm'
 
 type Method = RuleMethod
 type Rule = {
@@ -179,8 +180,8 @@ function SourcesTable({ v, editor, onOpen, onChanged }: { v: View; editor: boole
   const { can } = useSession()
   const merge = useAction()
   const canMerge = editor && can('monitoring:edit')
-  const doMerge = (s: Source) =>
-    window.confirm(t(s.system_id ? 'ms.merge.confirm' : 'ms.merge.confirm.new', { name: s.name, n: s.rules })) &&
+  const doMerge = async (s: Source) =>
+    (await ask({ text: t(s.system_id ? 'ms.merge.confirm' : 'ms.merge.confirm.new', { name: s.name, n: s.rules }) })) &&
     void merge.run(async () => {
       await api('POST', `/api/metric-sources/${s.id}/merge`)
       onChanged()
@@ -308,9 +309,9 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
       onSaved()
     })
   const runPreview = () => check.run(async () => setPreview(await api<Preview>('POST', '/api/rules/preview', ruleBody(d))))
-  const remove = () =>
+  const remove = async () =>
     editing &&
-    window.confirm(t('rl.delete.confirm', { name: editing.name })) &&
+    (await ask({ text: t('rl.delete.confirm', { name: editing.name }), danger: true })) &&
     save.run(async () => {
       await api('DELETE', `/api/rules/${editing.id}`)
       onSaved()
@@ -485,9 +486,9 @@ function SourceEditor({ value, onClose, onSaved }: { value: Source | 'new' | nul
       const r = await api<{ series: number }>('POST', '/api/metric-sources/test', d)
       notify({ kind: 'ok', title: t('ms.test.ok', { n: r.series }) })
     })
-  const remove = () =>
+  const remove = async () =>
     editing &&
-    window.confirm(t('ms.delete.confirm', { name: editing.name })) &&
+    (await ask({ text: t('ms.delete.confirm', { name: editing.name }), danger: true })) &&
     save.run(async () => {
       await api('DELETE', `/api/metric-sources/${editing.id}`)
       onSaved()

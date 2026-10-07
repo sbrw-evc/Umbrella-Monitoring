@@ -7,6 +7,7 @@ import { useRouter } from '../router'
 import { Button, formatDate } from '../ui'
 import { useSession } from './session'
 import { topbarStrings } from './topbarStrings'
+import { ask } from '../confirm'
 
 // NotificationCenter is the bell of the top bar: it counts unread notifications and opens the
 // history of them in a panel on the right.
@@ -105,7 +106,7 @@ function Panel({ fresh, onClose }: { fresh: Set<string>; onClose: () => void }) 
           <h2>{t('nc.title')}</h2>
           <div className="row">
             {history.length > 0 && (
-              <Button variant="ghost" onClick={() => window.confirm(t('nc.clear.confirm')) && clearHistory()}>
+              <Button variant="ghost" onClick={async () => (await ask({ text: t('nc.clear.confirm'), danger: true })) && clearHistory()}>
                 <Trash2 size={15} />
                 {t('nc.clear')}
               </Button>
