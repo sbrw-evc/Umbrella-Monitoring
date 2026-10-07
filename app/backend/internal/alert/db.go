@@ -218,9 +218,21 @@ type Filter struct {
 	PD         string
 	Fallback   bool
 	Suppressed bool
-	Since      time.Time
-	Limit      int
+	// HideSuppressed leaves out alerts covered by a maintenance window.
+	HideSuppressed bool
+	// Scope keeps alerts of any of its items, services or teams; an empty scope keeps all.
+	Scope Scope
+	Since time.Time
+	Limit int
 }
+
+type Scope struct {
+	CIIDs      []string
+	ServiceIDs []string
+	TeamIDs    []string
+}
+
+func (s Scope) Empty() bool { return len(s.CIIDs)+len(s.ServiceIDs)+len(s.TeamIDs) == 0 }
 
 type Counts struct {
 	Active       int            `json:"active"`
@@ -281,6 +293,22 @@ func (f Filter) where() (string, []any) {
 	}
 	if f.Suppressed {
 		conds = append(conds, "(doc->>'suppressed')::boolean")
+	}
+	if f.HideSuppressed {
+		conds = append(conds, "NOT COALESCE((doc->>'suppressed')::boolean, false)")
+	}
+	if !f.Scope.Empty() {
+		var any []string
+		if len(f.Scope.CIIDs) > 0 {
+			any = append(any, "ci_id = ANY("+arg(f.Scope.CIIDs)+")")
+		}
+		if len(f.Scope.ServiceIDs) > 0 {
+			any = append(any, "service_ids && "+arg(f.Scope.ServiceIDs)+"::text[]")
+		}
+		if len(f.Scope.TeamIDs) > 0 {
+			any = append(any, "team_id = ANY("+arg(f.Scope.TeamIDs)+")")
+		}
+		conds = append(conds, "("+strings.Join(any, " OR ")+")")
 	}
 	if !f.Since.IsZero() {
 		conds = append(conds, "last_seen >= "+arg(f.Since))

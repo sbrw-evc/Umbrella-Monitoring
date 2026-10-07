@@ -69,6 +69,7 @@ type App struct {
 	cmdb       *CMDBService
 	groups     *GroupsService
 	monitoring *MonitoringService
+	tv         *TVBoardsService
 
 	creds         *CredentialsService
 	connectors    *ConnectorsService
@@ -132,6 +133,7 @@ func New(opt Options, deps Deps) *App {
 		cis:         NewCIService(deps.Store, nb),
 		groups:      NewGroupsService(deps.Store, vault, dir),
 		maintenance: NewMaintenanceService(deps.Store),
+		tv:          NewTVBoardsService(deps.Store),
 	}
 	var firing firingSource
 	if queue != nil {
@@ -186,7 +188,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerRules, a.registerGrafana} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerRules, a.registerGrafana, a.registerTVBoards} {
 		register(mux)
 	}
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })

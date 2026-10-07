@@ -68,6 +68,10 @@ var pages = []Page{
 		view,
 		{"edit", Text{"Plan, change, finish and delete maintenance windows", "Планирование, изменение, завершение и удаление сервисных окон"}},
 	}},
+	{"tv", GroupOverview, Text{"TV boards", "ТВ-панели"}, []Feature{
+		view,
+		{"edit", Text{"Create, change and delete boards, change their allowed networks and trusted proxies", "Создание, изменение и удаление панелей, их разрешённых сетей и доверенных прокси"}},
+	}},
 	{"connectors", GroupAuto, Text{"Connectors", "Коннекторы"}, []Feature{
 		view,
 		{"edit", Text{"Create and change drafts, samples and test runs", "Создание и изменение черновиков, образцов и тестовых прогонов"}},

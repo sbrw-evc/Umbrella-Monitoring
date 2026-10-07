@@ -126,6 +126,7 @@ type Settings struct {
 	NetBox        netbox.Config    `json:"netbox"`
 	Groups        GroupMappings    `json:"groups"`
 	Alerting      Alerting         `json:"alerting"`
+	TV            TVSettings       `json:"tv"`
 	SetupAt       time.Time        `json:"setup_at"`
 	SetupBy       string           `json:"setup_by"`
 }
