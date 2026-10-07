@@ -200,3 +200,8 @@
   color: var(--muted);
   margin-bottom: -2px;
 }
+
+.mon-kind-graylog {
+  background: var(--ok-soft, var(--surface-2));
+  color: var(--ok);
+}

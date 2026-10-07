@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/monitoring"
@@ -159,5 +160,35 @@ func TestGrafanaHosts(t *testing.T) {
 	if len(reading.Alerts) != 5 || reading.Alerts[0].Fingerprint == "" || reading.Alerts[0].Labels["alertname"] == "" ||
 		reading.Alerts[0].Labels["grafana_folder"] != "Infra" {
 		t.Errorf("alerts = %+v", reading.Alerts)
+	}
+}
+
+// Graylog hosts are the sources of its messages; a host with an alert event within the quiet
+// time is down.
+func TestGraylogHosts(t *testing.T) {
+	g := monitoringtest.StartGraylog(t)
+	g.SetSources(map[string]int{"web-01": 120, "WEB-01.example.com": 3, "10.0.0.5": 9})
+	g.AddEvent(monitoringtest.GraylogEvent{ID: "e1", DefinitionID: "d1", Title: "5xx", Key: "web-01", Priority: 3, At: time.Now().Add(-time.Minute),
+		GroupBy: map[string]string{"source": "web-01"}})
+	g.AddEvent(monitoringtest.GraylogEvent{ID: "e0", DefinitionID: "d1", Title: "5xx", Key: "10.0.0.5", Priority: 3, At: time.Now().Add(-time.Hour),
+		GroupBy: map[string]string{"source": "10.0.0.5"}})
+	src := model.MonitoringSource{Kind: model.MonitoringGraylog, URL: g.URL}
+	auth := &monitoring.Auth{Type: "bearer", Secrets: map[string]string{"token": g.Token}}
+	res, err := monitoring.Fetch(context.Background(), src, auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Version != "6.1.2" || len(res.Hosts) != 3 {
+		t.Fatalf("result = %+v", res)
+	}
+	states := map[string]string{}
+	for _, h := range res.Hosts {
+		states[h.Key] = h.State
+	}
+	if states["web-01"] != model.HostDown || states["10.0.0.5"] != model.HostUp || states["web-01.example.com"] != model.HostUp {
+		t.Errorf("states = %v", states)
+	}
+	if _, err := monitoring.Fetch(context.Background(), src, &monitoring.Auth{Type: "bearer", Secrets: map[string]string{"token": "x"}}); err == nil || !strings.Contains(err.Error(), "401") {
+		t.Errorf("wrong token: %v", err)
 	}
 }
