@@ -1,0 +1,43 @@
+.tv-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr));
+  gap: 16px;
+}
+
+.tv-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.tv-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  min-width: 0;
+}
+
+.tv-sub {
+  margin-top: 2px;
+  font-size: 12.5px;
+}
+
+.tv-actions {
+  flex-wrap: wrap;
+}
+
+.modal:has(.tv-editor) {
+  width: min(720px, 100%);
+}
+
+.tv-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.mw-tag-teams {
+  background: var(--ok-soft);
+}
