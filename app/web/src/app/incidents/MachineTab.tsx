@@ -42,6 +42,21 @@ type Event = {
   last_seen: string
   count: number
 }
+// SourceEvent is a problem a monitoring system (Zabbix) raised on the machine.
+type SourceEvent = {
+  id: string
+  at: string
+  title: string
+  severity: string
+  level: string
+  status: string
+  resolved_at?: string
+  acknowledged?: boolean
+  suppressed?: boolean
+  tags?: string[]
+  url?: string
+  source: string
+}
 type Other = { id: string; title: string; severity: string; status: string; opened_at: string; resolved_at?: string }
 type Machine = {
   from: string
@@ -58,6 +73,10 @@ type Machine = {
   events: Event[]
   incidents: Other[]
   events_error?: string
+  source_events: SourceEvent[]
+  source_events_errors: SourceError[]
+  source_events_truncated?: boolean
+  source_event_hosts: number
 }
 type LogLine = { at: string; level?: string; text: string; source: string; labels?: Record<string, string> }
 type Logs = { from: string; to: string; names: string[]; sources: number; lines: LogLine[]; truncated: boolean; errors: SourceError[] }
@@ -133,6 +152,7 @@ export function MachineTab({ d, onOpen }: { d: Detail; onOpen: (id: string) => v
     marks.push({ at: Date.parse(m.opened_at), tone: 'open', label: t('mc.mark.open', { at: at(m.opened_at) }) })
     if (m.resolved_at) marks.push({ at: Date.parse(m.resolved_at), tone: 'resolve', label: t('mc.mark.resolve', { at: at(m.resolved_at) }) })
     for (const e of m.events) marks.push({ at: Date.parse(e.first_seen), tone: 'event', label: `${at(e.first_seen)} · ${e.connector || e.connector_id}: ${e.title}` })
+    for (const e of m.source_events ?? []) marks.push({ at: Date.parse(e.at), tone: 'source', label: `${at(e.at)} · ${e.source}: ${e.title}` })
     for (const o of m.incidents)
       if (o.id !== id) marks.push({ at: Date.parse(o.opened_at), tone: 'incident', label: `${at(o.opened_at)} · ${o.id}: ${o.title}` })
   }
@@ -278,8 +298,16 @@ export function MachineTab({ d, onOpen }: { d: Detail; onOpen: (id: string) => v
                   {t('mc.legend.event')}
                 </li>
               )}
+              {(m.source_events?.length ?? 0) > 0 && (
+                <li>
+                  <span className="mc-line mc-line-source" />
+                  {t('mc.legend.source')}
+                </li>
+              )}
             </ul>
           )}
+
+          {m.source_event_hosts > 0 && <SourceEvents m={m} at={at} />}
 
           <section className="stack mc-section">
             <h3>{t('mc.events')}</h3>
@@ -365,6 +393,87 @@ export function MachineTab({ d, onOpen }: { d: Detail; onOpen: (id: string) => v
         {!logs.data && !logs.error && <p className="muted">{t('loading')}</p>}
       </section>
     </div>
+  )
+}
+
+// SourceEvents lists the problems the monitoring systems raised on the machine in the window.
+function SourceEvents({ m, at }: { m: Machine; at: (v: string) => string }) {
+  const t = useT(allStrings)
+  const from = Date.parse(m.from)
+  const events = m.source_events ?? []
+  const errors = m.source_events_errors ?? []
+  return (
+    <section className="stack mc-section">
+      <h3>{t('mc.src')}</h3>
+      {errors.map((e) => (
+        <Banner key={e.source} kind="warn" title={t('mc.src.error', { source: e.source, error: e.error })} />
+      ))}
+      {m.source_events_truncated && <p className="muted">{t('mc.src.truncated', { n: events.length })}</p>}
+      {events.length === 0 && errors.length === 0 && <p className="muted">{t('mc.src.none')}</p>}
+      {events.length > 0 && (
+        <div className="mc-scroll">
+          <table className="cn-table compact">
+            <thead>
+              <tr>
+                <th>{t('mc.events.col.time')}</th>
+                <th>{t('mc.events.col.source')}</th>
+                <th>{t('mc.events.col.event')}</th>
+                <th>{t('mc.events.col.status')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((e) => (
+                <tr key={e.source + e.id}>
+                  <td className="muted mc-nowrap">
+                    {at(e.at)}
+                    {Date.parse(e.at) < from && <div className="muted">{t('mc.src.started')}</div>}
+                  </td>
+                  <td>{e.source}</td>
+                  <td>
+                    <span className={`pill inc-sev inc-sev-${severityTone(e.severity)}`} title={e.level}>
+                      <span className="inc-dot" aria-hidden />
+                      {severityText(t, e.severity)}
+                    </span>{' '}
+                    {e.url ? (
+                      <a href={e.url} target="_blank" rel="noopener noreferrer" title={t('mc.src.open')}>
+                        {e.title} <ExternalLink size={12} aria-hidden />
+                      </a>
+                    ) : (
+                      e.title
+                    )}
+                    {(e.tags?.length ?? 0) > 0 && (
+                      <span className="mc-src-tags">
+                        {e.tags!.map((tag) => (
+                          <span key={tag} className="pill pill-off">
+                            {tag}
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <span className={`pill pill-${e.status === 'firing' ? 'error' : 'ok'}`}>{t(e.status === 'firing' ? 'mc.firing' : 'mc.resolved')}</span>
+                    {e.resolved_at && <span className="muted"> {t('mc.src.until', { at: at(e.resolved_at) })}</span>}
+                    {e.acknowledged && (
+                      <>
+                        {' '}
+                        <span className="pill pill-ok">{t('mc.src.ack')}</span>
+                      </>
+                    )}
+                    {e.suppressed && (
+                      <>
+                        {' '}
+                        <span className="pill pill-off">{t('mc.src.suppressed')}</span>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   )
 }
 

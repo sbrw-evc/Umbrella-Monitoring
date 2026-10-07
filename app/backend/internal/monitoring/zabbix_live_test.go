@@ -39,4 +39,29 @@ func TestZabbixLive(t *testing.T) {
 		}
 		t.Logf("graph over %s: %d series", span, len(series))
 	}
+	// Events and log lines of a host named by UMBRELLA_ZABBIX_HOST, the first host otherwise.
+	host := res.Hosts[0]
+	if name := os.Getenv("UMBRELLA_ZABBIX_HOST"); name != "" {
+		for _, h := range res.Hosts {
+			if h.Host == name {
+				host = h
+			}
+		}
+	}
+	now := time.Now()
+	events, _, err := monitoring.HostEvents(context.Background(), src, auth, host, now.Add(-24*time.Hour), now, 100)
+	if err != nil {
+		t.Fatalf("events: %v", err)
+	}
+	for _, e := range events {
+		t.Logf("event %s %s %s %s %s resolved %v %v", e.ID, e.At.Format(time.RFC3339), e.Level, e.Status, e.Title, e.ResolvedAt, e.Tags)
+	}
+	lines, err := monitoring.HostLogLines(context.Background(), src, auth, host, now.Add(-24*time.Hour), now, 100, os.Getenv("UMBRELLA_ZABBIX_LOG_TEXT"))
+	if err != nil {
+		t.Fatalf("logs: %v", err)
+	}
+	t.Logf("%d log items, %d lines", lines.Items, len(lines.Lines))
+	for _, l := range lines.Lines {
+		t.Logf("log %s [%s] %s %v", l.At.Format(time.RFC3339Nano), l.Level, l.Text, l.Labels)
+	}
 }

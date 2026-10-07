@@ -18,16 +18,27 @@ import (
 )
 
 type machineView struct {
-	From          time.Time         `json:"from"`
-	To            time.Time         `json:"to"`
-	WindowMinutes int               `json:"window_minutes"`
-	DefaultWindow int               `json:"default_window"`
-	Names         []string          `json:"names"`
-	Hosts         []app.CIMonitor   `json:"hosts"`
-	LogSources    int               `json:"log_sources"`
-	EventsError   string            `json:"events_error"`
-	Events        []json.RawMessage `json:"events"`
-	Incidents     []struct {
+	From          time.Time       `json:"from"`
+	To            time.Time       `json:"to"`
+	WindowMinutes int             `json:"window_minutes"`
+	DefaultWindow int             `json:"default_window"`
+	Names         []string        `json:"names"`
+	Hosts         []app.CIMonitor `json:"hosts"`
+	LogSources    int             `json:"log_sources"`
+	EventsError   string          `json:"events_error"`
+	SourceEvents  []struct {
+		Title    string `json:"title"`
+		Severity string `json:"severity"`
+		Status   string `json:"status"`
+		Source   string `json:"source"`
+	} `json:"source_events"`
+	SourceEventsErrors []struct {
+		Source string `json:"source"`
+		Error  string `json:"error"`
+	} `json:"source_events_errors"`
+	SourceEventHosts int               `json:"source_event_hosts"`
+	Events           []json.RawMessage `json:"events"`
+	Incidents        []struct {
 		ID string `json:"id"`
 	} `json:"incidents"`
 	Panels []struct {
@@ -73,7 +84,18 @@ func TestIncidentMachine(t *testing.T) {
 		}}})
 	}))
 	t.Cleanup(loki.Close)
+	// Zabbix watches the machine too and keeps its own problems and log lines.
+	zbx := monitoringtest.StartZabbix(t, "8.0.0")
+	zbx.AddEvent(monitoringtest.Event{HostID: "10101", ID: "77", TriggerID: "500", Name: "High CPU utilization", Clock: now.Add(-2 * time.Minute).Unix(), Severity: 4})
+	zbx.AddEvent(monitoringtest.Event{HostID: "10101", ID: "70", TriggerID: "501", Name: "Long ago", Clock: now.Add(-48 * time.Hour).Unix(), Severity: 2,
+		Recovery: "71", RecoveryClock: now.Add(-47 * time.Hour).Unix()})
+	zbx.AddLogItem(10101, 9, "nginx error log", "log[/var/log/nginx/error.log]", 2,
+		monitoringtest.LogValue{Clock: now.Add(-time.Minute).Unix(), Value: "ERROR nginx: upstream timed out"},
+		monitoringtest.LogValue{Clock: now.Add(-time.Minute).Unix(), Value: "INFO php-fpm: pool www started"})
+	zcred := f.credential(flow.CredBearer, nil, map[string]string{"token": "zbx-token"})
 	f.h.st.Write(func(d *store.Data) {
+		d.MonitoringSources["MON-2"] = &model.MonitoringSource{ID: "MON-2", Name: "Zabbix", Kind: model.MonitoringZabbix, URL: zbx.URL, Enabled: true, CredentialID: zcred.ID,
+			Hosts: []model.MonitoringHost{{Key: "10101", Host: "web-01", Name: "web-01", IPs: []string{"10.0.0.7"}, State: model.HostUp}}}
 		d.ConfigItems["CI-1"] = &model.ConfigItem{ID: "CI-1", Name: "web-01", Kind: model.CIKindVM, Status: model.CIStatusActive, IPs: []string{"10.0.0.7"}}
 		d.MonitoringSources["MON-1"] = &model.MonitoringSource{ID: "MON-1", Name: "Metrics", Kind: model.MonitoringPrometheus, URL: prom.URL, Enabled: true,
 			Hosts: []model.MonitoringHost{{Key: "web-01", Host: "web-01", Name: "web-01", Endpoints: []string{"web-01:9100"}, State: model.HostUp}}}
@@ -119,8 +141,13 @@ func TestIncidentMachine(t *testing.T) {
 
 	var m machineView
 	f.expect(f.admin, http.MethodGet, "/api/incidents/"+id+"/machine", nil, http.StatusOK, &m)
-	if m.WindowMinutes != 30 || m.DefaultWindow != 30 || len(m.Hosts) != 1 || m.LogSources != 1 || m.EventsError != "" {
+	if m.WindowMinutes != 30 || m.DefaultWindow != 30 || len(m.Hosts) != 2 || m.LogSources != 2 || m.EventsError != "" {
 		t.Fatalf("machine %+v", m)
+	}
+	// The problems Zabbix raised on the machine in the window, with the host named.
+	if m.SourceEventHosts != 1 || len(m.SourceEventsErrors) != 0 || len(m.SourceEvents) != 1 || m.SourceEvents[0].Title != "High CPU utilization" ||
+		m.SourceEvents[0].Severity != model.SeverityError || m.SourceEvents[0].Status != "firing" || m.SourceEvents[0].Source != "Zabbix" {
+		t.Fatalf("zabbix events %+v %+v", m.SourceEvents, m.SourceEventsErrors)
 	}
 	// The metric of the alert (the alerting rule named as the signal) comes first, with its
 	// threshold, and only the series of the machine.
@@ -146,8 +173,18 @@ func TestIncidentMachine(t *testing.T) {
 
 	var lg machineLogs
 	f.expect(f.admin, http.MethodGet, "/api/incidents/"+id+"/machine/logs?q=nginx", nil, http.StatusOK, &lg)
-	if lg.Sources != 1 || len(lg.Lines) != 1 || lg.Lines[0].Source != "Logs" || len(lg.Errors) != 0 {
+	if lg.Sources != 2 || len(lg.Lines) != 2 || len(lg.Errors) != 0 {
 		t.Fatalf("logs %+v", lg)
+	}
+	sources := []string{lg.Lines[0].Source, lg.Lines[1].Source}
+	slices.Sort(sources)
+	if !slices.Equal(sources, []string{"Logs", "Zabbix"}) || !slices.ContainsFunc(lg.Lines, func(l struct {
+		Source string `json:"source"`
+		Text   string `json:"text"`
+	}) bool {
+		return l.Text == "ERROR nginx: upstream timed out"
+	}) {
+		t.Fatalf("logs %+v", lg.Lines)
 	}
 	if !strings.Contains(lokiQuery, `10\\.0\\.0\\.7`) || !strings.Contains(lokiQuery, `|~ "(?i)nginx"`) {
 		t.Fatalf("loki query %s", lokiQuery)

@@ -415,6 +415,10 @@
   fill: var(--error);
 }
 
+.mc-tick-source {
+  fill: var(--info);
+}
+
 .mc-tip {
   position: absolute;
   top: 6px;
@@ -493,11 +497,28 @@
   border-color: var(--ok);
 }
 
-.mc-line-event {
+.mc-line-event,
+.mc-line-source {
   width: 4px;
   height: 8px;
   border: none;
   background: var(--warn);
+}
+
+.mc-line-source {
+  background: var(--info);
+}
+
+.mc-src-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.mc-src-tags .pill {
+  font-size: 11px;
 }
 
 .mc-empty,
