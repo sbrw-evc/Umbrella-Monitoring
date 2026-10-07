@@ -95,6 +95,11 @@ var pages = []Page{
 		{"sync", Text{"Read host lists", "Загрузка списков хостов"}},
 		{"link", Text{"Link hosts to configuration items and create items from hosts", "Привязка хостов к КЕ и создание КЕ из хостов"}},
 	}},
+	{"response", GroupAuto, Text{"Incident response", "Реагирование на инциденты"}, []Feature{
+		view,
+		{"test", Text{"Check the Jira, Microsoft Teams and Zoom connections", "Проверка подключений Jira, Microsoft Teams и Zoom"}},
+		{"edit", Text{"Change impact rules, priority policies, escalations and integrations", "Изменение правил влияния, политик приоритетов, эскалаций и интеграций"}},
+	}},
 	{"credentials", GroupAuto, Text{"Credentials", "Учётные данные"}, []Feature{
 		view,
 		{"edit", Text{"Create, replace and delete credentials", "Создание, замена и удаление учётных данных"}},

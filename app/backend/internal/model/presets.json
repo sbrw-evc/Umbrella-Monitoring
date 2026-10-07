@@ -15,7 +15,7 @@
       "en": "Viewer who also acknowledges, resolves and comments incidents and plans maintenance windows.",
       "ru": "Наблюдатель, который также подтверждает, решает и комментирует инциденты и планирует сервисные окна."
     },
-    "permissions": ["incidents:view", "cmdb:view", "cis:view", "services:view", "maintenance:view", "wallboards:view", "incidents:ack", "maintenance:edit"]
+    "permissions": ["incidents:view", "response:view", "cmdb:view", "cis:view", "services:view", "maintenance:view", "wallboards:view", "incidents:ack", "maintenance:edit"]
   },
   {
     "id": "preset-service-owner",
@@ -33,7 +33,7 @@
       "en": "Viewer who connects sources: connectors, credentials, RED/USE rules, monitoring systems, NetBox, configuration items and services.",
       "ru": "Наблюдатель, который подключает источники: коннекторы, учётные данные, правила RED/USE, системы мониторинга, NetBox, КЕ и сервисы."
     },
-    "permissions": ["incidents:view", "cmdb:view", "cis:view", "services:view", "maintenance:view", "wallboards:view", "connectors:edit", "connectors:publish", "connectors:payload", "credentials:edit", "rules:edit", "monitoring:test", "monitoring:edit", "monitoring:sync", "monitoring:link", "netbox:test", "netbox:edit", "netbox:sync", "cis:edit", "services:edit", "status:view"]
+    "permissions": ["incidents:view", "response:view", "response:test", "response:edit", "cmdb:view", "cis:view", "services:view", "maintenance:view", "wallboards:view", "connectors:edit", "connectors:publish", "connectors:payload", "credentials:edit", "rules:edit", "monitoring:test", "monitoring:edit", "monitoring:sync", "monitoring:link", "netbox:test", "netbox:edit", "netbox:sync", "cis:edit", "services:edit", "status:view"]
   },
   {
     "id": "preset-noc-lead",
@@ -42,6 +42,6 @@
       "en": "On-call engineer who also manages teams, users (except administrators), TV wallboards and checks alerting.",
       "ru": "Дежурный инженер, который также управляет командами, пользователями (кроме администраторов), ТВ-панелями и проверяет оповещения."
     },
-    "permissions": ["incidents:view", "cmdb:view", "cis:view", "services:view", "maintenance:view", "wallboards:view", "incidents:ack", "maintenance:edit", "teams:edit", "users:view", "users:edit", "users:lock", "wallboards:edit", "settings.alerting:view", "settings.alerting:test", "status:view"]
+    "permissions": ["incidents:view", "response:view", "response:test", "response:edit", "cmdb:view", "cis:view", "services:view", "maintenance:view", "wallboards:view", "incidents:ack", "maintenance:edit", "teams:edit", "users:view", "users:edit", "users:lock", "wallboards:edit", "settings.alerting:view", "settings.alerting:test", "status:view"]
   }
 ]
