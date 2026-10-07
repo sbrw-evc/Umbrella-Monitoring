@@ -31,7 +31,7 @@ export function PublicURLCard({ onSaved }: { onSaved?: () => void }) {
 
   if (saved === null) {
     return (
-      <ProfileCard title={t('pub.title')} action={loader}>
+      <ProfileCard title={t('pub.title')} action={loader} inline>
         {!loader.error && <p className="muted">{t('loading')}</p>}
       </ProfileCard>
     )

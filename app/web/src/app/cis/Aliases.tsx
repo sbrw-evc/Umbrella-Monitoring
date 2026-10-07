@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction } from '../../connections/useRequest'
 import { useT } from '../../i18n'
 import { Button, Input } from '../../ui'
@@ -54,7 +54,7 @@ export function Aliases({ ci, editable, onChanged }: { ci: CI; editable: boolean
           {t('ci.aliases.cancel')}
         </Button>
       </div>
-      <ErrorBanner error={save.error} strings={strings} />
+      <ErrorFlash error={save.error} strings={strings} />
     </div>
   )
 }

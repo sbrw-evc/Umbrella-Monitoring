@@ -11,6 +11,7 @@ import { PermissionMatrix } from './PermissionMatrix'
 import { ADMIN, changes, Permissions, type Catalog, type Draft, type Role } from './permissions'
 import { RoleMembers } from './RoleMembers'
 import { strings } from './strings'
+import { Flash } from '../../notify'
 
 type Tab = 'permissions' | 'members'
 
@@ -110,9 +111,9 @@ export function RoleDetail({
         )
       )}
       {defaulter.error && (
-        <Banner kind="error" title={defaulter.error.message}>
+        <Flash kind="error" title={defaulter.error.message}>
           {defaulter.error.detail}
-        </Banner>
+        </Flash>
       )}
       <div className="grid-2 roles-fields">
         <Field label={t('roles.name')} hint={role.system ? t('roles.name.system') : undefined}>
@@ -201,11 +202,11 @@ export function RoleDetail({
                 </ul>
               </div>
             )}
-            {saver.notice && !diff.dirty && <Banner kind="ok" title={saver.notice} />}
+            {saver.notice && <Flash kind="ok" title={saver.notice} />}
             {saver.error && (
-              <Banner kind="error" title={saver.error.message}>
+              <Flash kind="error" title={saver.error.message}>
                 {saver.error.detail}
-              </Banner>
+              </Flash>
             )}
             {diff.dirty && (
               <div className="roles-savebar-actions">

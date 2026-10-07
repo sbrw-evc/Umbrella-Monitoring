@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Play, PlayCircle, Radio, RefreshCw, RotateCcw, Save, StepForward, Trash2 } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Banner, Button, Field, formatDate, Input, Modal, Select, Textarea } from '../../ui'
@@ -9,6 +9,7 @@ import { useSession } from '../session'
 import { json } from './graph'
 import { strings } from './strings'
 import type { Capture, Connector, EventPreview, IngestRequest, Issue, Sample, Stats, StoredEvent, StoredFailure, TestAll, TestRun } from './types'
+import { Flash } from '../../notify'
 
 export type Tab = 'issues' | 'test' | 'samples' | 'requests' | 'failures' | 'events' | 'stats'
 
@@ -131,7 +132,7 @@ export function TestPanel({
           {t('cn.test.all')}
         </Button>
       </div>
-      <ErrorBanner error={error} strings={strings} />
+      <ErrorFlash error={error} strings={strings} />
       {run && (
         <>
           {run.issues.some((i) => i.level === 'error') && !run.result && <Banner kind="error" title={t('cn.test.cannotRun')} />}
@@ -215,7 +216,7 @@ function CaptureBox({ conn, capture, editable, onChanged }: { conn: Connector; c
         <Radio size={14} />
         {t('cn.capture.start')}
       </Button>
-      <ErrorBanner error={action.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
     </div>
   )
 }
@@ -256,7 +257,7 @@ export function SamplesPanel({
           {t('cn.refresh')}
         </Button>
       </div>
-      <ErrorBanner error={action.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
       {samples.length === 0 ? (
         <p className="muted">{t('cn.samples.none')}</p>
       ) : (
@@ -371,7 +372,7 @@ function AddSampleDialog({ open, connector, onClose, onAdded }: { open: boolean;
       <Field label={t('cn.body')} hint={t('cn.samples.body.hint')}>
         {(id) => <Textarea id={id} rows={12} className="cn-mono" value={body} onChange={(e) => setBody(e.target.value)} />}
       </Field>
-      <ErrorBanner error={action.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
     </Modal>
   )
 }
@@ -412,7 +413,8 @@ export function RequestsPanel({ conn, editable, onSampled }: { conn: Connector; 
           {t('cn.refresh')}
         </Button>
       </div>
-      <ErrorBanner error={list.error ?? action.error} strings={strings} />
+      <ErrorBanner error={list.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
       {list.data && list.data.length === 0 && <p className="muted">{t('cn.req.none')}</p>}
       {list.data && list.data.length > 0 && (
         <div className="cn-table-wrap">
@@ -518,8 +520,9 @@ export function FailuresPanel({ conn, canReprocess }: { conn: Connector; canRepr
         )}
       </div>
       {canReprocess && conn.published > 0 && !resolved && <p className="muted">{t('cn.fail.hint', { n: conn.published })}</p>}
-      {result && <Banner kind="ok" title={t('cn.fail.requeued', { n: result.requeued, missing: result.missing })} />}
-      <ErrorBanner error={list.error ?? action.error} strings={strings} />
+      {result && <Flash kind="ok" title={t('cn.fail.requeued', { n: result.requeued, missing: result.missing })} trigger={result} />}
+      <ErrorBanner error={list.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
       {list.data && list.data.length === 0 && <p className="muted">{t('cn.fail.none')}</p>}
       {list.data?.map((f) => (
         <div key={f.id} className="card cn-failure">

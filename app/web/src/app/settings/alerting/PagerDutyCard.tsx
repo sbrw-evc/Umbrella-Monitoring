@@ -133,7 +133,7 @@ export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void
 
   if (!view || !draft) {
     return (
-      <ProfileCard title={t('pd.title')} action={loader}>
+      <ProfileCard title={t('pd.title')} action={loader} inline>
         {!loader.error && <p className="muted">{t('loading')}</p>}
       </ProfileCard>
     )

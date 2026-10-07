@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Search } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { mergeDicts } from '../../connections/connectionStrings'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
@@ -96,7 +96,8 @@ export function BindServicesDialog({
               </label>
             ))}
           </div>
-          <ErrorBanner error={act.error ?? all.error} strings={dialogStrings} />
+          <ErrorBanner error={all.error} strings={dialogStrings} />
+          <ErrorFlash error={act.error} strings={dialogStrings} />
         </div>
       )}
       {result && <BulkResults rows={ciRows(result)} columns={[t('bulk.col.item'), t('bulk.col.service')]} summary={result.summary} />}
@@ -165,7 +166,7 @@ export function CreateHostsDialog({ hosts, onClose, onDone }: { hosts: HostKey[]
             )}
           </Field>
           {registrable && <Switch checked={register} onChange={setRegister} label={t('bulk.hosts.register')} />}
-          <ErrorBanner error={act.error} strings={dialogStrings} />
+          <ErrorFlash error={act.error} strings={dialogStrings} />
         </div>
       )}
       {result && (

@@ -12,6 +12,7 @@ import { reveal } from './PagerDutyCard'
 import { strings } from './strings'
 import { severityText } from '../../incidents/types'
 import { SEVERITIES, TEMPLATE_MESSAGES, TEMPLATE_PARTS, type BotStatus, type NotifyPreview, type NotifyView } from './types'
+import { Flash } from '../../../notify'
 
 type Channel = 'email' | 'telegram' | 'teams' | 'zoom'
 
@@ -116,7 +117,7 @@ export function NotifyCard() {
 
   if (!view || !draft) {
     return (
-      <ProfileCard title={t('nt.title')} action={loader}>
+      <ProfileCard title={t('nt.title')} action={loader} inline>
         {!loader.error && <p className="muted">{t('loading')}</p>}
       </ProfileCard>
     )
@@ -341,11 +342,11 @@ export function NotifyCard() {
                   </Button>
                 </div>
               ))}
-            {tester.notice && <Banner kind="ok" title={tester.notice} />}
+            {tester.notice && <Flash kind="ok" title={tester.notice} />}
             {tester.error && (
-              <Banner kind="error" title={tester.error.message}>
+              <Flash kind="error" title={tester.error.message}>
                 {tester.error.detail}
-              </Banner>
+              </Flash>
             )}
           </section>
         )}
@@ -427,9 +428,9 @@ function Templates({
         </Button>
       </div>
       {previewer.error && (
-        <Banner kind="error" title={previewer.error.message}>
+        <Flash kind="error" title={previewer.error.message}>
           {previewer.error.detail}
-        </Banner>
+        </Flash>
       )}
       {preview &&
         !previewer.error &&

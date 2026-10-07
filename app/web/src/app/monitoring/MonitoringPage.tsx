@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ExternalLink, Plus, RefreshCw, Search, Settings, PlugZap } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { mergeDicts } from '../../connections/connectionStrings'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
@@ -22,6 +22,7 @@ import '../cis/cis.css'
 import '../rules/rules.css'
 import './monitoring.css'
 import '../bulk/bulk.css'
+import { Flash, notify } from '../../notify'
 
 type Kind = 'zabbix' | 'prometheus'
 type Sync = { started_at: string; finished_at: string; ok: boolean; error?: string; actor: string; hosts: number; version?: string }
@@ -164,18 +165,16 @@ function SourcesTable({ v, onOpen, onChanged, onHosts }: { v: View; onOpen: (s: 
   const t = useT(strings)
   const syncer = useAction()
   const [busy, setBusy] = useState('')
-  const [done, setDone] = useState('')
   const focus = query().get('system') ?? ''
   useEffect(() => {
     if (focus) document.getElementById(`system-${focus}`)?.scrollIntoView({ block: 'start' })
   }, [focus])
   const read = (s: Source) => {
     setBusy(s.id)
-    setDone('')
     void syncer
       .run(async () => {
         const st = await api<Sync>('POST', `/api/monitoring/sources/${s.id}/sync`)
-        if (st.ok) setDone(t('mon.sync.done', { n: st.hosts, name: s.name }))
+        if (st.ok) notify({ kind: 'ok', title: t('mon.sync.done', { n: st.hosts, name: s.name }) })
       })
       .finally(() => {
         setBusy('')
@@ -185,8 +184,7 @@ function SourcesTable({ v, onOpen, onChanged, onHosts }: { v: View; onOpen: (s: 
   if (v.sources.length === 0) return <p className="muted card rl-empty">{t('mon.empty.sources')}</p>
   return (
     <>
-      {done && <Banner kind="ok" title={done} />}
-      <ErrorBanner error={syncer.error} strings={strings} />
+      <ErrorFlash error={syncer.error} strings={strings} />
       {v.sources.map((s) => (
         <SystemCard key={s.id} s={s} reading={busy === s.id || s.running} onRead={() => read(s)} onOpen={() => onOpen(s)} onChanged={onChanged} onHosts={() => onHosts(s.id)} />
       ))}
@@ -330,7 +328,7 @@ function SystemAlerts({ s, onChanged }: { s: Source; onChanged: () => void }) {
           )}
         </div>
         <p className="muted">{t('sys.alerts.tokens')}</p>
-        <ErrorBanner error={action.error} strings={strings} />
+        <ErrorFlash error={action.error} strings={strings} />
         <QuickConnectDialog key={s.id} open={connecting} onClose={() => setConnecting(false)} onDone={onChanged} monitoring={{ id: s.id, name: s.name, kind: s.kind }} />
       </>
     )
@@ -358,7 +356,7 @@ function SystemAlerts({ s, onChanged }: { s: Source; onChanged: () => void }) {
           </Button>
         </div>
       )}
-      <ErrorBanner error={action.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
     </>
   )
 }
@@ -653,7 +651,8 @@ function LinkDialog({ host, onClose, onSaved }: { host: Host | null; onClose: ()
               {results.map((r) => option(r))}
             </div>
           )}
-          <ErrorBanner error={saver.error ?? found.error} strings={strings} />
+          <ErrorBanner error={found.error} strings={strings} />
+          <ErrorFlash error={saver.error} strings={strings} />
         </div>
       )}
     </Modal>
@@ -708,7 +707,7 @@ function CreateDialog({ host, onClose, onSaved }: { host: Host | null; onClose: 
             )}
           </Field>
           {registrable && <Switch checked={register} onChange={setRegister} label={t('mon.create.register')} />}
-          <ErrorBanner error={saver.error} strings={createStrings} />
+          <ErrorFlash error={saver.error} strings={createStrings} />
         </div>
       )}
     </Modal>
@@ -876,16 +875,16 @@ function SourceEditor({
         </Field>
         {report &&
           (report.ok ? (
-            <Banner kind="ok" title={t('mon.test.ok', { hosts: report.hosts })}>
+            <Flash kind="ok" title={t('mon.test.ok', { hosts: report.hosts })} trigger={report}>
               {report.version && <div>{t('mon.test.version', { version: report.version })}</div>}
               {(report.sample?.length ?? 0) > 0 && <div className="cn-mono">{(report.sample ?? []).map((h) => h.host || h.name).join(', ')}</div>}
-            </Banner>
+            </Flash>
           ) : (
-            <Banner kind="error" title={t('mon.test.fail')}>
+            <Flash kind="error" title={t('mon.test.fail')} trigger={report}>
               {report.error}
-            </Banner>
+            </Flash>
           ))}
-        <ErrorBanner error={test.error ?? save.error} strings={strings} />
+        <ErrorFlash error={test.error ?? save.error} strings={strings} />
       </div>
     </Modal>
   )

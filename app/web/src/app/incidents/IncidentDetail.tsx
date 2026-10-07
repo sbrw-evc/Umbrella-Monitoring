@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { CalendarClock, ExternalLink, Link2, Plus } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Link } from '../../router'
@@ -13,6 +13,7 @@ import { entryText, severityTone } from './format'
 import { useLiveReload } from './live'
 import { strings } from './strings'
 import { severityText, type Detail, type Incident, type PD, type Person, type Severity } from './types'
+import { notify } from '../../notify'
 
 export function SeverityPill({ severity }: { severity: Severity }) {
   const t = useT(strings)
@@ -67,13 +68,11 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
   const [epoch, setEpoch] = useState(0)
   const [tab, setTab] = useState<Tab>('main')
   const [mode, setMode] = useState<Mode>(null)
-  const [note, setNote] = useState('')
   const detail = useResource<Detail>(id ? `/api/incidents/${encodeURIComponent(id)}` : '', epoch)
   const act = useAction()
   useEffect(() => {
     setTab('main')
     setMode(null)
-    setNote('')
     act.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
@@ -107,7 +106,7 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
     })
   const catalogDone = ({ bound }: { bound: string[] }) => {
     setMode(null)
-    setNote(t('inc.ci.done', { n: bound.length }))
+    notify({ kind: 'ok', title: t('inc.ci.done', { n: bound.length }) })
     refresh()
   }
 
@@ -160,7 +159,6 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
             <StatusPill status={a.status} />
             <PDPill state={a.pd.state} />
           </div>
-          {note && <Banner kind="ok" title={note} />}
           <Segmented
             label={t('inc.tab.main')}
             value={tab}
@@ -184,7 +182,7 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
           {tab === 'response' && <ResponseTab id={a.id} status={a.status} actor={actor} epoch={epoch} />}
         </div>
       )}
-      <ErrorBanner error={act.error} strings={strings} />
+      <ErrorFlash error={act.error} strings={strings} />
     </Modal>
   )
 }

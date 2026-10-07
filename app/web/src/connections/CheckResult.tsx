@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { useT, type Dict } from '../i18n'
 import { Banner } from '../ui'
+import { Flash } from '../notify'
 
 export type Check<T> = { key: string; ok: boolean; result?: T; error?: string } | null
 
@@ -28,13 +29,9 @@ export function CheckResult<T>({
   if (check.ok && check.result) return <>{ok(check.result)}</>
   const extra = failExtra?.(check.error ?? '')
   return (
-    <Banner kind="error" title={failTitle}>
+    <Flash kind="error" title={failTitle} trigger={check}>
       {check.error && <div>{check.error}</div>}
-      {extra && (
-        <div className="hint" style={{ marginTop: 6 }}>
-          {extra}
-        </div>
-      )}
-    </Banner>
+      {extra && <div>{extra}</div>}
+    </Flash>
   )
 }

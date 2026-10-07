@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { api } from '../../../api'
 import type { Check } from '../../../connections/CheckResult'
-import { ErrorBanner, MigrationActions, MigrationCard } from '../../../connections/ConnectionCard'
+import { ErrorFlash, MigrationActions, MigrationCard } from '../../../connections/ConnectionCard'
 import { MigrateConfirm } from '../../../connections/MigrateConfirm'
 import { postgresBody, postgresCheckKey, postgresComplete, postgresDraft, postgresUsable, type PostgresReport } from '../../../connections/postgres'
 import { PostgresCheckResult, PostgresForm } from '../../../connections/PostgresForm'
@@ -10,6 +10,7 @@ import { useT } from '../../../i18n'
 import { Banner, Switch } from '../../../ui'
 import { strings } from './strings'
 import type { PostgresMigrated } from './types'
+import { Flash } from '../../../notify'
 
 export function Migration({ current, onMigrated }: { current: string; onMigrated: () => void }) {
   const t = useT(strings)
@@ -55,11 +56,11 @@ export function Migration({ current, onMigrated }: { current: string; onMigrated
           </div>
         }
       />
-      {!confirming && <ErrorBanner error={action.error} strings={strings} />}
+      <ErrorFlash error={action.error} strings={strings} />
       {done && (
-        <Banner kind="ok" title={t('pgs.move.done', { where: done })}>
+        <Flash kind="ok" title={t('pgs.move.done', { where: done })}>
           {t('pgs.move.doneText')}
-        </Banner>
+        </Flash>
       )}
       <MigrationActions
         onCheck={runCheck}
@@ -79,7 +80,6 @@ export function Migration({ current, onMigrated }: { current: string; onMigrated
           <li>{t('pgs.move.step4', { current })}</li>
         </ol>
         {probe?.has_state && <Banner kind="warn" title={t('pgs.move.replace')} />}
-        <ErrorBanner error={action.error} strings={strings} />
       </MigrateConfirm>
     </MigrationCard>
   )

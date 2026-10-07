@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api, type Locale, type Theme } from '../api'
 import { errorText, useT } from '../i18n'
-import { Banner, Button, Field, Modal, Segmented, TimezoneSelect } from '../ui'
+import { Button, Field, Modal, Segmented, TimezoneSelect } from '../ui'
 import { strings } from './strings'
+import { Flash } from '../notify'
 
 export type Defaults = { default_theme: Theme; default_locale: Locale; default_timezone: string }
 
@@ -80,7 +81,7 @@ export function DefaultsEditor({ open, onClose, initial, onSaved }: { open: bool
       <Field label={t('field.timezone')}>
         {(id) => <TimezoneSelect id={id} value={d.default_timezone} onChange={(v) => setD({ ...d, default_timezone: v })} />}
       </Field>
-      {error && <Banner kind="error" title={error.message} />}
+      {error && <Flash kind="error" title={error.message}>{error.detail}</Flash>}
     </Modal>
   )
 }

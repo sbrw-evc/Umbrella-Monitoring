@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
 import { Banner, Button, Field, Input, Modal, Select, Switch, Textarea } from '../../ui'
@@ -108,7 +108,8 @@ function EditorForm({ ci, tags, onClose, onSaved }: Props) {
         ) : (
           <p className="hint">{t('ci.field.register.kind')}</p>
         ))}
-      <ErrorBanner error={saver.error ?? refs.error} strings={strings} />
+      <ErrorBanner error={refs.error} strings={strings} />
+      <ErrorFlash error={saver.error} strings={strings} />
       <div className="modal-foot">
         <Button type="button" variant="ghost" onClick={onClose}>
           {t('ci.cancel')}
@@ -154,7 +155,7 @@ export function DeleteDialog({ ci, onClose, onDeleted }: { ci: CI | null; onClos
         <>
           <p>{t('ci.delete.text', { name: ci.name })}</p>
           {ci.netbox && <Banner kind="warn" title={t('ci.delete.netbox', { kind: ci.netbox.kind, id: ci.netbox.id })} />}
-          <ErrorBanner error={remover.error} strings={strings} />
+          <ErrorFlash error={remover.error} strings={strings} />
         </>
       )}
     </Modal>
