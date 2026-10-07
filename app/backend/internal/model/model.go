@@ -153,6 +153,9 @@ type Settings struct {
 	// NewUserRole is the role of accounts created by a directory sign-in or synchronization or by
 	// NetBox when no group mapping gives one. Empty or unknown: the system role "user".
 	NewUserRole string `json:"new_user_role"`
+	// TrustedProxies are reverse proxies set in the interface, in addition to
+	// UMBRELLA_TRUSTED_PROXIES: their X-Forwarded-For is believed for the client address.
+	TrustedProxies []string `json:"trusted_proxies"`
 	// PresetRolesSeeded: the preset roles were created once and are not created again.
 	PresetRolesSeeded bool `json:"-"`
 	// NetBoxUsersDecided: NetBox settings saved before «create accounts for contacts» existed were

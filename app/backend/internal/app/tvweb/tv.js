@@ -110,7 +110,8 @@
     pageStarted: 0,
     lastCounts: '',
     theme: '',
-    severities: []         // the alert scale, most severe first (see scaleOf)
+    severities: [],        // the alert scale, most severe first (see scaleOf)
+    zone: ''               // IANA time zone of the clock and times ('' = the browser's)
   };
 
   var el = {};
@@ -131,13 +132,39 @@
     return fmt(s, vars);
   }
   function pad2(n) { return n < 10 ? '0' + n : String(n); }
-  function hhmm(d) { return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
-  function hhmmss(d) { return hhmm(d) + ':' + pad2(d.getSeconds()); }
+  // wall is the moment as the clock of the board's time zone shows it: a Date whose local
+  // fields are that wall time. Without a zone (or a browser that does not know it) the
+  // browser's own time is used.
+  var zoneFmt = null;
+  function setZone(zone) {
+    zone = String(zone || '');
+    if (zone === state.zone) return;
+    state.zone = zone;
+    zoneFmt = null;
+    if (!zone || !window.Intl || !Intl.DateTimeFormat) return;
+    try {
+      zoneFmt = new Intl.DateTimeFormat('en-US', { timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+    } catch (e) {
+      zoneFmt = null;
+    }
+  }
+  function wall(d) {
+    if (!zoneFmt || !zoneFmt.formatToParts) return d;
+    var p = {};
+    var parts = zoneFmt.formatToParts(d);
+    for (var i = 0; i < parts.length; i++) p[parts[i].type] = parseInt(parts[i].value, 10);
+    return new Date(p.year, p.month - 1, p.day, p.hour % 24, p.minute, p.second);
+  }
+  function hhmm(d) { d = wall(d); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()); }
+  function hhmmss(d) { var w = wall(d); return pad2(w.getHours()) + ':' + pad2(w.getMinutes()) + ':' + pad2(w.getSeconds()); }
   function ddmm(d, withYear) {
+    d = wall(d);
     var s = pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1);
     return withYear ? s + '.' + d.getFullYear() : s;
   }
   function sameDay(a, b) {
+    a = wall(a);
+    b = wall(b);
     return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
   }
   function parseDate(s) {
@@ -216,7 +243,7 @@
     var o = parseDate(inc.opened_at) || parseDate(inc.first_seen);
     if (!o) return '';
     if (sameDay(o, now)) return t('opened.today', { t: hhmm(o) });
-    return t('opened.date', { d: ddmm(o, o.getFullYear() !== now.getFullYear()), t: hhmm(o) });
+    return t('opened.date', { d: ddmm(o, wall(o).getFullYear() !== wall(now).getFullYear()), t: hhmm(o) });
   }
 
   function durationText(inc, now) {
@@ -344,6 +371,9 @@
     var board = json.board || {};
     var lang = pickLang(board.locale) || pickLang(json.default_locale) || 'ru';
     var langChanged = lang !== state.lang;
+    var zoneBefore = state.zone;
+    setZone(board.timezone);
+    if (state.zone !== zoneBefore) lastClock = '';
     state.lang = lang;
     document.documentElement.lang = lang;
 

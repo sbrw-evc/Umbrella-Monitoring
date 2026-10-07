@@ -3,6 +3,8 @@ package app
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
+	"encoding/base32"
 	"fmt"
 	"html"
 	"net/http"
@@ -32,6 +34,13 @@ const (
 )
 
 var wallboardSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
+
+// randomSlug is an address nobody can guess: 160 random bits in lower-case base32.
+func randomSlug() string {
+	b := make([]byte, 20)
+	_, _ = rand.Read(b)
+	return strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b))
+}
 
 // WallboardService keeps the TV wallboards: pages for the operations room opened without
 // signing in from the allowed networks.
@@ -71,6 +80,7 @@ type WallboardInput struct {
 	RefreshSeconds   int      `json:"refresh_seconds"`
 	Theme            string   `json:"theme"`
 	Locale           string   `json:"locale"`
+	Timezone         string   `json:"timezone"`
 	AllowedNetworks  []string `json:"allowed_networks"`
 }
 
@@ -183,6 +193,7 @@ func (s *WallboardService) check(d *store.Data, selfID string, in *WallboardInpu
 	in.CIIDs, in.ServiceIDs, in.TeamIDs = uniq(in.CIIDs), uniq(in.ServiceIDs), uniq(in.TeamIDs)
 	in.Severities, in.Methods = uniq(in.Severities), uniq(in.Methods)
 	in.Sort, in.Theme, in.Locale = strings.TrimSpace(in.Sort), strings.TrimSpace(in.Theme), strings.TrimSpace(in.Locale)
+	in.Timezone = strings.TrimSpace(in.Timezone)
 	if in.Sort == "" {
 		in.Sort = model.WallboardSortNewest
 	}
@@ -207,6 +218,8 @@ func (s *WallboardService) check(d *store.Data, selfID string, in *WallboardInpu
 		return invalid("theme_invalid", nil)
 	case in.Locale != "" && !model.ValidLocale(in.Locale):
 		return invalid("locale_invalid", nil)
+	case in.Timezone != "" && !model.ValidTimezone(in.Timezone):
+		return invalid("timezone_invalid", nil)
 	case in.ResolvedMinutes < 0 || in.ResolvedMinutes > maxResolvedMinutes:
 		return invalid("resolved_invalid", nil)
 	case len(in.CIIDs)+len(in.ServiceIDs)+len(in.TeamIDs) > maxWallboardTargets:
@@ -255,7 +268,7 @@ func (in WallboardInput) apply(w *model.Wallboard) {
 	w.CIIDs, w.ServiceIDs, w.TeamIDs = in.CIIDs, in.ServiceIDs, in.TeamIDs
 	w.Severities, w.Methods = in.Severities, in.Methods
 	w.ShowAcknowledged, w.ShowSuppressed, w.ResolvedMinutes = in.ShowAcknowledged, in.ShowSuppressed, in.ResolvedMinutes
-	w.Sort, w.RefreshSeconds, w.Theme, w.Locale = in.Sort, in.RefreshSeconds, in.Theme, in.Locale
+	w.Sort, w.RefreshSeconds, w.Theme, w.Locale, w.Timezone = in.Sort, in.RefreshSeconds, in.Theme, in.Locale, in.Timezone
 	w.AllowedNetworks = in.AllowedNetworks
 }
 
@@ -263,6 +276,10 @@ func (s *WallboardService) Create(actor string, sc viewScope, in WallboardInput)
 	now := s.now()
 	var out WallboardView
 	var err error
+	// Without an address of its own choosing the wallboard gets one nobody can guess.
+	if strings.TrimSpace(in.Slug) == "" {
+		in.Slug = randomSlug()
+	}
 	s.st.Write(func(d *store.Data) {
 		if err = s.check(d, "", &in); err != nil {
 			return
@@ -289,6 +306,9 @@ func (s *WallboardService) Update(actor string, sc viewScope, id string, in Wall
 		if w == nil {
 			return
 		}
+		if strings.TrimSpace(in.Slug) == "" {
+			in.Slug = w.Slug
+		}
 		if err = s.check(d, id, &in); err != nil {
 			return
 		}
@@ -301,6 +321,27 @@ func (s *WallboardService) Update(actor string, sc viewScope, id string, in Wall
 		in.apply(w)
 		w.UpdatedBy, w.UpdatedAt = actor, now
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "wallboard.update", Object: w.ID, Detail: w.Title})
+		out = s.view(d, w)
+		out.InScope = true
+	})
+	return out, err
+}
+
+// Rotate gives the wallboard a new random address; screens on the old one stop getting data.
+func (s *WallboardService) Rotate(actor string, sc viewScope, id string) (WallboardView, error) {
+	now := s.now()
+	var out WallboardView
+	err := ErrNotFound
+	s.st.Write(func(d *store.Data) {
+		w := d.Wallboards[id]
+		if w == nil {
+			return
+		}
+		if err = sc.covers(d, w.CIIDs, w.ServiceIDs, w.TeamIDs); err != nil {
+			return
+		}
+		w.Slug, w.UpdatedBy, w.UpdatedAt = randomSlug(), actor, now
+		d.AddAudit(store.AuditEntry{Actor: actor, Action: "wallboard.rotate", Object: w.ID, Detail: w.Title})
 		out = s.view(d, w)
 		out.InScope = true
 	})
@@ -374,12 +415,14 @@ func wallboardAllows(w *model.Wallboard, ip netip.Addr) bool {
 // Public payload of a wallboard: no people, contacts, PagerDuty keys or labels.
 
 type tvBoard struct {
-	Slug             string `json:"slug"`
-	Title            string `json:"title"`
-	Description      string `json:"description"`
-	RefreshSeconds   int    `json:"refresh_seconds"`
-	Theme            string `json:"theme"`
-	Locale           string `json:"locale"`
+	Slug           string `json:"slug"`
+	Title          string `json:"title"`
+	Description    string `json:"description"`
+	RefreshSeconds int    `json:"refresh_seconds"`
+	Theme          string `json:"theme"`
+	Locale         string `json:"locale"`
+	// Timezone is the zone of the clock and times: the wallboard's own or the installation's.
+	Timezone         string `json:"timezone"`
 	Sort             string `json:"sort"`
 	ShowAcknowledged bool   `json:"show_acknowledged"`
 	ResolvedMinutes  int    `json:"resolved_minutes"`
@@ -459,13 +502,14 @@ func tvIncidentOf(a alert.Alert) tvIncident {
 // wallboardPayload builds what the TV page shows; while the alert engine is not ready the
 // lists are empty and Ready is false.
 func (a *App) wallboardPayload(ctx context.Context, w *model.Wallboard) (TVPayload, error) {
-	locale := a.settings.Get().DefaultLocale
+	set := a.settings.Get()
+	locale := set.DefaultLocale
 	if !model.ValidLocale(locale) {
 		locale = model.LocaleRU
 	}
 	out := TVPayload{
 		Board: tvBoard{Slug: w.Slug, Title: w.Title, Description: w.Description, RefreshSeconds: w.RefreshSeconds, Theme: w.Theme,
-			Locale: w.Locale, Sort: w.Sort, ShowAcknowledged: w.ShowAcknowledged, ResolvedMinutes: w.ResolvedMinutes},
+			Locale: w.Locale, Timezone: cmp.Or(w.Timezone, DefaultTimezone(set)), Sort: w.Sort, ShowAcknowledged: w.ShowAcknowledged, ResolvedMinutes: w.ResolvedMinutes},
 		DefaultLocale: locale, Version: a.opt.Version, GeneratedAt: time.Now().UTC().Truncate(time.Second), Incidents: []tvIncident{},
 		Severities: model.Severities,
 	}
@@ -494,7 +538,10 @@ func (a *App) registerWallboards(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/wallboards/{id}/preview", a.authed(a.can("wallboards:view", a.previewWallboard)))
 	mux.HandleFunc("POST /api/wallboards", a.authed(a.can("wallboards:edit", a.createWallboard)))
 	mux.HandleFunc("PUT /api/wallboards/{id}", a.authed(a.can("wallboards:edit", a.updateWallboard)))
+	mux.HandleFunc("POST /api/wallboards/{id}/rotate", a.authed(a.can("wallboards:edit", a.rotateWallboard)))
 	mux.HandleFunc("DELETE /api/wallboards/{id}", a.authed(a.can("wallboards:edit", a.deleteWallboard)))
+	mux.HandleFunc("GET /api/wallboards/proxies", a.authed(a.can("wallboards:view", a.proxySettings)))
+	mux.HandleFunc("PUT /api/wallboards/proxies", a.authed(a.can("wallboards:proxies", a.saveProxySettings)))
 
 	// Public: no sign-in; the client address is checked against the allowed networks.
 	mux.HandleFunc("GET /tv/{slug}", a.tvPage)
@@ -515,7 +562,7 @@ func addrString(ip netip.Addr) string {
 }
 
 func (a *App) listWallboards(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, wallboardList{Wallboards: a.wallboards.List(a.userScope(current(r).user)), ClientIP: addrString(a.proxies.ClientIP(r))})
+	httpx.JSON(w, http.StatusOK, wallboardList{Wallboards: a.wallboards.List(a.userScope(current(r).user)), ClientIP: addrString(a.trustedProxies().ClientIP(r))})
 }
 
 func (a *App) getWallboard(w http.ResponseWriter, r *http.Request) {
@@ -549,6 +596,11 @@ func (a *App) updateWallboard(w http.ResponseWriter, r *http.Request) {
 	settingsRespond(w, out, err)
 }
 
+func (a *App) rotateWallboard(w http.ResponseWriter, r *http.Request) {
+	out, err := a.wallboards.Rotate(current(r).user.Username, a.userScope(current(r).user), r.PathValue("id"))
+	settingsRespond(w, out, err)
+}
+
 func (a *App) deleteWallboard(w http.ResponseWriter, r *http.Request) {
 	if err := a.wallboards.Delete(current(r).user.Username, a.userScope(current(r).user), r.PathValue("id")); err != nil {
 		writeError(w, err)
@@ -576,7 +628,7 @@ func (a *App) previewWallboard(w http.ResponseWriter, r *http.Request) {
 // tvAccess finds an enabled wallboard the client may open. Unknown, disabled and denied
 // wallboards look the same to the client.
 func (a *App) tvAccess(r *http.Request) (*model.Wallboard, netip.Addr) {
-	ip := a.proxies.ClientIP(r)
+	ip := a.trustedProxies().ClientIP(r)
 	board := a.wallboards.BySlug(r.PathValue("slug"))
 	if board == nil || !board.Enabled || !wallboardAllows(board, ip) {
 		return nil, ip

@@ -71,6 +71,7 @@ var pages = []Page{
 	{"wallboards", GroupOverview, Text{"TV wallboards", "ТВ-панели"}, []Feature{
 		view,
 		{"edit", Text{"Create, change and delete TV wallboards and their allowed networks", "Создание, изменение и удаление ТВ-панелей и разрешённых сетей"}},
+		{"proxies", Text{"Change trusted proxies (they also decide the address for sign-in limits and the audit)", "Изменение доверенных прокси (от них зависит и адрес для ограничений входа и аудита)"}},
 	}},
 	{"connectors", GroupAuto, Text{"Connectors", "Коннекторы"}, []Feature{
 		view,

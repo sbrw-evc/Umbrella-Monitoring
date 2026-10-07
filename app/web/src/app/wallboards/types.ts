@@ -28,6 +28,7 @@ export type Wallboard = {
   refresh_seconds: number
   theme: BoardTheme
   locale: BoardLocale
+  timezone: string
   allowed_networks: string[]
   created_by: string
   created_at: string
@@ -63,6 +64,7 @@ export type Input = {
   refresh_seconds: number
   theme: BoardTheme
   locale: BoardLocale
+  timezone: string
   allowed_networks: string[]
 }
 

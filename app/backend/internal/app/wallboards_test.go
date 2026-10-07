@@ -374,3 +374,103 @@ func TestWallboardIncidents(t *testing.T) {
 		t.Fatalf("preview = %v", preview)
 	}
 }
+
+func TestWallboardRandomAddressAndTimezone(t *testing.T) {
+	h := newProxyHarness(t, "127.0.0.1")
+	h.addLocal("admin", "Admin-pass-2026", model.RoleAdmin, time.Now())
+	admin := h.client()
+	admin.login("admin", "Admin-pass-2026")
+	f := connFixture{h: h, admin: admin}
+	h.st.Write(func(d *store.Data) { d.Settings.DefaultTZ = "Europe/Moscow" })
+	from := map[string]string{"X-Forwarded-For": "127.0.0.1"}
+
+	var p struct {
+		Error string `json:"error"`
+	}
+	if code := admin.call(http.MethodPost, "/api/wallboards", wallboardBody(map[string]any{"slug": "", "timezone": "Mars/Base"}), &p); code != http.StatusBadRequest || p.Error != "timezone_invalid" {
+		t.Errorf("bad time zone: %d %+v", code, p)
+	}
+	// No address given: a random one nobody can guess.
+	var a, b app.WallboardView
+	f.expect(admin, http.MethodPost, "/api/wallboards", wallboardBody(map[string]any{"slug": ""}), http.StatusCreated, &a)
+	f.expect(admin, http.MethodPost, "/api/wallboards", wallboardBody(map[string]any{"slug": "", "timezone": "Asia/Yekaterinburg"}), http.StatusCreated, &b)
+	if len(a.Slug) != 32 || a.Slug == b.Slug || strings.ToLower(a.Slug) != a.Slug {
+		t.Fatalf("random addresses = %q %q", a.Slug, b.Slug)
+	}
+	// Saving without an address keeps the one the wallboard has.
+	f.expect(admin, http.MethodPut, "/api/wallboards/"+a.ID, wallboardBody(map[string]any{"slug": "", "title": "Hall"}), http.StatusOK, &a)
+	if len(a.Slug) != 32 || a.Title != "Hall" {
+		t.Errorf("after update = %+v", a)
+	}
+
+	// The screen gets the wallboard's time zone, or the installation's.
+	zone := func(slug string) string {
+		var out struct {
+			Board struct {
+				Timezone string `json:"timezone"`
+			} `json:"board"`
+		}
+		r := fetch(t, h, "/api/public/tv/"+slug, from)
+		_ = json.Unmarshal([]byte(r.body), &out)
+		return out.Board.Timezone
+	}
+	if za, zb := zone(a.Slug), zone(b.Slug); za != "Europe/Moscow" || zb != "Asia/Yekaterinburg" {
+		t.Errorf("time zones = %q %q", za, zb)
+	}
+
+	// A new address cuts off screens on the old one.
+	old := a.Slug
+	f.expect(admin, http.MethodPost, "/api/wallboards/"+a.ID+"/rotate", nil, http.StatusOK, &a)
+	if a.Slug == old || len(a.Slug) != 32 {
+		t.Fatalf("rotated = %q", a.Slug)
+	}
+	if fetch(t, h, "/api/public/tv/"+old, from).status != http.StatusForbidden || fetch(t, h, "/api/public/tv/"+a.Slug, from).status != http.StatusOK {
+		t.Error("the old address must stop working and the new one work")
+	}
+	f.expect(admin, http.MethodPost, "/api/wallboards/TV-404/rotate", nil, http.StatusNotFound, nil)
+}
+
+func TestWallboardProxiesFromInterface(t *testing.T) {
+	h := newProxyHarness(t, "192.0.2.10")
+	h.addLocal("admin", "Admin-pass-2026", model.RoleAdmin, time.Now())
+	admin := h.client()
+	admin.login("admin", "Admin-pass-2026")
+	f := connFixture{h: h, admin: admin}
+	f.expect(admin, http.MethodPost, "/api/wallboards", wallboardBody(map[string]any{"allowed_networks": []string{"10.20.0.0/24"}}), http.StatusCreated, nil)
+	via := map[string]string{"X-Forwarded-For": "10.20.0.15"}
+	if fetch(t, h, "/api/public/tv/noc", via).status != http.StatusForbidden {
+		t.Fatal("the test client is not a trusted proxy yet")
+	}
+
+	var p struct {
+		Error string `json:"error"`
+	}
+	if code := admin.call(http.MethodPut, "/api/wallboards/proxies", map[string]any{"trusted_proxies": []string{"10.0.0.0/33"}}, &p); code != http.StatusBadRequest || p.Error != "proxy_invalid" {
+		t.Errorf("bad proxy: %d %+v", code, p)
+	}
+	var view struct {
+		Set      []string `json:"trusted_proxies"`
+		Env      []string `json:"env"`
+		ClientIP string   `json:"client_ip"`
+	}
+	f.expect(admin, http.MethodPut, "/api/wallboards/proxies", map[string]any{"trusted_proxies": []string{" 127.0.0.1 ", "10.1.2.3/16", "127.0.0.1"}}, http.StatusOK, &view)
+	if !slices.Equal(view.Set, []string{"127.0.0.1", "10.1.0.0/16"}) || !slices.Equal(view.Env, []string{"192.0.2.10/32"}) {
+		t.Errorf("proxies = %+v", view)
+	}
+	if fetch(t, h, "/api/public/tv/noc", via).status != http.StatusOK {
+		t.Error("behind a proxy set in the interface the forwarded address is checked")
+	}
+	if fetch(t, h, "/api/public/tv/noc", map[string]string{"X-Forwarded-For": "10.30.0.1"}).status != http.StatusForbidden {
+		t.Error("a forwarded address outside the networks is refused")
+	}
+
+	// Changing proxies needs its own permission: wallboard editors cannot.
+	h.st.Write(func(d *store.Data) {
+		d.Roles["R-tv"] = &model.Role{ID: "R-tv", Name: "TV", Permissions: []string{"wallboards:view", "wallboards:edit"}}
+	})
+	h.addLocal("tv", "Tv-editor-pass-2026", "R-tv", time.Now())
+	editor := h.client()
+	editor.login("tv", "Tv-editor-pass-2026")
+	f.expect(editor, http.MethodGet, "/api/wallboards/proxies", nil, http.StatusOK, nil)
+	f.expect(editor, http.MethodPut, "/api/wallboards/proxies", map[string]any{"trusted_proxies": []string{}}, http.StatusForbidden, nil)
+}

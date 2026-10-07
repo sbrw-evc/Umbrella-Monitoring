@@ -35,6 +35,9 @@ type Wallboard struct {
 	Theme           string `json:"theme"`
 	// Locale: empty uses the default locale of the installation.
 	Locale string `json:"locale"`
+	// Timezone of the clock and times on the screen (IANA name); empty uses the default time
+	// zone of the installation.
+	Timezone string `json:"timezone"`
 	// AllowedNetworks are CIDRs or single addresses of the clients that may open the page.
 	AllowedNetworks []string  `json:"allowed_networks"`
 	CreatedBy       string    `json:"created_by"`

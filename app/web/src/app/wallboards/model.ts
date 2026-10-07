@@ -6,26 +6,6 @@ export const REFRESH_MAX = 600
 export const RESOLVED_MAX = 1440
 export const MAX_NETWORKS = 200
 
-const CYRILLIC: Record<string, string> = {
-  а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p',
-  р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya',
-}
-
-// slugOf suggests a URL key for a title: Cyrillic is transliterated to Latin, everything else
-// that is not a Latin letter or digit becomes a single dash.
-export function slugOf(title: string) {
-  const latin = Array.from(title.toLowerCase())
-    .map((c) => CYRILLIC[c] ?? c)
-    .join('')
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-  return latin
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 63)
-    .replace(/-+$/, '')
-}
-
 function ipv4(s: string) {
   const parts = s.split('.')
   return parts.length === 4 && parts.every((p) => /^\d{1,3}$/.test(p) && Number(p) <= 255)
@@ -94,6 +74,7 @@ export function draftOf(v: Wallboard | 'new' | null): Draft {
       refresh_seconds: v.refresh_seconds || 30,
       theme: v.theme || 'dark',
       locale: v.locale ?? '',
+      timezone: v.timezone ?? '',
       networks: (v.allowed_networks ?? []).join('\n'),
       slugTouched: true,
     }
@@ -114,6 +95,7 @@ export function draftOf(v: Wallboard | 'new' | null): Draft {
     refresh_seconds: 30,
     theme: 'dark',
     locale: '',
+    timezone: '',
     networks: '',
     slugTouched: false,
   }
@@ -137,6 +119,7 @@ export function inputOf(d: Draft): Input {
     refresh_seconds: d.refresh_seconds,
     theme: d.theme,
     locale: d.locale,
+    timezone: d.timezone,
     allowed_networks: networksOf(d.networks),
   }
 }

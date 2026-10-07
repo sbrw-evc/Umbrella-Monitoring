@@ -1,10 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Copy, Eye, ExternalLink, Pencil, Plus, RefreshCw, Trash2, Tv } from 'lucide-react'
 import { api } from '../../api'
 import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
-import { Banner, Button, formatDate, Modal, Rows } from '../../ui'
+import { Banner, Button, Field, formatDate, Modal, Rows, Textarea, zoneLabel } from '../../ui'
+import { SummaryCard } from '../profile/SummaryCard'
 import { SeverityPill } from '../incidents/IncidentDetail'
 import { SEVERITIES, severityText } from '../incidents/types'
 import { useSession } from '../session'
@@ -94,6 +95,7 @@ export function WallboardsPage() {
           ))}
         </div>
       )}
+      {list.data && <Proxies onSaved={reload} />}
       <WallboardEditor
         value={editing}
         clientIP={clientIP}
@@ -220,6 +222,61 @@ function BoardCard({
   )
 }
 
+type ProxyView = { trusted_proxies: string[]; env: string[]; client_ip: string }
+
+// Proxies are the reverse proxies whose X-Forwarded-For is believed: those of
+// UMBRELLA_TRUSTED_PROXIES (read-only) and those set here.
+function Proxies({ onSaved }: { onSaved: () => void }) {
+  const t = useT(strings)
+  const { can } = useSession()
+  const editor = can('wallboards:proxies')
+  const [epoch, setEpoch] = useState(0)
+  const view = useResource<ProxyView>('/api/wallboards/proxies', epoch)
+  const [text, setText] = useState('')
+  const save = useAction()
+  useEffect(() => {
+    if (view.data) setText(view.data.trusted_proxies.join('\n'))
+  }, [view.data])
+  const list = (v: string[] | undefined) => (v && v.length ? v.join(', ') : t('wb.proxies.none'))
+  const submit = () =>
+    save.run(async () => {
+      const entries = text
+        .split(/[\n,;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+      await api('PUT', '/api/wallboards/proxies', { trusted_proxies: entries })
+      notify({ kind: 'ok', title: t('wb.proxies.saved') })
+      setEpoch((e) => e + 1)
+      onSaved()
+    })
+  return (
+    <SummaryCard
+      title={t('wb.proxies.title')}
+      text={t('wb.proxies.text')}
+      rows={[
+        [t('wb.proxies.set'), <span className="wb-mono">{list(view.data?.trusted_proxies)}</span>],
+        [t('wb.proxies.env'), <span className="wb-mono">{list(view.data?.env)}</span>],
+        [t('wb.proxies.you'), <span className="wb-mono">{view.data?.client_ip || '—'}</span>],
+      ]}
+    >
+      <ErrorBanner error={view.error} strings={strings} />
+      {editor && (
+        <div className="stack wb-proxies">
+          <Field label={t('wb.proxies.field')}>
+            {(id) => <Textarea id={id} rows={3} spellCheck={false} className="wb-mono" placeholder="10.0.0.5" value={text} onChange={(e) => setText(e.target.value)} />}
+          </Field>
+          <ErrorFlash error={save.error} strings={strings} />
+          <div className="row">
+            <Button busy={save.busy} onClick={() => void submit()}>
+              {t('wb.proxies.save')}
+            </Button>
+          </div>
+        </div>
+      )}
+    </SummaryCard>
+  )
+}
+
 function Names({ refs }: { refs: { id: string; name: string; missing?: boolean }[] | undefined }) {
   const t = useT(strings)
   if (!refs || refs.length === 0) return null
@@ -259,6 +316,7 @@ function Details({ w, onClose }: { w: Wallboard | null; onClose: () => void }) {
         [t('wb.refresh'), `${w.refresh_seconds} ${t('wb.seconds')}`],
         [t('wb.theme'), t(`wb.theme.${w.theme || 'dark'}`)],
         [t('wb.locale'), t(`wb.locale.${w.locale || 'auto'}`)],
+        [t('wb.timezone'), w.timezone ? zoneLabel(w.timezone) : t('wb.timezone.auto')],
         [t('wb.allowed'), <Networks list={w.allowed_networks ?? []} />],
         [t('wb.updated.label'), `${formatDate(w.updated_at, locale, timezone)}${w.updated_by ? ` · ${w.updated_by}` : ''}`],
       ]
