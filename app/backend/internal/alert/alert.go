@@ -60,14 +60,18 @@ func (a *Alert) IsTest() bool { return a.Labels[TestLabel] == "true" }
 
 // Source is one event of one connector that feeds the alert.
 type Source struct {
-	ConnectorID string    `json:"connector_id"`
-	Key         string    `json:"key"`
-	Status      string    `json:"status"`
-	Severity    string    `json:"severity"`
-	Title       string    `json:"title"`
-	Value       string    `json:"value,omitempty"`
-	FirstSeen   time.Time `json:"first_seen"`
-	LastSeen    time.Time `json:"last_seen"`
+	ConnectorID string `json:"connector_id"`
+	Key         string `json:"key"`
+	Status      string `json:"status"`
+	Severity    string `json:"severity"`
+	Title       string `json:"title"`
+	Value       string `json:"value,omitempty"`
+	// Description and Fields are what the connector shows of the event: the full text and
+	// named values (model.Field).
+	Description string        `json:"description,omitempty"`
+	Fields      []model.Field `json:"fields,omitempty"`
+	FirstSeen   time.Time     `json:"first_seen"`
+	LastSeen    time.Time     `json:"last_seen"`
 }
 
 type Ref struct {
@@ -399,5 +403,7 @@ type Incoming struct {
 	Severity    string
 	Status      string
 	Value       string
+	Description string
+	Fields      []model.Field
 	Labels      map[string]string
 }

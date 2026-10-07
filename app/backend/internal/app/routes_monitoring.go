@@ -16,6 +16,7 @@ func (a *App) registerMonitoring(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/monitoring/sources/{id}", a.authed(a.can("monitoring:edit", a.deleteMonitoringSource)))
 	mux.HandleFunc("POST /api/monitoring/test", a.authed(a.can("monitoring:test", a.testMonitoringSource)))
 	mux.HandleFunc("POST /api/monitoring/sources/{id}/sync", a.authed(a.can("monitoring:sync", a.syncMonitoringSource)))
+	mux.HandleFunc("POST /api/monitoring/sources/{id}/poll", a.authed(a.can("monitoring:sync", a.pollMonitoringSource)))
 	mux.HandleFunc("GET /api/monitoring/hosts", a.authed(a.can("monitoring:view", a.monitoringHosts)))
 	mux.HandleFunc("POST /api/monitoring/link", a.authed(a.can("monitoring:link", a.linkHost)))
 	mux.HandleFunc("POST /api/monitoring/ci", a.authed(a.can("monitoring:link", a.can("cis:edit", a.createCIFromHost))))

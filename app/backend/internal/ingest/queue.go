@@ -405,23 +405,28 @@ func (q *Queue) handle(ctx context.Context, tx pgx.Tx, r Request, process Proces
 		e := &res.Events[i]
 		cleanEvent(&e.Event)
 		labels, _ := json.Marshal(e.Event.Labels)
+		fields, _ := json.Marshal(e.Event.Fields)
+		if e.Event.Fields == nil {
+			fields = []byte("[]")
+		}
 		// changed: the first delivery of the alert or a change of its status or severity. The
 		// rest are duplicates (prev is read before the upsert, in the same snapshot). No row
 		// comes back when a newer request already set this key.
 		var changed, again bool
 		err := tx.QueryRow(ctx, `WITH prev AS (SELECT status, severity, request_id, request_at FROM connector_events WHERE connector_id = $1 AND key = $3)
 			INSERT INTO connector_events AS ce (connector_id, version, key, title, ci, signal, method, severity, status,
-				external_id, value, labels, request_id, request_at, item)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+				external_id, value, labels, request_id, request_at, item, description, fields)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 			ON CONFLICT (connector_id, key) DO UPDATE SET version = EXCLUDED.version, title = EXCLUDED.title, ci = EXCLUDED.ci,
 				signal = EXCLUDED.signal, method = EXCLUDED.method, severity = EXCLUDED.severity, status = EXCLUDED.status,
 				external_id = EXCLUDED.external_id, value = EXCLUDED.value, labels = EXCLUDED.labels, request_id = EXCLUDED.request_id,
-				request_at = EXCLUDED.request_at, item = EXCLUDED.item, last_seen = now(), seen = ce.seen + 1
+				request_at = EXCLUDED.request_at, item = EXCLUDED.item, description = EXCLUDED.description, fields = EXCLUDED.fields,
+				last_seen = now(), seen = ce.seen + 1
 			WHERE (ce.request_at, ce.request_id) <= (EXCLUDED.request_at, EXCLUDED.request_id)
 			RETURNING coalesce((SELECT status <> $9 OR severity <> $8 FROM prev), true),
 				coalesce((SELECT request_id = $13 AND request_at = $14 FROM prev), false)`,
 			r.ConnectorID, version, e.Event.Key, e.Event.Title, e.Event.CI, e.Event.Signal, e.Event.Method, e.Event.Severity, e.Event.Status,
-			e.Event.ExternalID, e.Event.Value, labels, r.ID, r.ReceivedAt, e.Lineage.Item).Scan(&changed, &again)
+			e.Event.ExternalID, e.Event.Value, labels, r.ID, r.ReceivedAt, e.Lineage.Item, e.Event.Description, fields).Scan(&changed, &again)
 		if errors.Is(err, pgx.ErrNoRows) {
 			st.duplicates++ // stale: a newer request has spoken for this source
 			continue

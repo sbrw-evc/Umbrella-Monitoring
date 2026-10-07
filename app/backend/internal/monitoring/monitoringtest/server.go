@@ -1,4 +1,4 @@
-// Package monitoringtest runs fake Zabbix and Prometheus servers for tests.
+// Package monitoringtest runs fake Zabbix, Prometheus and Grafana servers for tests.
 package monitoringtest
 
 import (

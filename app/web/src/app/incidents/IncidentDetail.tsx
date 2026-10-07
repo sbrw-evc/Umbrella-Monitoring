@@ -13,6 +13,7 @@ import { useSession } from '../session'
 import { BindCIForm, CreateCIForm, ResolveConfirm } from './CatalogForms'
 import { entryText, severityTone } from './format'
 import { useLiveReload } from './live'
+import { IncidentDetails, SourceDetailsToggle } from './SourceDetails'
 import { strings } from './strings'
 import { severityText, type Detail, type Incident, type PD, type Person, type Severity } from './types'
 import { notify } from '../../notify'
@@ -177,6 +178,7 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
           {tab === 'main' && (
             <>
               <Catalog d={d} onMode={setMode} />
+              <IncidentDetails d={d} />
               <Main d={d} onOpen={onOpen} />
               {actor && <CommentBox busy={act.busy} onComment={(text) => run('comment', { text })} />}
             </>
@@ -423,6 +425,7 @@ function Sources({ d }: { d: Detail }) {
             <td>
               {s.title}
               {s.value && <span className="muted"> · {s.value}</span>}
+              <SourceDetailsToggle s={s} />
             </td>
             <td>
               <SeverityPill severity={s.severity} />

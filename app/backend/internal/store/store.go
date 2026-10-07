@@ -24,7 +24,7 @@ type Data struct {
 	Wallboards    map[string]*model.Wallboard
 	MetricSources map[string]*model.MetricSource
 	Rules         map[string]*model.Rule
-	// MonitoringSources are the Zabbix and Prometheus systems hosts are read from.
+	// MonitoringSources are the Zabbix, Prometheus and Grafana systems hosts are read from.
 	MonitoringSources map[string]*model.MonitoringSource
 	// LogSources are the log stores the incident card reads the lines of a machine from.
 	LogSources map[string]*model.LogSource

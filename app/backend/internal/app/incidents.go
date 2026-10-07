@@ -25,7 +25,7 @@ func (a *App) alertSink(ctx context.Context, tx pgx.Tx, connectorID string, even
 	in := make([]alert.Incoming, 0, len(events))
 	for _, e := range events {
 		in = append(in, alert.Incoming{ConnectorID: connectorID, Key: e.Key, Title: e.Title, CI: e.CI, Signal: e.Signal, Method: e.Method,
-			Severity: e.Severity, Status: e.Status, Value: e.Value, Labels: e.Labels})
+			Severity: e.Severity, Status: e.Status, Value: e.Value, Description: e.Description, Fields: e.Fields, Labels: e.Labels})
 	}
 	return a.alerts.Apply(ctx, tx, in)
 }

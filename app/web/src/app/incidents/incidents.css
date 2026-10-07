@@ -307,6 +307,22 @@
   }
 }
 
+.inc-details h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.inc-source-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.inc-source-details .inc-source-extra {
+  margin-top: 6px;
+}
+
 /* The machine of an incident: graphs, events and logs around it. */
 .modal:has(.inc-machine) {
   width: min(1120px, 100%);

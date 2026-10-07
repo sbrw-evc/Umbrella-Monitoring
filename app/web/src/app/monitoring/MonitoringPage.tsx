@@ -26,7 +26,8 @@ import './monitoring.css'
 import '../bulk/bulk.css'
 import { Flash, notify } from '../../notify'
 
-type Kind = 'zabbix' | 'prometheus'
+type Kind = 'zabbix' | 'prometheus' | 'grafana'
+type Poll = { at: string; ok: boolean; error?: string; firing: number; sent: number }
 type Sync = { started_at: string; finished_at: string; ok: boolean; error?: string; actor: string; hosts: number; version?: string }
 type Source = {
   id: string
@@ -40,6 +41,9 @@ type Source = {
   sync_minutes: number
   query?: string
   host_label?: string
+  poll_alerts?: boolean
+  poll_seconds?: number
+  poll?: Poll
   sync: Sync
   hosts: number
   matched: number
@@ -50,7 +54,7 @@ type Source = {
   connector?: { id: string; name: string; slug: string; status: string; ingest_path: string; last_received?: string; received: number }
   rules: number
 }
-type View = { sources: Source[]; defaults: { query: string; host_label: string } }
+type View = { sources: Source[]; defaults: { query: string; host_label: string; grafana_host_labels?: string[]; poll_seconds?: number } }
 type Ref = { id: string; name: string }
 type Host = {
   key: string
@@ -354,6 +358,7 @@ function SystemAlerts({ s, onChanged }: { s: Source; onChanged: () => void }) {
         </dd>
       </dl>
       <CopyField label={t('sys.alerts.url')} value={`${window.location.origin}${c.ingest_path}`} />
+      {s.kind === 'grafana' && <PollBlock s={s} draft={c.status === 'draft'} onChanged={onChanged} />}
       <p className="muted">{t('sys.alerts.tokens')}</p>
       {c.status !== 'draft' && (can('connectors:edit') || editable) && <TestEvent connectorID={c.id} />}
       {editable && (
@@ -365,6 +370,51 @@ function SystemAlerts({ s, onChanged }: { s: Source; onChanged: () => void }) {
       )}
       <ErrorFlash error={action.error} strings={strings} />
     </>
+  )
+}
+
+// PollBlock is the state of polling the Grafana Alerting API, with a button to poll at once.
+function PollBlock({ s, draft, onChanged }: { s: Source; draft: boolean; onChanged: () => void }) {
+  const t = useT(systemStrings)
+  const { can } = useSession()
+  const action = useAction()
+  const p = s.poll
+  const poll = () =>
+    void action.run(async () => {
+      await api('POST', `/api/monitoring/sources/${s.id}/poll`)
+      onChanged()
+    })
+  return (
+    <div className="mon-poll">
+      <h3>{t('sys.poll.title')}</h3>
+      {!s.poll_alerts && !p ? (
+        <p className="muted">{t('sys.poll.off')}</p>
+      ) : (
+        <dl className="mon-kv">
+          <dt>{t('sys.poll.last')}</dt>
+          <dd>
+            {p ? <When at={p.at} /> : t('sys.poll.never')}
+            {s.poll_alerts && <span className="muted"> · {t('sys.poll.every', { n: s.poll_seconds ?? 60 })}</span>}
+            {p?.ok && <div className="muted">{t('sys.poll.result', { firing: p.firing, sent: p.sent })}</div>}
+            {p && !p.ok && (
+              <div className="mon-error" title={p.error}>
+                <span className="pill pill-error">{t('sys.poll.failed')}</span> {p.error}
+              </div>
+            )}
+          </dd>
+        </dl>
+      )}
+      {draft && <Banner kind="warn" title={t('sys.poll.unpublished')} />}
+      {can('monitoring:sync') && !draft && (
+        <div className="row">
+          <Button busy={action.busy} onClick={poll}>
+            <RefreshCw size={15} aria-hidden />
+            {t('sys.poll.now')}
+          </Button>
+        </div>
+      )}
+      <ErrorBanner error={action.error} strings={strings} />
+    </div>
   )
 }
 
@@ -721,15 +771,30 @@ function CreateDialog({ host, onClose, onSaved }: { host: Host | null; onClose: 
   )
 }
 
-type Draft = Omit<Source, 'id' | 'sync' | 'hosts' | 'matched' | 'unmatched' | 'running' | 'next_sync_at' | 'credential_name' | 'connector' | 'rules'> & {
+type Draft = Omit<Source, 'id' | 'sync' | 'hosts' | 'matched' | 'unmatched' | 'running' | 'next_sync_at' | 'credential_name' | 'connector' | 'rules' | 'poll'> & {
   credential_id: string
   connector_id: string
   query: string
   host_label: string
+  poll_alerts: boolean
+  poll_seconds: number
 }
 
 function blank(kind: Kind = 'zabbix'): Draft {
-  return { name: '', kind, url: '', credential_id: '', connector_id: '', skip_verify: false, enabled: true, sync_minutes: 60, query: '', host_label: '' }
+  return {
+    name: '',
+    kind,
+    url: '',
+    credential_id: '',
+    connector_id: '',
+    skip_verify: false,
+    enabled: true,
+    sync_minutes: 60,
+    query: '',
+    host_label: '',
+    poll_alerts: false,
+    poll_seconds: 60,
+  }
 }
 
 function SourceEditor({
@@ -765,6 +830,8 @@ function SourceEditor({
             sync_minutes: editing.sync_minutes,
             query: editing.query ?? '',
             host_label: editing.host_label ?? '',
+            poll_alerts: editing.poll_alerts ?? false,
+            poll_seconds: editing.poll_seconds || 60,
           }
         : blank(),
     )
@@ -829,6 +896,7 @@ function SourceEditor({
           options={[
             { value: 'zabbix', label: t('mon.kind.zabbix') },
             { value: 'prometheus', label: t('mon.kind.prometheus') },
+            { value: 'grafana', label: t('mon.kind.grafana') },
           ]}
         />
         <Field label={t('mon.name')}>
@@ -841,7 +909,7 @@ function SourceEditor({
               value={d.url}
               spellCheck={false}
               autoComplete="off"
-              placeholder={d.kind === 'zabbix' ? 'https://zabbix.example.com' : 'http://prometheus:9090'}
+              placeholder={d.kind === 'zabbix' ? 'https://zabbix.example.com' : d.kind === 'grafana' ? 'https://grafana.example.com' : 'http://prometheus:9090'}
               onChange={(e) => set({ url: e.target.value })}
             />
           )}
@@ -870,6 +938,25 @@ function SourceEditor({
               {(id) => <Input id={id} value={d.host_label} spellCheck={false} placeholder={defaults.host_label} onChange={(e) => set({ host_label: e.target.value })} />}
             </Field>
           </div>
+        )}
+        {d.kind === 'grafana' && (
+          <>
+            <Field label={t('mon.label')} hint={t('mon.glabel.hint', { labels: (defaults.grafana_host_labels ?? ['instance']).join(', ') })}>
+              {(id) => (
+                <Input id={id} value={d.host_label} spellCheck={false} placeholder={(defaults.grafana_host_labels ?? ['instance'])[0]} onChange={(e) => set({ host_label: e.target.value })} />
+              )}
+            </Field>
+            <Switch checked={d.poll_alerts} onChange={(poll_alerts) => set({ poll_alerts })} label={t('mon.poll')} hint={t('mon.poll.hint')} />
+            {d.poll_alerts && (
+              <Field label={t('mon.poll.every')}>
+                {(id) => (
+                  <div className="nb-stepper">
+                    <Stepper id={id} value={d.poll_seconds} min={15} max={3600} suffix={t('mon.seconds')} onChange={(poll_seconds) => set({ poll_seconds })} />
+                  </div>
+                )}
+              </Field>
+            )}
+          </>
         )}
         {d.url.trim().startsWith('https') && <Switch checked={d.skip_verify} onChange={(skip_verify) => set({ skip_verify })} label={t('mon.skip')} />}
         <Switch checked={d.enabled} onChange={(enabled) => set({ enabled })} label={t('mon.enabled')} hint={t('mon.enabled.hint')} />

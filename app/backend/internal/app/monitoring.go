@@ -61,7 +61,15 @@ type MonitoringService struct {
 	now     func() time.Time
 	mu      sync.Mutex
 	running map[string]bool
+	// polls tells the last poll of the alerts of a source (alertPoller.status).
+	polls func(id string) *model.MonitoringPoll
 }
+
+const (
+	defaultPollSeconds = 60
+	minPollSeconds     = 15
+	maxPollSeconds     = 3600
+)
 
 func NewMonitoringService(st *store.Store, creds *CredentialsService, cis *CIService) *MonitoringService {
 	return &MonitoringService{st: st, creds: creds, cis: cis, fetch: monitoring.Fetch, now: func() time.Time { return time.Now().UTC() },
@@ -79,6 +87,8 @@ type MonitoringSourceInput struct {
 	Query        string `json:"query"`
 	HostLabel    string `json:"host_label"`
 	ConnectorID  string `json:"connector_id"`
+	PollAlerts   bool   `json:"poll_alerts"`
+	PollSeconds  int    `json:"poll_seconds"`
 }
 
 type MonitoringSourceView struct {
@@ -93,6 +103,8 @@ type MonitoringSourceView struct {
 	// query a Prometheus system.
 	Connector *SystemConnector `json:"connector,omitempty"`
 	Rules     int              `json:"rules"`
+	// Poll is the last poll of the alerts of a Grafana system since Umbrella started.
+	Poll *model.MonitoringPoll `json:"poll,omitempty"`
 }
 
 // SystemConnector is the alert intake of a monitoring system. LastReceived is filled in by
@@ -112,6 +124,9 @@ type MonitoringView struct {
 	Defaults struct {
 		Query     string `json:"query"`
 		HostLabel string `json:"host_label"`
+		// GrafanaHostLabels name the host of a Grafana alert when the system sets no label.
+		GrafanaHostLabels []string `json:"grafana_host_labels"`
+		PollSeconds       int      `json:"poll_seconds"`
 	} `json:"defaults"`
 }
 
@@ -300,6 +315,9 @@ func (s *MonitoringService) sourceView(d *store.Data, m *hostMatcher, src *model
 			v.Unmatched++
 		}
 	}
+	if s.polls != nil && src.Kind == model.MonitoringGrafana {
+		v.Poll = s.polls(src.ID)
+	}
 	if src.Enabled && src.SyncMinutes > 0 {
 		next := src.Sync.StartedAt.Add(time.Duration(src.SyncMinutes) * time.Minute)
 		if src.Sync.StartedAt.IsZero() {
@@ -313,6 +331,7 @@ func (s *MonitoringService) sourceView(d *store.Data, m *hostMatcher, src *model
 func (s *MonitoringService) View() MonitoringView {
 	out := MonitoringView{Sources: []MonitoringSourceView{}}
 	out.Defaults.Query, out.Defaults.HostLabel = monitoring.DefaultQuery, monitoring.DefaultHostLabel
+	out.Defaults.GrafanaHostLabels, out.Defaults.PollSeconds = monitoring.GrafanaHostLabels, defaultPollSeconds
 	s.st.Read(func(d *store.Data) {
 		m := newHostMatcher(d)
 		for _, src := range sortedSources(d) {
@@ -327,7 +346,7 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 	if n := utf8.RuneCountInString(in.Name); n == 0 || n > 200 || strings.ContainsFunc(in.Name, unicode.IsControl) {
 		return invalid("name_invalid", nil)
 	}
-	if in.Kind != model.MonitoringZabbix && in.Kind != model.MonitoringPrometheus {
+	if in.Kind != model.MonitoringZabbix && in.Kind != model.MonitoringPrometheus && in.Kind != model.MonitoringGrafana {
 		return invalid("monitoring_kind", nil)
 	}
 	u, err := optionalURL(in.URL)
@@ -338,13 +357,29 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 	if in.SyncMinutes < 0 || in.SyncMinutes > 10080 {
 		return invalid("monitoring_interval", nil)
 	}
-	if in.Kind == model.MonitoringPrometheus {
+	switch in.Kind {
+	case model.MonitoringPrometheus:
 		in.Query, in.HostLabel = strings.TrimSpace(in.Query), strings.TrimSpace(in.HostLabel)
 		if len(in.Query) > 4000 || len(in.HostLabel) > 200 {
 			return invalid("monitoring_query", nil)
 		}
-	} else {
+	case model.MonitoringGrafana:
+		in.Query, in.HostLabel = "", strings.TrimSpace(in.HostLabel)
+		if len(in.HostLabel) > 200 {
+			return invalid("monitoring_query", nil)
+		}
+	default:
 		in.Query, in.HostLabel = "", ""
+	}
+	if in.Kind == model.MonitoringGrafana {
+		if in.PollSeconds == 0 {
+			in.PollSeconds = defaultPollSeconds
+		}
+		if in.PollSeconds < minPollSeconds || in.PollSeconds > maxPollSeconds {
+			return invalid("monitoring_poll_interval", nil)
+		}
+	} else {
+		in.PollAlerts, in.PollSeconds = false, 0
 	}
 	if in.ConnectorID != "" && d.Connectors[in.ConnectorID] == nil {
 		return invalid("connector_not_found", nil)
@@ -360,7 +395,7 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 		return invalid("credential_not_found", nil)
 	}
 	ok := c.Type == "bearer" || c.Type == "basic"
-	if in.Kind == model.MonitoringPrometheus {
+	if in.Kind != model.MonitoringZabbix {
 		ok = ok || c.Type == "header"
 	}
 	if !ok {
@@ -372,7 +407,7 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 func (in MonitoringSourceInput) apply(src *model.MonitoringSource) {
 	src.Name, src.Kind, src.URL, src.CredentialID, src.SkipVerify = in.Name, in.Kind, in.URL, in.CredentialID, in.SkipVerify
 	src.Enabled, src.SyncMinutes, src.Query, src.HostLabel = in.Enabled, in.SyncMinutes, in.Query, in.HostLabel
-	src.ConnectorID = in.ConnectorID
+	src.ConnectorID, src.PollAlerts, src.PollSeconds = in.ConnectorID, in.PollAlerts, in.PollSeconds
 }
 
 func (s *MonitoringService) Create(actor string, in MonitoringSourceInput) (MonitoringSourceView, error) {
@@ -413,7 +448,7 @@ func (s *MonitoringService) Update(actor, id string, in MonitoringSourceInput) (
 		}
 		// Another system means other hosts: what was read and linked before no longer applies.
 		if src.Kind != in.Kind || !strings.EqualFold(src.URL, in.URL) {
-			src.Hosts, src.Links, src.Sync = nil, map[string]string{}, model.MonitoringSync{}
+			src.Hosts, src.Links, src.Sync, src.Polled = nil, map[string]string{}, model.MonitoringSync{}, nil
 		}
 		in.apply(src)
 		src.UpdatedBy, src.UpdatedAt = actor, s.now()

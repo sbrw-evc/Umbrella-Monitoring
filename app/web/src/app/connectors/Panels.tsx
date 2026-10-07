@@ -5,6 +5,7 @@ import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Banner, Button, Field, formatDate, Input, Modal, Select, Textarea } from '../../ui'
+import { FieldList, LongText } from '../../LongText'
 import { useSession } from '../session'
 import { json } from './graph'
 import { strings } from './strings'
@@ -42,7 +43,17 @@ export function EventsTable({ events }: { events: (EventPreview | StoredEvent)[]
                 <SevPill sev={e.severity} />
               </td>
               <td>{e.status}</td>
-              <td>{e.title}</td>
+              <td>
+                {e.title}
+                {e.value && <span className="muted"> · {e.value}</span>}
+                {(e.description || (e.fields?.length ?? 0) > 0) && (
+                  <details className="cn-ev-details">
+                    <summary>{t('cn.ev.details')}</summary>
+                    {(e.fields?.length ?? 0) > 0 && <FieldList fields={e.fields ?? []} />}
+                    {e.description && <LongText text={e.description} />}
+                  </details>
+                )}
+              </td>
               <td className="cn-mono">{e.ci}</td>
               <td className="cn-mono">{e.signal}</td>
               <td className="cn-mono cn-labels">

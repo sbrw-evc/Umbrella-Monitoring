@@ -5,7 +5,7 @@ import type { Dict } from '../../i18n'
 export const sourcesStrings: Dict = {
   en: {
     'src.explain':
-      'Alert intake — Connectors; host lists and CI matching — Monitoring systems; metrics for RED/USE rules — Prometheus systems or Metric sources. One Zabbix or Prometheus is one monitoring system with all three.',
+      'Alert intake — Connectors; host lists and CI matching — Monitoring systems; metrics for RED/USE rules — Prometheus systems or Metric sources. One Zabbix, Prometheus or Grafana is one monitoring system.',
     'src.explain.connectors': 'Connectors',
     'src.explain.monitoring': 'Monitoring systems',
     'src.explain.rules': 'RED/USE rules',
@@ -68,7 +68,7 @@ export const sourcesStrings: Dict = {
   },
   ru: {
     'src.explain':
-      'Приём алертов — Коннекторы; списки хостов и сопоставление с КЕ — Системы мониторинга; метрики для правил RED/USE — системы Prometheus или Источники метрик. Один Zabbix или Prometheus — одна система мониторинга со всеми тремя.',
+      'Приём алертов — Коннекторы; списки хостов и сопоставление с КЕ — Системы мониторинга; метрики для правил RED/USE — системы Prometheus или Источники метрик. Один Zabbix, Prometheus или Grafana — одна система мониторинга.',
     'src.explain.connectors': 'Коннекторы',
     'src.explain.monitoring': 'Системы мониторинга',
     'src.explain.rules': 'Правила RED/USE',

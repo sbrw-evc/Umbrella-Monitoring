@@ -1915,6 +1915,76 @@ code {
   border-top: 1px solid var(--border);
 }
 
+/* LongText: a long text collapsed to its first lines, and FieldList: named values of an incident. */
+.long-text pre {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.45;
+  tab-size: 4;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.long-text.open pre {
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.long-text-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.link-button:hover {
+  text-decoration: underline;
+}
+
+.field-list {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 1fr;
+  gap: 4px 14px;
+  margin: 0;
+}
+
+.field-list > div {
+  display: contents;
+}
+
+.field-list dt {
+  color: var(--muted);
+}
+
+.field-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.field-list a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 /* Notifications: toasts in the bottom right corner and the history panel of the top bar. */
 .toaster {
   position: fixed;
