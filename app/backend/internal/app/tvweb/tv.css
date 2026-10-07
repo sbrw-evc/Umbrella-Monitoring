@@ -23,6 +23,7 @@ html { font-size: 1vh; }
   --crit: #ff3d5e;   --crit-text: #ff8597;  --crit-tint: rgba(255, 61, 94, 0.13);
   --err: #ff8a1f;    --err-text: #ffad5c;   --err-tint: rgba(255, 138, 31, 0.07);
   --warn: #ffd23f;   --warn-text: #ffdf70;  --warn-tint: rgba(255, 210, 63, 0.035);
+  --low: #3dd6c3;    --low-text: #7fe6d9;   --low-tint: transparent;
   --info: #47a6ff;   --info-text: #8cc6ff;  --info-tint: transparent;
   --ack: #9fb0c6;
   --badge-bg: rgba(255, 255, 255, 0.08);
@@ -49,6 +50,7 @@ html { font-size: 1vh; }
   --crit: #d70f3c;   --crit-text: #b40a30;  --crit-tint: rgba(215, 15, 60, 0.08);
   --err: #e86b00;    --err-text: #a84c00;   --err-tint: rgba(232, 107, 0, 0.05);
   --warn: #f2b400;   --warn-text: #7a5a00;  --warn-tint: rgba(242, 180, 0, 0.05);
+  --low: #0f9488;    --low-text: #0b6d64;   --low-tint: transparent;
   --info: #0f6fd6;   --info-text: #0b56a8;  --info-tint: transparent;
   --ack: #5c6c82;
   --badge-bg: rgba(13, 23, 36, 0.06);
@@ -175,12 +177,8 @@ body.no-cursor, body.no-cursor * { cursor: none !important; }
 .cnt.zero .cnt-num { color: var(--faint); }
 .cnt.zero .cnt-label { color: var(--faint); }
 .cnt.zero .mk { opacity: 0.35; }
-.cnt-crit { --c: var(--crit); }
-.cnt-err { --c: var(--err); }
-.cnt-warn { --c: var(--warn); }
-.cnt-info { --c: var(--info); }
-.cnt-ack { --c: var(--ack); margin-left: 1.2rem; }
-.cnt-crit:not(.zero) { background: var(--crit-tint); border-color: var(--crit); }
+.cnt.tone-ack { margin-left: 1.2rem; }
+.cnt.tone-critical:not(.zero) { background: var(--crit-tint); border-color: var(--crit); }
 
 .hdr-time {
   flex: 0 0 auto;
@@ -277,10 +275,17 @@ body.no-cursor, body.no-cursor * { cursor: none !important; }
   transform: scale(0.88);
 }
 /* warning: triangle */
+.mk-warn::before,
 .mk-warning::before {
   background: var(--warn);
   -webkit-clip-path: polygon(50% 4%, 100% 94%, 0 94%);
   clip-path: polygon(50% 4%, 100% 94%, 0 94%);
+}
+/* low: hollow square */
+.mk-low::before {
+  border: 0.55rem solid var(--low);
+  border-radius: 0.3rem;
+  transform: scale(0.78);
 }
 /* info: ring */
 .mk-info::before {
@@ -325,18 +330,21 @@ body.no-cursor, body.no-cursor * { cursor: none !important; }
   position: relative;
 }
 .row:nth-child(even) { background: var(--row-alt); }
-.row.sev-critical { background: linear-gradient(90deg, var(--crit-tint), transparent 60%), var(--row); }
-.row.sev-error { background: linear-gradient(90deg, var(--err-tint), transparent 60%), var(--row); }
+.row.tone-critical { background: linear-gradient(90deg, var(--crit-tint), transparent 60%), var(--row); }
+.row.tone-error { background: linear-gradient(90deg, var(--err-tint), transparent 60%), var(--row); }
 
 .row-bar {
   flex: 0 0 auto;
   width: 1.1rem;
   background: var(--sc);
 }
-.sev-critical { --sc: var(--crit); --st: var(--crit-text); }
-.sev-error { --sc: var(--err); --st: var(--err-text); }
-.sev-warning { --sc: var(--warn); --st: var(--warn-text); }
-.sev-info { --sc: var(--info); --st: var(--info-text); }
+/* Tones of the alert scale (model.Severity.Tone); warning is the tone of an older payload. */
+.tone-critical { --c: var(--crit); --sc: var(--crit); --st: var(--crit-text); }
+.tone-error { --c: var(--err); --sc: var(--err); --st: var(--err-text); }
+.tone-warn, .tone-warning { --c: var(--warn); --sc: var(--warn); --st: var(--warn-text); }
+.tone-low { --c: var(--low); --sc: var(--low); --st: var(--low-text); }
+.tone-info { --c: var(--info); --sc: var(--info); --st: var(--info-text); }
+.tone-ack { --c: var(--ack); }
 
 .row-sev {
   flex: 0 0 auto;
@@ -351,6 +359,20 @@ body.no-cursor, body.no-cursor * { cursor: none !important; }
   white-space: nowrap;
 }
 .row-sev .mk { width: 3.4rem; height: 3.4rem; }
+.sev-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.1;
+}
+.sev-word {
+  font-size: 1.7rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sev-p + .sev-word { color: var(--text-2); }
+.sev-word:only-child { font-size: inherit; font-weight: inherit; }
 
 .row-main {
   flex: 1 1 auto;
@@ -502,7 +524,7 @@ body.no-cursor, body.no-cursor * { cursor: none !important; }
 .row.is-ack .dur { color: var(--text-2); }
 .row.is-ack .row-bar { opacity: 0.45; }
 .row.is-ack { opacity: 0.78; }
-.row.is-ack.sev-critical, .row.is-ack.sev-error { background: var(--row); }
+.row.is-ack.tone-critical, .row.is-ack.tone-error { background: var(--row); }
 
 /* resolved rows: grey and struck through */
 .row.is-resolved { opacity: 0.55; background: var(--row-alt); }

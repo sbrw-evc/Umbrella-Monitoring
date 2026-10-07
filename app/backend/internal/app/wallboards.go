@@ -422,6 +422,9 @@ type TVPayload struct {
 	Counts        tvCounts     `json:"counts"`
 	Incidents     []tvIncident `json:"incidents"`
 	More          bool         `json:"more"`
+	// Severities is the alert scale (model.Severities), most severe first: the page takes
+	// its order, counters, colours and words from it.
+	Severities []model.Severity `json:"severities"`
 }
 
 // boardFilter: a team target matches the incidents routed to the team and the incidents of every
@@ -464,6 +467,7 @@ func (a *App) wallboardPayload(ctx context.Context, w *model.Wallboard) (TVPaylo
 		Board: tvBoard{Slug: w.Slug, Title: w.Title, Description: w.Description, RefreshSeconds: w.RefreshSeconds, Theme: w.Theme,
 			Locale: w.Locale, Sort: w.Sort, ShowAcknowledged: w.ShowAcknowledged, ResolvedMinutes: w.ResolvedMinutes},
 		DefaultLocale: locale, Version: a.opt.Version, GeneratedAt: time.Now().UTC().Truncate(time.Second), Incidents: []tvIncident{},
+		Severities: model.Severities,
 	}
 	if a.alerts == nil || !a.ingestReady() {
 		return out, nil
