@@ -116,3 +116,48 @@ func TestPrometheusTargets(t *testing.T) {
 		t.Errorf("probe %+v", h)
 	}
 }
+
+// Grafana hosts come from the instances of its alert rules: a host per instance label, down
+// while all its instances alert, partial while some do.
+func TestGrafanaHosts(t *testing.T) {
+	g := monitoringtest.StartGrafana(t)
+	g.SetRule("cpu", "High CPU", map[string]string{"summary": "CPU"},
+		monitoringtest.GrafanaInstance{Labels: map[string]string{"instance": "db-01:9100"}, State: "Alerting"},
+		monitoringtest.GrafanaInstance{Labels: map[string]string{"instance": "app-01:9100"}, State: "Normal"})
+	g.SetRule("disk", "Disk", nil,
+		monitoringtest.GrafanaInstance{Labels: map[string]string{"host": "db-01"}, State: "Normal"},
+		monitoringtest.GrafanaInstance{Labels: map[string]string{"host": "10.0.0.7"}, State: "Alerting (NoData)"},
+		monitoringtest.GrafanaInstance{Labels: map[string]string{"service": "no-host"}, State: "Alerting"})
+	src := model.MonitoringSource{Kind: model.MonitoringGrafana, URL: g.URL}
+	auth := &monitoring.Auth{Type: "bearer", Secrets: map[string]string{"token": g.Token}}
+	res, err := monitoring.Fetch(context.Background(), src, auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]string{}
+	for _, h := range res.Hosts {
+		states[h.Key] = h.State
+	}
+	want := map[string]string{"db-01": "partial", "app-01": "up", "10.0.0.7": "down"}
+	if res.Version != "11.3.0" || len(states) != 3 {
+		t.Fatalf("got %+v", res)
+	}
+	for k, v := range want {
+		if states[k] != v {
+			t.Errorf("%s: %q, want %q", k, states[k], v)
+		}
+	}
+	if _, err := monitoring.Fetch(context.Background(), src, &monitoring.Auth{Type: "bearer", Secrets: map[string]string{"token": "bad"}}); err == nil ||
+		!strings.Contains(err.Error(), "401") {
+		t.Errorf("a wrong token: %v", err)
+	}
+	src.HostLabel = "service"
+	if res, _ := monitoring.Fetch(context.Background(), src, auth); len(res.Hosts) != 1 || res.Hosts[0].Key != "no-host" {
+		t.Errorf("by the service label: %+v", res.Hosts)
+	}
+	reading, _ := monitoring.ReadGrafana(context.Background(), src, auth)
+	if len(reading.Alerts) != 5 || reading.Alerts[0].Fingerprint == "" || reading.Alerts[0].Labels["alertname"] == "" ||
+		reading.Alerts[0].Labels["grafana_folder"] != "Infra" {
+		t.Errorf("alerts = %+v", reading.Alerts)
+	}
+}

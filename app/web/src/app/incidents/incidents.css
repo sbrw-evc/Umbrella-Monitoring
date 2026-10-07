@@ -306,3 +306,19 @@
     animation: none;
   }
 }
+
+.inc-details h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.inc-source-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.inc-source-details .inc-source-extra {
+  margin-top: 6px;
+}

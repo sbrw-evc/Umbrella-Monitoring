@@ -83,6 +83,7 @@ type App struct {
 	cmdb       *CMDBService
 	groups     *GroupsService
 	monitoring *MonitoringService
+	alertPoll  *alertPoller
 
 	creds         *CredentialsService
 	connectors    *ConnectorsService
@@ -205,6 +206,8 @@ func New(opt Options, deps Deps) *App {
 	}
 	a.cmdb = NewCMDBService(deps.Store, firing)
 	a.monitoring = NewMonitoringService(deps.Store, creds, a.cis)
+	a.alertPoll = newAlertPoller(a)
+	a.monitoring.polls = a.alertPoll.status
 	a.status = NewStatusService(deps.Store, vault, db, dir, sessions, queue, a.ingestReady, opt)
 	return a
 }
@@ -245,6 +248,7 @@ func (a *App) Run(ctx context.Context) {
 	wg.Go(func() { a.netbox.Run(ctx) })
 	wg.Go(func() { a.groups.Run(ctx) })
 	wg.Go(func() { a.monitoring.Run(ctx) })
+	wg.Go(func() { a.alertPoll.Run(ctx) })
 	if a.queue == nil {
 		return
 	}

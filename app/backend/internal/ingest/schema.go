@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS connector_events (
 	UNIQUE (connector_id, key)
 );
 CREATE INDEX IF NOT EXISTS connector_events_recent ON connector_events (connector_id, last_seen DESC);
+ALTER TABLE connector_events ADD COLUMN IF NOT EXISTS description text NOT NULL DEFAULT '';
+ALTER TABLE connector_events ADD COLUMN IF NOT EXISTS fields jsonb NOT NULL DEFAULT '[]';
 
 CREATE TABLE IF NOT EXISTS ingest_failures (
 	id           bigserial PRIMARY KEY,

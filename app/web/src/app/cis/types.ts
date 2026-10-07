@@ -62,7 +62,7 @@ export type CI = {
 export type Monitor = {
   source_id: string
   source_name: string
-  kind: 'zabbix' | 'prometheus'
+  kind: 'zabbix' | 'prometheus' | 'grafana'
   key: string
   host: string
   name: string
@@ -73,7 +73,7 @@ export type Monitor = {
 
 // Presence: whether a system (NetBox, the domain, a monitoring system) knows the item.
 export type Presence = {
-  kind: 'netbox' | 'directory' | 'zabbix' | 'prometheus'
+  kind: 'netbox' | 'directory' | 'zabbix' | 'prometheus' | 'grafana'
   source_id?: string
   name: string
   state: 'present' | 'missing'

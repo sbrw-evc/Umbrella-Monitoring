@@ -182,6 +182,8 @@ export type Event = {
   status: string
   external_id: string
   value: string
+  description?: string
+  fields?: { name: string; value: string }[]
   labels: Record<string, string>
   key: string
 }
