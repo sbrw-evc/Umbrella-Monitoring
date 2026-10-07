@@ -78,6 +78,12 @@ type hostContextDefaults struct {
 	MessageField  string            `json:"message_field"`
 	TimeField     string            `json:"time_field"`
 	LevelField    string            `json:"level_field"`
+	// Graylog are the fields a Graylog source reads when it names none.
+	Graylog struct {
+		HostField    string `json:"host_field"`
+		MessageField string `json:"message_field"`
+		LevelField   string `json:"level_field"`
+	} `json:"graylog"`
 }
 
 type HostContextView struct {
@@ -87,9 +93,11 @@ type HostContextView struct {
 }
 
 func hostContextDefaultsView() hostContextDefaults {
-	return hostContextDefaults{WindowMinutes: model.DefaultHostWindow, LogLimit: model.DefaultHostLogLimit, Panels: model.DefaultHostPanels(),
+	d := hostContextDefaults{WindowMinutes: model.DefaultHostWindow, LogLimit: model.DefaultHostLogLimit, Panels: model.DefaultHostPanels(),
 		LokiQuery: logs.DefaultLokiQuery, Index: logs.DefaultIndex, HostField: logs.DefaultHostField, MessageField: logs.DefaultMessageField,
 		TimeField: logs.DefaultTimeField, LevelField: logs.DefaultLevelField}
+	d.Graylog.HostField, d.Graylog.MessageField, d.Graylog.LevelField = logs.GraylogHostField, logs.GraylogMessageField, logs.GraylogLevelField
+	return d
 }
 
 func logSourceView(d *store.Data, src *model.LogSource) LogSourceView {
@@ -225,7 +233,17 @@ func (in *LogSourceInput) check(d *store.Data) error {
 			return invalid("log_query", nil)
 		}
 	} else {
-		in.Query = ""
+		if in.Kind == model.LogGraylog {
+			// Graylog: the query narrows the lines, the index lists stream IDs and the time is
+			// always its timestamp.
+			in.TimeField = ""
+			if len(in.Query) > 4000 || strings.ContainsFunc(in.Query, unicode.IsControl) {
+				return invalid("log_query", nil)
+			}
+			in.Index = strings.Join(logs.GraylogStreams(model.LogSource{Index: in.Index}), ",")
+		} else {
+			in.Query = ""
+		}
 		for _, f := range fields[1:] {
 			if len(*f) > 200 || strings.ContainsFunc(*f, func(r rune) bool { return unicode.IsControl(r) || unicode.IsSpace(r) }) {
 				return invalid("log_field", nil)
@@ -629,6 +647,10 @@ func (s *HostContextService) Machine(ctx context.Context, al alert.Alert, minute
 			label := h.SourceName
 			if prefix {
 				label += " · " + firstSet(h.Name, h.Host)
+			}
+			// Grafana and Graylog systems give alerts and hosts, not graphs.
+			if h.Kind != model.MonitoringPrometheus && h.Kind != model.MonitoringZabbix {
+				continue
 			}
 			if err := authErr[h.src.ID]; err != nil {
 				v.Panels[i].Errors = append(v.Panels[i].Errors, sourceError{Source: label, Error: err.Error()})

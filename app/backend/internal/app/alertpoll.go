@@ -18,7 +18,12 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
-// Polling the alerts of Grafana: besides its contact point (a webhook to the connector),
+// pollable: the kinds of systems whose alerts can be polled.
+func pollable(kind string) bool {
+	return kind == model.MonitoringGrafana || kind == model.MonitoringGraylog
+}
+
+// Polling the alerts of Grafana (Graylog: graylogpoll.go): besides its contact point (a webhook to the connector),
 // Umbrella can read the firing alerts through the Alerting API. Each poll hands the alerts that
 // began to fire and those that stopped to the connector of the system, in the body a Grafana
 // webhook contact point sends, so one connector serves both ways and folds them into the same
@@ -34,7 +39,7 @@ const (
 
 var (
 	ErrPollRunning = errors.New("the alerts of this system are already being read")
-	ErrPollOff     = errors.New("the system is not Grafana or has no connector for its alerts")
+	ErrPollOff     = errors.New("the system is not Grafana or Graylog or has no connector for its alerts")
 )
 
 func init() {
@@ -48,6 +53,7 @@ func init() {
 type alertPoller struct {
 	a       *App
 	read    func(ctx context.Context, src model.MonitoringSource, auth *monitoring.Auth) (monitoring.GrafanaReading, error)
+	graylog func(ctx context.Context, src model.MonitoringSource, auth *monitoring.Auth, span time.Duration) (monitoring.GraylogReading, error)
 	now     func() time.Time
 	mu      sync.Mutex
 	state   map[string]model.MonitoringPoll
@@ -55,7 +61,7 @@ type alertPoller struct {
 }
 
 func newAlertPoller(a *App) *alertPoller {
-	return &alertPoller{a: a, read: monitoring.ReadGrafana, now: func() time.Time { return time.Now().UTC() },
+	return &alertPoller{a: a, read: monitoring.ReadGrafana, graylog: monitoring.ReadGraylog, now: func() time.Time { return time.Now().UTC() },
 		state: map[string]model.MonitoringPoll{}, running: map[string]bool{}}
 }
 
@@ -82,7 +88,7 @@ func (p *alertPoller) Run(ctx context.Context) {
 			for _, id := range p.due() {
 				wg.Go(func() {
 					if _, err := p.Poll(ctx, id); err != nil && !errors.Is(err, ErrPollRunning) {
-						slog.Error("grafana: polling alerts failed", "source", id, "err", err)
+						slog.Error("monitoring: polling alerts failed", "source", id, "err", err)
 					}
 				})
 			}
@@ -95,7 +101,7 @@ func (p *alertPoller) due() []string {
 	var out []string
 	p.a.deps.Store.Read(func(d *store.Data) {
 		for id, src := range d.MonitoringSources {
-			if !src.Enabled || !src.PollAlerts || src.Kind != model.MonitoringGrafana || src.ConnectorID == "" {
+			if !src.Enabled || !src.PollAlerts || !pollable(src.Kind) || src.ConnectorID == "" {
 				continue
 			}
 			last := p.status(id)
@@ -123,7 +129,7 @@ func (p *alertPoller) Poll(ctx context.Context, id string) (model.MonitoringPoll
 		}
 		src = *s
 		src.Polled = maps.Clone(s.Polled)
-		if c := d.Connectors[s.ConnectorID]; c != nil && s.Kind == model.MonitoringGrafana {
+		if c := d.Connectors[s.ConnectorID]; c != nil && pollable(s.Kind) {
 			con, ok = *c, true
 		}
 	})
@@ -172,6 +178,9 @@ func (p *alertPoller) poll(ctx context.Context, src model.MonitoringSource, con 
 	}
 	ctx, cancel := context.WithTimeout(ctx, pollTimeout)
 	defer cancel()
+	if src.Kind == model.MonitoringGraylog {
+		return p.pollGraylog(ctx, src, con, auth, st)
+	}
 	reading, err := p.read(ctx, src, auth)
 	if err != nil {
 		return err

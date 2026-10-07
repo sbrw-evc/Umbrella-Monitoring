@@ -10,12 +10,13 @@ import "time"
 const (
 	LogLoki       = "loki"
 	LogOpenSearch = "opensearch"
+	LogGraylog    = "graylog"
 )
 
-var LogKinds = []string{LogLoki, LogOpenSearch}
+var LogKinds = []string{LogLoki, LogOpenSearch, LogGraylog}
 
 // LogSource is a log store the lines of a machine are read from: a Loki-compatible server
-// (LogQL) or an OpenSearch- or Elasticsearch-compatible search API.
+// (LogQL), an OpenSearch- or Elasticsearch-compatible search API or Graylog.
 type LogSource struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
@@ -25,10 +26,12 @@ type LogSource struct {
 	SkipVerify   bool   `json:"skip_verify"`
 	Enabled      bool   `json:"enabled"`
 	// Query (LogQL) selects the lines of a machine; $host is a regular expression that matches
-	// every name of the machine.
+	// every name of the machine. Graylog: a search query that narrows the lines; $host in it
+	// stands for the names of the machine, otherwise the host field must be one of them.
 	Query string `json:"query,omitempty"`
 	// Index, HostField, MessageField, TimeField and LevelField: where an OpenSearch document keeps
-	// the machine name, the line, its time and level.
+	// the machine name, the line, its time and level. Graylog: Index is the stream IDs, comma
+	// separated (empty: every stream), and the time is always its timestamp.
 	Index        string `json:"index,omitempty"`
 	HostField    string `json:"host_field,omitempty"`
 	MessageField string `json:"message_field,omitempty"`

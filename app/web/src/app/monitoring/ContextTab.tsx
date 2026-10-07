@@ -11,7 +11,7 @@ import { panelTitle } from '../incidents/Chart'
 import { Flash } from '../../notify'
 import { ask } from '../../confirm'
 
-type LogKind = 'loki' | 'opensearch'
+type LogKind = 'loki' | 'opensearch' | 'graylog'
 type Panel = { id: string; title: string; unit: string; promql: string; zabbix_key: string }
 type Settings = { window_minutes: number; log_limit: number; panels: Panel[] }
 type LogSource = {
@@ -40,6 +40,7 @@ type Defaults = {
   message_field: string
   time_field: string
   level_field: string
+  graylog?: { host_field: string; message_field: string; level_field: string }
 }
 type View = { settings: Settings; defaults: Defaults; log_sources: LogSource[] }
 type Credential = { id: string; name: string; type: string }
@@ -250,6 +251,12 @@ type Draft = {
   level_field: string
 }
 
+const urlPlaceholders: Record<LogKind, string> = {
+  loki: 'http://loki:3100',
+  opensearch: 'https://opensearch:9200',
+  graylog: 'https://graylog.example.com',
+}
+
 const blank = (): Draft => ({
   name: '',
   kind: 'loki',
@@ -320,9 +327,23 @@ function LogEditor({ value, defaults, onClose, onSaved }: { value: LogSource | '
       await api('DELETE', `/api/host-context/logs/${editing.id}`)
       onSaved()
     })
+  // Graylog reads its own fields and streams instead of an index.
+  const placeholder = (key: 'index' | 'host_field' | 'message_field' | 'time_field' | 'level_field') => {
+    if (d.kind !== 'graylog') return defaults[key]
+    if (key === 'host_field' || key === 'message_field' || key === 'level_field') return defaults.graylog?.[key] ?? ''
+    return ''
+  }
   const field = (key: 'index' | 'host_field' | 'message_field' | 'time_field' | 'level_field', label: string, hint?: string) => (
     <Field label={t(label)} hint={hint && t(hint)}>
-      {(id) => <Input id={id} value={d[key]} spellCheck={false} placeholder={defaults[key]} onChange={(e) => set({ [key]: e.target.value })} />}
+      {(id) => (
+        <Input
+          id={id}
+          value={d[key]}
+          spellCheck={false}
+          placeholder={placeholder(key)}
+          onChange={(e) => set({ [key]: e.target.value })}
+        />
+      )}
     </Field>
   )
   return (
@@ -348,10 +369,11 @@ function LogEditor({ value, defaults, onClose, onSaved }: { value: LogSource | '
         <Segmented
           label={t('ctx.kind')}
           value={d.kind}
-          onChange={(kind) => set({ kind })}
+          onChange={(kind) => set({ kind, query: '', index: '', host_field: '', message_field: '', time_field: '', level_field: '' })}
           options={[
             { value: 'loki', label: t('ctx.kind.loki') },
             { value: 'opensearch', label: t('ctx.kind.opensearch') },
+            { value: 'graylog', label: t('ctx.kind.graylog') },
           ]}
         />
         <Field label={t('ctx.name')}>{(id) => <Input id={id} value={d.name} placeholder={t(`ctx.kind.${d.kind}`)} onChange={(e) => set({ name: e.target.value })} />}</Field>
@@ -362,7 +384,7 @@ function LogEditor({ value, defaults, onClose, onSaved }: { value: LogSource | '
               value={d.url}
               spellCheck={false}
               autoComplete="off"
-              placeholder={d.kind === 'loki' ? 'http://loki:3100' : 'https://opensearch:9200'}
+              placeholder={urlPlaceholders[d.kind]}
               onChange={(e) => set({ url: e.target.value })}
             />
           )}
@@ -386,6 +408,18 @@ function LogEditor({ value, defaults, onClose, onSaved }: { value: LogSource | '
           <Field label={t('ctx.query')} hint={t('ctx.query.hint')}>
             {(id) => <Input id={id} className="cn-mono" value={d.query} spellCheck={false} placeholder={defaults.loki_query} onChange={(e) => set({ query: e.target.value })} />}
           </Field>
+        ) : d.kind === 'graylog' ? (
+          <>
+            <Field label={t('ctx.gquery')} hint={t('ctx.gquery.hint')}>
+              {(id) => <Input id={id} className="cn-mono" value={d.query} spellCheck={false} placeholder="NOT level:7" onChange={(e) => set({ query: e.target.value })} />}
+            </Field>
+            {field('index', 'ctx.streams', 'ctx.streams.hint')}
+            <div className="rl-grid">
+              {field('host_field', 'ctx.hostfield')}
+              {field('message_field', 'ctx.msgfield')}
+              {field('level_field', 'ctx.levelfield')}
+            </div>
+          </>
         ) : (
           <>
             {field('index', 'ctx.index', 'ctx.index.hint')}
