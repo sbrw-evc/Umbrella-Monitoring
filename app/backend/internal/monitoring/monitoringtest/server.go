@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ type Zabbix struct {
 	mu        sync.Mutex
 	hosts     []map[string]any
 	items     []item
+	events    []Event
 	sessions  map[string]bool
 	Calls     []string
 	LoggedOut int
@@ -59,6 +61,98 @@ type item struct {
 	hostID, itemID, name, key, units string
 	valueType                        int
 	values                           [][2]float64
+	lines                            []LogValue
+}
+
+// LogValue is a value of a log or text item: unix seconds and the line.
+type LogValue struct {
+	Clock int64
+	Value string
+}
+
+// AddLogItem adds an item of a host whose values are text: value type 1 is character, 2 log,
+// 4 text.
+func (z *Zabbix) AddLogItem(hostID, itemID int, name, key string, valueType int, lines ...LogValue) {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+	z.items = append(z.items, item{hostID: strconv.Itoa(hostID), itemID: strconv.Itoa(itemID), name: name, key: key, valueType: valueType, lines: lines})
+}
+
+// Event is a trigger problem of a host; Recovery and RecoveryClock are set once it ended.
+type Event struct {
+	HostID, ID, TriggerID, Name string
+	Clock                       int64
+	Severity                    int
+	Recovery                    string
+	RecoveryClock               int64
+	Tags                        map[string]string
+}
+
+func (z *Zabbix) AddEvent(e Event) {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+	z.events = append(z.events, e)
+}
+
+func (z *Zabbix) eventRow(e Event, output []any) map[string]any {
+	row := map[string]any{"eventid": e.ID, "clock": strconv.FormatInt(e.Clock, 10), "name": e.Name, "severity": strconv.Itoa(e.Severity),
+		"value": "1", "r_eventid": "0", "acknowledged": "0", "suppressed": "0", "objectid": e.TriggerID}
+	if e.Recovery != "" {
+		row["r_eventid"] = e.Recovery
+	}
+	tags := []map[string]string{}
+	for k, v := range e.Tags {
+		tags = append(tags, map[string]string{"tag": k, "value": v})
+	}
+	row["tags"] = tags
+	if len(output) > 0 {
+		keep := map[string]any{}
+		for _, f := range output {
+			keep[f.(string)] = row[f.(string)]
+		}
+		keep["tags"] = tags
+		return keep
+	}
+	return row
+}
+
+// eventGet answers event.get (problems by host and time, or events by id) and problem.get
+// (problems not resolved that began by time_till).
+func (z *Zabbix) eventGet(p map[string]any, problems bool) []map[string]any {
+	output, _ := p["output"].([]any)
+	out := []map[string]any{}
+	if ids, ok := p["eventids"].([]any); ok {
+		for _, e := range z.events {
+			if slices.Contains(ids, any(e.Recovery)) {
+				out = append(out, map[string]any{"eventid": e.Recovery, "clock": strconv.FormatInt(e.RecoveryClock, 10)})
+			}
+			if slices.Contains(ids, any(e.ID)) {
+				out = append(out, z.eventRow(e, output))
+			}
+		}
+		return out
+	}
+	hosts, _ := p["hostids"].([]any)
+	from, hasFrom := p["time_from"].(float64)
+	till, hasTill := p["time_till"].(float64)
+	var sel []Event
+	for _, e := range z.events {
+		if len(hosts) > 0 && !slices.Contains(hosts, any(e.HostID)) {
+			continue
+		}
+		if (hasFrom && float64(e.Clock) < from) || (hasTill && float64(e.Clock) > till) || (problems && e.Recovery != "") {
+			continue
+		}
+		sel = append(sel, e)
+	}
+	slices.SortFunc(sel, func(a, b Event) int { return int(b.Clock - a.Clock) })
+	if l, ok := p["limit"].(float64); ok && len(sel) > int(l) {
+		sel = sel[:int(l)]
+	}
+	for _, e := range sel {
+		out = append(out, z.eventRow(e, output))
+	}
+	return out
 }
 
 // AddItem adds a numeric item of a host with its values, [unix seconds, value]. Value type 0
@@ -99,6 +193,9 @@ func (z *Zabbix) itemGet(p map[string]any) []map[string]any {
 		if k, ok := filter["key_"].(string); ok && k != it.key {
 			continue
 		}
+		if vts, ok := filter["value_type"].([]any); ok && !slices.Contains(vts, any(float64(it.valueType))) {
+			continue
+		}
 		if k, ok := search["key_"].(string); ok && !keyMatches(k, it.key) {
 			continue
 		}
@@ -122,6 +219,15 @@ func (z *Zabbix) values(p map[string]any, trend bool) []map[string]any {
 		}
 		if vt, ok := p["history"].(float64); ok && int(vt) != it.valueType {
 			continue
+		}
+		search, _ := p["search"].(map[string]any)
+		text, _ := search["value"].(string)
+		for _, l := range it.lines {
+			if float64(l.Clock) < from || float64(l.Clock) > till || !strings.Contains(strings.ToLower(l.Value), strings.ToLower(text)) {
+				continue
+			}
+			out = append(out, map[string]any{"itemid": it.itemID, "clock": strconv.FormatInt(l.Clock, 10), "ns": "0", "value": l.Value,
+				"source": "", "severity": "0", "logeventid": "0", "timestamp": "0"})
 		}
 		for _, v := range it.values {
 			if v[0] < from || v[0] > till {
@@ -226,6 +332,10 @@ func (z *Zabbix) serve(w http.ResponseWriter, r *http.Request) {
 			out = append(out, c)
 		}
 		reply(out)
+	case "event.get", "problem.get":
+		var p map[string]any
+		_ = json.Unmarshal(req.Params, &p)
+		reply(z.eventGet(p, req.Method == "problem.get"))
 	case "item.get", "history.get", "trend.get":
 		var p map[string]any
 		_ = json.Unmarshal(req.Params, &p)

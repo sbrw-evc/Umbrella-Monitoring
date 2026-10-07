@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 export type ChartSeries = { name: string; unit?: string; points: [number, number][] }
-export type ChartMark = { at: number; tone: 'open' | 'resolve' | 'event' | 'incident'; label: string }
+export type ChartMark = { at: number; tone: 'open' | 'resolve' | 'event' | 'incident' | 'source'; label: string }
 
 // Colours of the series: the tokens of the theme, so custom themes colour graphs too.
 const COLORS = ['var(--accent)', 'var(--ok)', 'var(--warn)', 'var(--low)', 'var(--error)', 'var(--info)', 'var(--muted)']

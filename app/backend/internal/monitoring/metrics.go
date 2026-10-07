@@ -182,21 +182,11 @@ func zabbixMetrics(ctx context.Context, src model.MonitoringSource, auth *Auth, 
 	if key == "" {
 		return nil, ErrNoQuery
 	}
-	endpoint, web, err := zabbixEndpoint(src.URL)
+	z, _, closeFn, err := openZabbix(ctx, src, auth)
 	if err != nil {
 		return nil, err
 	}
-	z := &zabbix{endpoint: endpoint, web: web, http: clients[src.SkipVerify]}
-	if _, err := z.version(ctx); err != nil {
-		return nil, err
-	}
-	session, err := z.login(ctx, auth)
-	if err != nil {
-		return nil, err
-	}
-	if session {
-		defer func() { _ = z.call(context.WithoutCancel(ctx), "user.logout", []any{}, nil) }()
-	}
+	defer closeFn()
 	params := map[string]any{
 		"output":  []string{"itemid", "name", "key_", "value_type", "units"},
 		"hostids": []string{host.Key},

@@ -41,6 +41,10 @@ type metricsFetcher func(ctx context.Context, src model.MonitoringSource, auth *
 
 type logsFetcher func(ctx context.Context, src model.LogSource, auth *logs.Auth, q logs.Query) (logs.Result, error)
 
+type hostEventsFetcher func(ctx context.Context, src model.MonitoringSource, auth *monitoring.Auth, host model.MonitoringHost, from, to time.Time, limit int) ([]monitoring.HostEvent, bool, error)
+
+type hostLogsFetcher func(ctx context.Context, src model.MonitoringSource, auth *monitoring.Auth, host model.MonitoringHost, from, to time.Time, limit int, text string) (monitoring.HostLogs, error)
+
 // HostContextService keeps how the machine of an incident is shown and the log sources, and
 // reads the graphs and lines of a machine.
 type HostContextService struct {
@@ -48,11 +52,15 @@ type HostContextService struct {
 	creds   *CredentialsService
 	metrics metricsFetcher
 	logs    logsFetcher
-	now     func() time.Time
+	// hostEvents and hostLogs read what a monitoring system (Zabbix) keeps about the host.
+	hostEvents hostEventsFetcher
+	hostLogs   hostLogsFetcher
+	now        func() time.Time
 }
 
 func NewHostContextService(st *store.Store, creds *CredentialsService) *HostContextService {
-	return &HostContextService{st: st, creds: creds, metrics: monitoring.Metrics, logs: logs.Fetch, now: func() time.Time { return time.Now().UTC() }}
+	return &HostContextService{st: st, creds: creds, metrics: monitoring.Metrics, logs: logs.Fetch, hostEvents: monitoring.HostEvents, hostLogs: monitoring.HostLogLines,
+		now: func() time.Time { return time.Now().UTC() }}
 }
 
 type LogSourceView struct {
@@ -498,6 +506,15 @@ type machineEvent struct {
 	Count       int       `json:"count"`
 }
 
+// machineSourceEvent is a problem the monitoring system of the machine raised on it.
+type machineSourceEvent struct {
+	monitoring.HostEvent
+	Source string `json:"source"`
+}
+
+// hasOwnEvents: the systems that keep events and log lines of their hosts.
+func hasOwnEvents(kind string) bool { return kind == model.MonitoringZabbix }
+
 type machineIncident struct {
 	ID         string     `json:"id"`
 	Title      string     `json:"title"`
@@ -522,6 +539,12 @@ type machineView struct {
 	Events        []machineEvent    `json:"events"`
 	Incidents     []machineIncident `json:"incidents"`
 	EventsError   string            `json:"events_error,omitempty"`
+	// SourceEvents: the problems the monitoring systems of the machine raised in the window.
+	SourceEvents          []machineSourceEvent `json:"source_events"`
+	SourceEventsErrors    []sourceError        `json:"source_events_errors"`
+	SourceEventsTruncated bool                 `json:"source_events_truncated,omitempty"`
+	// SourceEventHosts is how many hosts of the machine keep their own events.
+	SourceEventHosts int `json:"source_event_hosts"`
 }
 
 type machineLogLine struct {
@@ -580,6 +603,9 @@ func (s *HostContextService) Machine(ctx context.Context, al alert.Alert, minute
 	v.Hosts = make([]CIMonitor, 0, len(hosts))
 	for _, h := range hosts {
 		v.Hosts = append(v.Hosts, h.CIMonitor)
+		if hasOwnEvents(h.Kind) {
+			v.LogSources++
+		}
 	}
 	if v.Names == nil {
 		v.Names = []string{}
@@ -590,33 +616,28 @@ func (s *HostContextService) Machine(ctx context.Context, al alert.Alert, minute
 	}
 	ctx, cancel := context.WithTimeout(ctx, machineTimeout)
 	defer cancel()
-	// The metric of the alert is read alongside the graphs and shown first.
+	// The metric of the alert and the events of the monitoring systems are read alongside the
+	// graphs; the metric is shown first.
 	var alertPanel *machinePanel
 	alertDone := make(chan struct{})
 	go func() {
 		defer close(alertDone)
 		alertPanel = s.alertPanel(ctx, al, rule, hosts, v.Names, v.From, v.To)
 	}()
+	eventsDone := make(chan struct{})
+	go func() {
+		defer close(eventsDone)
+		s.sourceEvents(ctx, hosts, &v)
+	}()
 	defer func() {
 		<-alertDone
+		<-eventsDone
 		v.Panels = orderPanels(v.Panels, alertPanel, focusPanels(set.Panels, al))
 	}()
 	if len(hosts) == 0 || len(set.Panels) == 0 {
 		return v
 	}
-	auths := map[string]*monitoring.Auth{}
-	authErr := map[string]error{}
-	for _, h := range hosts {
-		if _, done := auths[h.src.ID]; done || authErr[h.src.ID] != nil || h.src.CredentialID == "" {
-			continue
-		}
-		c, err := s.creds.Resolve(h.src.CredentialID)
-		if err != nil {
-			authErr[h.src.ID] = err
-			continue
-		}
-		auths[h.src.ID] = &monitoring.Auth{Type: c.Type, Fields: c.Fields, Secrets: c.Secrets}
-	}
+	auths, authErr := s.hostAuths(hosts)
 	prefix := len(hosts) > 1
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -668,16 +689,95 @@ func (s *HostContextService) Machine(ctx context.Context, al alert.Alert, minute
 	return v
 }
 
-// Logs reads the lines of the machine of an incident from every turned-on log source.
+// hostAuths resolves the credentials of the monitoring systems of the hosts.
+func (s *HostContextService) hostAuths(hosts []machineHost) (map[string]*monitoring.Auth, map[string]error) {
+	auths := map[string]*monitoring.Auth{}
+	authErr := map[string]error{}
+	for _, h := range hosts {
+		if _, done := auths[h.src.ID]; done || authErr[h.src.ID] != nil || h.src.CredentialID == "" {
+			continue
+		}
+		c, err := s.creds.Resolve(h.src.CredentialID)
+		if err != nil {
+			authErr[h.src.ID] = err
+			continue
+		}
+		auths[h.src.ID] = &monitoring.Auth{Type: c.Type, Fields: c.Fields, Secrets: c.Secrets}
+	}
+	return auths, authErr
+}
+
+// hostLabel names a host of the machine: its system, and the host when there are several.
+func hostLabel(h machineHost, several bool) string {
+	if several {
+		return h.SourceName + " · " + firstSet(h.Name, h.Host)
+	}
+	return h.SourceName
+}
+
+// sourceEvents reads the problems the monitoring systems of the machine raised in the window.
+func (s *HostContextService) sourceEvents(ctx context.Context, hosts []machineHost, v *machineView) {
+	v.SourceEvents, v.SourceEventsErrors = []machineSourceEvent{}, []sourceError{}
+	var own []machineHost
+	for _, h := range hosts {
+		if hasOwnEvents(h.Kind) {
+			own = append(own, h)
+		}
+	}
+	v.SourceEventHosts = len(own)
+	if len(own) == 0 {
+		return
+	}
+	auths, authErr := s.hostAuths(own)
+	several := len(own) > 1
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, h := range own {
+		label := hostLabel(h, several)
+		if err := authErr[h.src.ID]; err != nil {
+			v.SourceEventsErrors = append(v.SourceEventsErrors, sourceError{Source: label, Error: err.Error()})
+			continue
+		}
+		wg.Go(func() {
+			events, truncated, err := s.hostEvents(ctx, h.src, auths[h.src.ID], h.host, v.From, v.To, machineEvents)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				v.SourceEventsErrors = append(v.SourceEventsErrors, sourceError{Source: label, Error: err.Error()})
+				return
+			}
+			v.SourceEventsTruncated = v.SourceEventsTruncated || truncated
+			for _, e := range events {
+				v.SourceEvents = append(v.SourceEvents, machineSourceEvent{HostEvent: e, Source: label})
+			}
+		})
+	}
+	wg.Wait()
+	slices.SortStableFunc(v.SourceEvents, func(a, b machineSourceEvent) int { return b.At.Compare(a.At) })
+	if len(v.SourceEvents) > machineEvents {
+		v.SourceEvents, v.SourceEventsTruncated = v.SourceEvents[:machineEvents], true
+	}
+	slices.SortFunc(v.SourceEventsErrors, func(a, b sourceError) int { return strings.Compare(a.Source, b.Source) })
+}
+
+// Logs reads the lines of the machine of an incident from every turned-on log source and from
+// the log items of the monitoring systems that keep them (Zabbix).
 func (s *HostContextService) Logs(ctx context.Context, al alert.Alert, minutes int, span bool, text string) machineLogs {
 	var (
 		set     model.HostContext
 		names   []string
 		sources []model.LogSource
+		hosts   []machineHost
 	)
 	s.st.Read(func(d *store.Data) {
 		set = d.Settings.HostContext.Effective()
-		_, names = machineOf(d, al)
+		var all []machineHost
+		all, names = machineOf(d, al)
+		for _, h := range all {
+			if hasOwnEvents(h.Kind) {
+				hosts = append(hosts, h)
+			}
+		}
 		for _, src := range sortedLogSources(d) {
 			if src.Enabled {
 				sources = append(sources, *src)
@@ -687,19 +787,43 @@ func (s *HostContextService) Logs(ctx context.Context, al alert.Alert, minutes i
 	if minutes <= 0 {
 		minutes = set.WindowMinutes
 	}
-	out := machineLogs{Names: names, Sources: len(sources), Lines: []machineLogLine{}, Errors: []sourceError{}}
+	out := machineLogs{Names: names, Sources: len(sources) + len(hosts), Lines: []machineLogLine{}, Errors: []sourceError{}}
 	if out.Names == nil {
 		out.Names = []string{}
 	}
 	out.From, out.To = machineWindow(al, minutes, span, s.now())
-	if len(sources) == 0 || len(names) == 0 {
+	if len(sources)+len(hosts) == 0 || (len(names) == 0 && len(hosts) == 0) {
 		return out
 	}
 	ctx, cancel := context.WithTimeout(ctx, machineTimeout)
 	defer cancel()
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	auths, authErr := s.hostAuths(hosts)
+	for _, h := range hosts {
+		label := hostLabel(h, len(hosts) > 1)
+		wg.Go(func() {
+			err := authErr[h.src.ID]
+			var res monitoring.HostLogs
+			if err == nil {
+				res, err = s.hostLogs(ctx, h.src, auths[h.src.ID], h.host, out.From, out.To, set.LogLimit, text)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				out.Errors = append(out.Errors, sourceError{Source: label, Error: err.Error()})
+				return
+			}
+			out.Truncated = out.Truncated || res.Truncated
+			for _, l := range res.Lines {
+				out.Lines = append(out.Lines, machineLogLine{Line: logs.Line{At: l.At, Level: l.Level, Text: l.Text, Labels: l.Labels}, Source: label})
+			}
+		})
+	}
 	for _, src := range sources {
+		if len(names) == 0 {
+			break
+		}
 		wg.Go(func() {
 			auth, err := s.auth(src.CredentialID)
 			var res logs.Result
