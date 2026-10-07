@@ -3,13 +3,13 @@ import type { Severity } from '../incidents/types'
 export type Mode = 'off' | 'dry_run' | 'live'
 export type Impact = 'extensive' | 'significant' | 'moderate' | 'minor'
 export type Criticality = 'critical' | 'high' | 'medium' | 'low'
-export type Method = 'email' | 'telegram' | 'teams' | 'zoom' | 'pagerduty' | 'war_room' | 'call_teams' | 'call_zoom'
+export type Method = 'email' | 'telegram' | 'teams' | 'zoom' | 'pagerduty' | 'war_room' | 'call_teams' | 'call_zoom' | 'voice_teams' | 'voice_telegram' | 'voice_zoom'
 export type Target = 'route' | 'lead' | 'parent_lead' | 'ci_owners' | 'service_owners'
 
 export const SEVERITIES: Severity[] = ['critical', 'error', 'warning', 'low', 'info']
 export const IMPACTS: Impact[] = ['extensive', 'significant', 'moderate', 'minor']
 export const CRITICALITIES: Criticality[] = ['critical', 'high', 'medium', 'low']
-export const METHODS: Method[] = ['email', 'telegram', 'teams', 'zoom', 'pagerduty', 'war_room', 'call_teams', 'call_zoom']
+export const METHODS: Method[] = ['email', 'telegram', 'teams', 'zoom', 'pagerduty', 'war_room', 'call_teams', 'call_zoom', 'voice_teams', 'voice_telegram', 'voice_zoom']
 export const TARGETS: Target[] = ['route', 'lead', 'parent_lead', 'ci_owners', 'service_owners']
 export const PRIORITY: Record<Severity, string> = { critical: 'P1', error: 'P2', warning: 'P3', low: 'P4', info: 'P5' }
 
@@ -52,6 +52,38 @@ export type Jira = {
 export type Graph = { mode: Mode; tenant_id: string; client_id: string; account: string; login_url?: string; graph_url?: string; has_secret: boolean; has_refresh: boolean }
 export type Zoom = { mode: Mode; account_id: string; client_id: string; user: string; has_secret: boolean }
 
+export type VoiceVia = 'teams' | 'telegram' | 'zoom'
+export const VOICE_VIA: VoiceVia[] = ['teams', 'telegram', 'zoom']
+export type TTSProvider = 'piper' | 'rhvoice' | 'openai'
+
+export type Voice = {
+  mode: Mode
+  tts: { provider: TTSProvider; url: string; voices: Record<string, string>; model: string }
+  templates: Record<string, string>
+  repeat: number
+  ack_digit: boolean
+  has_key: boolean
+  ffmpeg: boolean
+  default_templates: Record<string, string>
+  placeholders: string[]
+}
+
+export type VoiceCall = {
+  id: string
+  via: VoiceVia
+  person: string
+  address?: string
+  locale: string
+  text: string
+  state: 'planned' | 'sent' | 'dialing' | 'talking' | 'done' | 'acked' | 'no_answer' | 'failed'
+  level?: number
+  by?: string
+  voice?: boolean
+  error?: string
+  dry_run?: boolean
+  created: string
+}
+
 export type ResponseView = {
   mode: Mode
   active_since?: string
@@ -60,6 +92,7 @@ export type ResponseView = {
   jira: Jira
   graph: Graph
   zoom: Zoom
+  voice: Voice
   channels: Record<string, boolean>
   default_impact: ImpactPolicy
   default_policies: Policy[]

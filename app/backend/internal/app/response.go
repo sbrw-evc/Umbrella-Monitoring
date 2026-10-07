@@ -5,8 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/mail"
+	"net/url"
+	"os/exec"
 	"regexp"
 	"strings"
 	"time"
@@ -28,6 +32,10 @@ func init() {
 		errStatus{response.ErrOff, http.StatusConflict, "response_off"},
 		errStatus{response.ErrBadAction, http.StatusBadRequest, "bad_action"},
 		errStatus{errResponseUnavailable, http.StatusServiceUnavailable, "response_unavailable"},
+		errStatus{response.ErrVoiceOff, http.StatusConflict, "voice_off"},
+		errStatus{response.ErrVoiceVia, http.StatusBadRequest, "voice_via_invalid"},
+		errStatus{response.ErrVoiceNobody, http.StatusConflict, "voice_nobody"},
+		errStatus{response.ErrVoiceGone, http.StatusNotFound, "voice_gone"},
 	)
 }
 
@@ -59,6 +67,15 @@ type ZoomAPIView struct {
 	HasSecret bool `json:"has_secret"`
 }
 
+type VoiceView struct {
+	model.VoiceSettings
+	HasKey bool `json:"has_key"`
+	// FFmpeg: ffmpeg is installed, so Piper audio goes to Telegram as a voice message.
+	FFmpeg           bool              `json:"ffmpeg"`
+	DefaultTemplates map[string]string `json:"default_templates"`
+	Placeholders     []string          `json:"placeholders"`
+}
+
 type ResponseView struct {
 	Mode        string                 `json:"mode"`
 	ActiveSince *time.Time             `json:"active_since,omitempty"`
@@ -67,6 +84,7 @@ type ResponseView struct {
 	Jira        JiraView               `json:"jira"`
 	Graph       GraphView              `json:"graph"`
 	Zoom        ZoomAPIView            `json:"zoom"`
+	Voice       VoiceView              `json:"voice"`
 	// Channels: the backup notification channels that are ready (email, telegram, teams, zoom)
 	// and PagerDuty:
 	// escalation messages go through them.
@@ -89,9 +107,11 @@ func (s *ResponseService) View() ResponseView {
 		r.Jira.Labels = []string{}
 	}
 	return ResponseView{Mode: r.Mode, ActiveSince: r.ActiveSince, Impact: r.Impact, Policies: r.Policies,
-		Jira:     JiraView{JiraSettings: r.Jira, HasToken: r.Jira.TokenRef != ""},
-		Graph:    GraphView{GraphSettings: r.Graph, HasSecret: r.Graph.ClientSecretRef != "", HasRefresh: r.Graph.RefreshTokenRef != ""},
-		Zoom:     ZoomAPIView{ZoomAPISettings: r.ZoomAPI, HasSecret: r.ZoomAPI.ClientSecretRef != ""},
+		Jira:  JiraView{JiraSettings: r.Jira, HasToken: r.Jira.TokenRef != ""},
+		Graph: GraphView{GraphSettings: r.Graph, HasSecret: r.Graph.ClientSecretRef != "", HasRefresh: r.Graph.RefreshTokenRef != ""},
+		Zoom:  ZoomAPIView{ZoomAPISettings: r.ZoomAPI, HasSecret: r.ZoomAPI.ClientSecretRef != ""},
+		Voice: VoiceView{VoiceSettings: r.Voice, HasKey: r.Voice.TTS.APIKeyRef != "", FFmpeg: ffmpegInstalled(),
+			DefaultTemplates: model.DefaultVoiceTemplates, Placeholders: model.VoicePlaceholders},
 		Channels: ch, DefaultImpact: model.DefaultImpactPolicy(), DefaultPolicies: model.DefaultResponsePolicies(), UpdatedAt: r.UpdatedAt, UpdatedBy: r.UpdatedBy}
 }
 
@@ -347,6 +367,104 @@ func (s *ResponseService) SaveZoom(ctx context.Context, actor string, in ZoomAPI
 	return s.View(), nil
 }
 
+func ffmpegInstalled() bool {
+	_, err := exec.LookPath("ffmpeg")
+	return err == nil
+}
+
+type VoiceInput struct {
+	Mode      string            `json:"mode"`
+	Provider  string            `json:"provider"`
+	URL       string            `json:"url"`
+	Voices    map[string]string `json:"voices"`
+	Model     string            `json:"model"`
+	APIKey    string            `json:"api_key"`
+	ClearKey  bool              `json:"clear_key"`
+	Templates map[string]string `json:"templates"`
+	Repeat    int               `json:"repeat"`
+	AckDigit  bool              `json:"ack_digit"`
+}
+
+var voiceName = regexp.MustCompile(`^[A-Za-z0-9_.:\-]{1,100}$`)
+
+// SaveVoice saves the voice settings: the speech server (its key in OpenBao), the voices and the
+// templates of each language.
+func (s *ResponseService) SaveVoice(ctx context.Context, actor string, in VoiceInput) (ResponseView, error) {
+	mode, err := modeOf(in.Mode)
+	if err != nil {
+		return ResponseView{}, err
+	}
+	if !model.ValidTTS(in.Provider) {
+		return ResponseView{}, invalid("tts_invalid", nil)
+	}
+	addr, err := normalizeServer(in.URL)
+	if err != nil {
+		return ResponseView{}, invalid("url_invalid", err)
+	}
+	voices := map[string]string{}
+	for loc, v := range in.Voices {
+		if !model.ValidLocale(loc) {
+			return ResponseView{}, invalid("locale_invalid", nil)
+		}
+		if v = strings.TrimSpace(v); v != "" {
+			if !voiceName.MatchString(v) {
+				return ResponseView{}, invalid("voice_invalid", fmt.Errorf("%q", v))
+			}
+			voices[loc] = v
+		}
+	}
+	tmpls := map[string]string{}
+	for loc, t := range in.Templates {
+		if !model.ValidLocale(loc) {
+			return ResponseView{}, invalid("locale_invalid", nil)
+		}
+		t = strings.TrimSpace(t)
+		if len([]rune(t)) > model.MaxVoiceTemplate {
+			return ResponseView{}, invalid("template_too_long", nil)
+		}
+		if t != "" && t != model.DefaultVoiceTemplates[loc] {
+			tmpls[loc] = t
+		}
+	}
+	if in.Repeat < 1 || in.Repeat > 3 {
+		return ResponseView{}, invalid("repeat_invalid", nil)
+	}
+	var cur model.TTSSettings
+	s.st.Read(func(d *store.Data) { cur = d.Settings.Response.Voice.TTS })
+	ref := cur.APIKeyRef
+	if in.ClearKey {
+		ref = ""
+	}
+	if v := strings.TrimSpace(in.APIKey); v != "" {
+		if ref, err = putSecret(ctx, s.secrets, responseSecretPath, "tts_api_key", v); err != nil {
+			return ResponseView{}, err
+		}
+	}
+	if mode != model.ModeOff && addr == "" {
+		return ResponseView{}, invalid("voice_incomplete", nil)
+	}
+	v := model.VoiceSettings{Mode: mode, Repeat: in.Repeat, AckDigit: in.AckDigit, Templates: tmpls,
+		TTS: model.TTSSettings{Provider: in.Provider, URL: addr, Voices: voices, Model: strings.TrimSpace(in.Model), APIKeyRef: ref}}
+	s.st.Write(func(d *store.Data) {
+		d.Settings.Response.Voice = v
+		d.AddAudit(store.AuditEntry{Actor: actor, Action: "settings.response.voice", Detail: fmt.Sprintf("mode=%s engine=%s", mode, in.Provider)})
+	})
+	return s.View(), nil
+}
+
+// normalizeServer checks the address of a self-hosted server: http or https, no query.
+func normalizeServer(v string) (string, error) {
+	v = strings.TrimRight(strings.TrimSpace(v), "/")
+	if v == "" {
+		return "", nil
+	}
+	u, err := url.Parse(v)
+	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", errors.New("the address must be an http or https URL without a query")
+	}
+	return v, nil
+}
+
 type SimulateInput struct {
 	Severity  string `json:"severity"`
 	ServiceID string `json:"service_id"`
@@ -443,6 +561,14 @@ func (a *App) registerResponse(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/response/zoom", a.authed(a.can("response:edit", a.responseZoom)))
 	mux.HandleFunc("POST /api/response/test/{kind}", a.authed(a.can("response:test", a.responseTest)))
 	mux.HandleFunc("POST /api/response/simulate", a.authed(a.can("response:view", a.responseSimulate)))
+	mux.HandleFunc("PUT /api/response/voice", a.authed(a.can("response:edit", a.responseVoice)))
+	mux.HandleFunc("GET /api/response/voice/preview", a.authed(a.can("response:view", a.responseVoicePreview)))
+	mux.HandleFunc("POST /api/response/voice/test", a.authed(a.can("response:test", a.responseVoiceTest)))
+	mux.HandleFunc("POST /api/incidents/{id}/response/call", a.authed(a.can("incidents:ack", a.incidentCall)))
+	// Microsoft fetches the audio of a Teams call and reports the call; the token of the call in
+	// the address is the only key.
+	mux.HandleFunc("GET /api/voice/audio/{token}/{file}", a.voiceAudio)
+	mux.HandleFunc("POST /api/voice/teams/{token}", a.voiceTeams)
 	mux.HandleFunc("GET /api/incidents/{id}/response", a.authed(a.can("incidents:view", a.incidentResponse)))
 	mux.HandleFunc("POST /api/incidents/{id}/response/{action}", a.authed(a.can("incidents:ack", a.incidentResponseAct)))
 }
@@ -526,6 +652,157 @@ func (a *App) responseSimulate(w http.ResponseWriter, r *http.Request) {
 type incidentResponseView struct {
 	Mode  string          `json:"mode"`
 	State *response.State `json:"state"`
+	// Voice is the mode of voice calls; Calls are the voice calls of the incident.
+	Voice string               `json:"voice"`
+	Calls []response.VoiceCall `json:"calls"`
+}
+
+func (a *App) incidentResponseOf(r *http.Request, id string, st *response.State) (incidentResponseView, error) {
+	v := a.responseSettings.View()
+	calls, err := a.response.Calls(r.Context(), id)
+	return incidentResponseView{Mode: v.Mode, Voice: v.Voice.Mode, State: st, Calls: calls}, err
+}
+
+func (a *App) responseVoice(w http.ResponseWriter, r *http.Request) {
+	var in VoiceInput
+	if !httpx.Decode(w, r, &in) {
+		return
+	}
+	out, err := a.responseSettings.SaveVoice(r.Context(), current(r).user.Username, in)
+	settingsRespond(w, out, err)
+}
+
+// responseVoicePreview: format=text is the text of a template for a sample incident, otherwise
+// its audio (WAV).
+func (a *App) responseVoicePreview(w http.ResponseWriter, r *http.Request) {
+	if a.response == nil {
+		writeError(w, errResponseUnavailable)
+		return
+	}
+	q := r.URL.Query()
+	tmpl := q.Get("template")
+	if len([]rune(tmpl)) > model.MaxVoiceTemplate {
+		writeError(w, invalid("template_too_long", nil))
+		return
+	}
+	if q.Get("format") == "text" {
+		httpx.JSON(w, http.StatusOK, map[string]string{"text": a.response.PreviewText(q.Get("locale"), tmpl, q.Get("via"))})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	wav, err := a.response.Preview(ctx, q.Get("locale"), tmpl, q.Get("via"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadGateway, "integration_failed", err)
+		return
+	}
+	w.Header().Set("Content-Type", "audio/wav")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(wav)
+}
+
+type voiceTestInput struct {
+	Via string `json:"via"`
+}
+
+// responseVoiceTest speaks a test text to the user who asks, by one channel.
+func (a *App) responseVoiceTest(w http.ResponseWriter, r *http.Request) {
+	if a.response == nil {
+		writeError(w, errResponseUnavailable)
+		return
+	}
+	var in voiceTestInput
+	if !httpx.Decode(w, r, &in) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	c, err := a.response.TestCall(ctx, in.Via, current(r).user)
+	if errors.Is(err, response.ErrVoiceVia) {
+		writeError(w, err)
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusBadGateway, "integration_failed", err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, c)
+}
+
+type incidentCallInput struct {
+	Via     string   `json:"via"`
+	UserIDs []string `json:"user_ids"`
+}
+
+// incidentCall speaks the incident now to the chosen people (the route when none is chosen).
+func (a *App) incidentCall(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := a.incidentAllowed(r, id); err != nil {
+		writeError(w, err)
+		return
+	}
+	var in incidentCallInput
+	if !httpx.Decode(w, r, &in) {
+		return
+	}
+	if len(in.UserIDs) > 50 {
+		writeError(w, invalid("too_many_people", nil))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	if _, err := a.response.Call(ctx, id, in.Via, in.UserIDs, current(r).user.Username); err != nil {
+		writeError(w, err)
+		return
+	}
+	st, err := a.response.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	out, err := a.incidentResponseOf(r, id, st)
+	settingsRespond(w, out, err)
+}
+
+var voiceToken = regexp.MustCompile(`^[0-9a-f]{48}$`)
+
+func (a *App) voiceAudio(w http.ResponseWriter, r *http.Request) {
+	token, file := r.PathValue("token"), r.PathValue("file")
+	if a.response == nil || !voiceToken.MatchString(token) || (file != "main.wav" && file != "confirm.wav") {
+		writeError(w, ErrNotFound)
+		return
+	}
+	data, err := a.response.Audio(r.Context(), token, strings.TrimSuffix(file, ".wav"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "audio/wav")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
+func (a *App) voiceTeams(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	if a.response == nil || !voiceToken.MatchString(token) {
+		writeError(w, ErrNotFound)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeError(w, invalid("body_invalid", err))
+		return
+	}
+	if err := a.response.TeamsEvent(r.Context(), token, body); err != nil {
+		if errors.Is(err, response.ErrVoiceGone) {
+			writeError(w, err)
+			return
+		}
+		slog.Warn("Teams call notification not handled", "err", err)
+		httpx.Error(w, http.StatusBadRequest, "notification_invalid", err)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 // incidentAllowed checks that the incident exists and is in the scope of the user.
@@ -554,7 +831,8 @@ func (a *App) incidentResponse(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, incidentResponseView{Mode: a.responseSettings.View().Mode, State: st})
+	out, err := a.incidentResponseOf(r, id, st)
+	settingsRespond(w, out, err)
 }
 
 func (a *App) incidentResponseAct(w http.ResponseWriter, r *http.Request) {
@@ -572,5 +850,6 @@ func (a *App) incidentResponseAct(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, incidentResponseView{Mode: a.responseSettings.View().Mode, State: st})
+	out, err := a.incidentResponseOf(r, id, st)
+	settingsRespond(w, out, err)
 }

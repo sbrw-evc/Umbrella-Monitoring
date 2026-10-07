@@ -333,3 +333,26 @@
     align-items: flex-start;
   }
 }
+
+.rs-voice-tmpl {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.rs-voice-tmpl .row {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rs-voice-audio {
+  height: 32px;
+  max-width: 100%;
+}
+
+.rs-voice-text {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 4px;
+}

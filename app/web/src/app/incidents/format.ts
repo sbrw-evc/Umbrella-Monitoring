@@ -117,6 +117,15 @@ export function entryText(t: T, e: Entry, connectors: Record<string, string>) {
     case 'response_bridge':
       a.provider = a.provider === 'zoom' ? 'Zoom' : 'Teams'
       break
+    case 'response_voice':
+    case 'response_voice_ack':
+      a.via = { teams: 'Teams', telegram: 'Telegram', zoom: 'Zoom' }[a.via ?? ''] ?? a.via ?? ''
+      a.locale = (a.locale ?? '').toUpperCase()
+      if (e.code === 'response_voice') {
+        if (a.error) key = 'tl.response_voice.error'
+        else a.state = t(`tl.vs.${a.state}`)
+      }
+      break
     case 'response_failed':
     case 'response_gave_up':
     case 'response_skipped':

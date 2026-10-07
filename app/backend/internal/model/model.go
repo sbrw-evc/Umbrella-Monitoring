@@ -122,7 +122,10 @@ type User struct {
 	// MappedScope is the scope mode a group mapping last gave the user.
 	MappedScope string `json:"mapped_scope,omitempty"`
 	// Telegram is the chat ID backup notification sends to.
-	Telegram           string     `json:"telegram"`
+	Telegram string `json:"telegram"`
+	// Locale is the interface language the user chose (en, ru); empty is the default of the
+	// installation. Voice calls speak it.
+	Locale             string     `json:"locale,omitempty"`
 	MustChangePassword bool       `json:"must_change_password"`
 	PasswordRef        string     `json:"-"`
 	ExternalID         string     `json:"-"`

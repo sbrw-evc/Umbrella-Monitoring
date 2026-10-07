@@ -100,6 +100,8 @@ type Service struct {
 	// run serializes ticks and manual actions inside this instance; the advisory lock does it
 	// between instances.
 	run sync.Mutex
+	// ticks counts the ticks of this instance (old voice audio is dropped now and then).
+	ticks int
 }
 
 func New(db *pgxpool.Pool, st *store.Store, inc Incidents, msg Messenger, sec Secrets) *Service {
@@ -191,6 +193,9 @@ func (s *Service) Tick(ctx context.Context) error {
 	}
 	defer conn.Exec(context.WithoutCancel(ctx), "SELECT pg_advisory_unlock($1)", int64(lockKey))
 
+	if s.ticks++; s.ticks%360 == 1 {
+		s.sweepVoice(ctx)
+	}
 	counts, err := s.counts(ctx)
 	if err != nil {
 		return err
@@ -734,6 +739,7 @@ func (p *pass) runStep(pol model.ResponsePolicy, i int) {
 	if b := p.st.Bridge; b != nil && (slices.Contains(step.Methods, model.CommCallTeams) || slices.Contains(step.Methods, model.CommCallZoom)) {
 		run.Reached = append(run.Reached, "call_"+b.Provider)
 	}
+	p.voiceStep(step.Methods, au, level, &run)
 	p.st.Steps = append(p.st.Steps, run)
 	args := map[string]string{"level": fmt.Sprint(level), "after": fmt.Sprint(step.AfterMinutes), "people": strings.Join(au.names(), ", "),
 		"methods": strings.Join(step.Methods, ","), "reached": fmt.Sprint(len(run.Reached)), "failed": fmt.Sprint(len(run.Failed))}

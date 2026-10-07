@@ -1,11 +1,15 @@
 package response
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"strings"
 	"sync"
@@ -27,6 +31,9 @@ type Graph struct {
 	refresh string
 	access  string
 	expires time.Time
+	// appAccess is the token of the app itself (calls).
+	appAccess  string
+	appExpires time.Time
 }
 
 func NewGraph(set model.GraphSettings, clientSecret, refreshToken string, client *http.Client) *Graph {
@@ -236,4 +243,149 @@ func (z *Zoom) CreateMeeting(ctx context.Context, topic string) (Meeting, error)
 		"topic": truncate(topic, 200), "type": 1, "settings": map[string]any{"join_before_host": true, "waiting_room": false},
 	}, &out)
 	return Meeting{ID: out.ID.String(), URL: out.Join}, err
+}
+
+// appToken is an access token of the app itself (client credentials): Teams calls are placed by
+// the app (application permission Calls.Initiate.All), not by the service account.
+func (g *Graph) appToken(ctx context.Context) (string, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.appAccess != "" && time.Now().Before(g.appExpires) {
+		return g.appAccess, nil
+	}
+	form := url.Values{
+		"client_id":     {g.set.ClientID},
+		"client_secret": {g.secret},
+		"grant_type":    {"client_credentials"},
+		"scope":         {"https://graph.microsoft.com/.default"},
+	}
+	var out struct {
+		Access    string `json:"access_token"`
+		ExpiresIn int    `json:"expires_in"`
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.set.Login()+"/"+url.PathEscape(g.set.TenantID)+"/oauth2/v2.0/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := g.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("Microsoft sign-in: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode/100 != 2 {
+		return "", &APIError{Service: "Microsoft sign-in", Status: resp.StatusCode, Msg: errorMessage(raw)}
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.Access == "" {
+		return "", fmt.Errorf("Microsoft sign-in: no access token in the answer")
+	}
+	g.appAccess, g.appExpires = out.Access, time.Now().Add(time.Duration(max(out.ExpiresIn-120, 60))*time.Second)
+	return g.appAccess, nil
+}
+
+func (g *Graph) doApp(ctx context.Context, method, path string, body, out any) error {
+	tok, err := g.appToken(ctx)
+	if err != nil {
+		return err
+	}
+	return call(ctx, g.client, "Microsoft Graph", method, g.set.API()+path, http.Header{"Authorization": {"Bearer " + tok}}, body, out)
+}
+
+// CallUser rings a Teams user from the app with media hosted by Microsoft (prompts are played
+// from audio files); Microsoft posts the progress of the call to callback.
+func (g *Graph) CallUser(ctx context.Context, callback, userID, name string) (string, error) {
+	var out struct {
+		ID string `json:"id"`
+	}
+	err := g.doApp(ctx, http.MethodPost, "/communications/calls", map[string]any{
+		"@odata.type": "#microsoft.graph.call",
+		"callbackUri": callback,
+		"targets": []any{map[string]any{
+			"@odata.type": "#microsoft.graph.invitationParticipantInfo",
+			"identity": map[string]any{
+				"@odata.type": "#microsoft.graph.identitySet",
+				"user":        map[string]any{"@odata.type": "#microsoft.graph.identity", "id": userID, "displayName": name},
+			},
+		}},
+		"requestedModalities": []string{"audio"},
+		"mediaConfig":         map[string]any{"@odata.type": "#microsoft.graph.serviceHostedMediaConfig"},
+		"tenantId":            g.set.TenantID,
+	}, &out)
+	if err == nil && out.ID == "" {
+		err = errors.New("Microsoft Graph: the call has no ID")
+	}
+	return out.ID, err
+}
+
+// PlayPrompt plays audio files one after another in a call; Microsoft fetches them by URL.
+func (g *Graph) PlayPrompt(ctx context.Context, callID, clientContext string, uris []string) error {
+	prompts := make([]any, 0, len(uris))
+	for i, u := range uris {
+		prompts = append(prompts, map[string]any{
+			"@odata.type": "#microsoft.graph.mediaPrompt",
+			"mediaInfo":   map[string]any{"@odata.type": "#microsoft.graph.mediaInfo", "uri": u, "resourceId": fmt.Sprintf("%s-%d", clientContext, i)},
+		})
+	}
+	return g.doApp(ctx, http.MethodPost, "/communications/calls/"+url.PathEscape(callID)+"/playPrompt", map[string]any{"clientContext": clientContext, "prompts": prompts}, nil)
+}
+
+// SubscribeToTone asks Microsoft to report the keys pressed in a call.
+func (g *Graph) SubscribeToTone(ctx context.Context, callID string) error {
+	return g.doApp(ctx, http.MethodPost, "/communications/calls/"+url.PathEscape(callID)+"/subscribeToTone", map[string]any{"clientContext": "tone"}, nil)
+}
+
+// Hangup ends a call.
+func (g *Graph) Hangup(ctx context.Context, callID string) error {
+	return g.doApp(ctx, http.MethodDelete, "/communications/calls/"+url.PathEscape(callID), nil, nil)
+}
+
+// SendChat sends a Team Chat message from the host user to a contact (an e-mail).
+func (z *Zoom) SendChat(ctx context.Context, to, text string) error {
+	return z.do(ctx, http.MethodPost, "/chat/users/"+url.PathEscape(z.set.User)+"/messages", map[string]any{"message": truncate(text, 4000), "to_contact": to}, nil)
+}
+
+// SendFile sends a file in Team Chat from the host user to a contact. Files go to a separate
+// host of the API (fileapi.zoom.us) unless the API address is replaced.
+func (z *Zoom) SendFile(ctx context.Context, to, name, contentType string, data []byte) error {
+	tok, err := z.token(ctx)
+	if err != nil {
+		return err
+	}
+	base := "https://fileapi.zoom.us/v2"
+	if z.set.APIURL != "" {
+		base = z.set.API()
+	}
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	_ = mw.WriteField("to_contact", to)
+	h := textproto.MIMEHeader{}
+	h.Set("Content-Disposition", `form-data; name="files"; filename="`+name+`"`)
+	h.Set("Content-Type", contentType)
+	fw, err := mw.CreatePart(h)
+	if err != nil {
+		return err
+	}
+	_, _ = fw.Write(data)
+	_ = mw.Close()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/users/"+url.PathEscape(z.set.User)+"/messages/files", &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := z.client.Do(req)
+	if err != nil {
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return fmt.Errorf("Zoom: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if resp.StatusCode/100 != 2 {
+		return &APIError{Service: "Zoom", Status: resp.StatusCode, Msg: errorMessage(raw)}
+	}
+	return nil
 }

@@ -24,7 +24,7 @@ CREATE INDEX IF NOT EXISTS incident_response_open ON incident_response (alert_id
 
 // EnsureSchema creates the table of response states; the alert tables must exist.
 func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) error {
-	if _, err := pool.Exec(ctx, schema); err != nil {
+	if _, err := pool.Exec(ctx, schema+voiceSchema); err != nil {
 		return fmt.Errorf("create the incident response table: %w", err)
 	}
 	return nil

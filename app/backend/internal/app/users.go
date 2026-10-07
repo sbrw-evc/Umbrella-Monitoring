@@ -167,6 +167,14 @@ func (s *UserService) SetTimezone(id string, tz string) (model.User, error) {
 	})
 }
 
+// SetLocale keeps the interface language of the user; empty is the default of the installation.
+func (s *UserService) SetLocale(id string, locale string) (model.User, error) {
+	if locale != "" && !model.ValidLocale(locale) {
+		return model.User{}, invalid("invalid_locale", nil)
+	}
+	return s.update(id, func(d *store.Data, u *model.User) { u.Locale = locale })
+}
+
 // SetTelegram sets the Telegram chat backup notification sends to; empty clears it.
 func (s *UserService) SetTelegram(id string, chat string) (model.User, error) {
 	chat = strings.TrimSpace(chat)

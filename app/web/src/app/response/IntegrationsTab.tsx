@@ -8,6 +8,7 @@ import { useAction } from '../profile/useAction'
 import { useSession } from '../session'
 import { responseStrings } from './strings'
 import { SEVERITIES, type Mode, type ResponseView } from './types'
+import { VoiceCard } from './VoiceCard'
 
 type Props = { view: ResponseView; onSaved: (v: ResponseView) => void }
 
@@ -19,6 +20,7 @@ export function IntegrationsTab({ view, onSaved }: Props) {
       <JiraCard view={view} onSaved={onSaved} />
       <GraphCard view={view} onSaved={onSaved} />
       <ZoomCard view={view} onSaved={onSaved} />
+      <VoiceCard view={view} onSaved={onSaved} />
     </>
   )
 }

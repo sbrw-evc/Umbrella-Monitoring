@@ -91,6 +91,8 @@ func (f *fakeAPI) handle(w http.ResponseWriter, r *http.Request) {
 		reply(201, map[string]any{"id": "19:chat-1", "webUrl": "https://teams.example/l/chat/19:chat-1"})
 	case strings.HasPrefix(p, "/chats/"):
 		reply(201, map[string]any{"id": "m1"})
+	case p == "/communications/calls":
+		reply(201, map[string]any{"id": fmt.Sprintf("call-%d", n)})
 	case p == "/me/onlineMeetings":
 		reply(201, map[string]any{"id": "meet-1", "joinWebUrl": "https://teams.example/l/meetup-join/1"})
 	case strings.HasSuffix(p, "/meetings"):
