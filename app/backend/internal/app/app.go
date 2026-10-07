@@ -84,6 +84,8 @@ type App struct {
 	groups     *GroupsService
 	monitoring *MonitoringService
 	alertPoll  *alertPoller
+	// hostContext shows the machine of an incident: graphs, logs and events around it.
+	hostContext *HostContextService
 
 	creds         *CredentialsService
 	connectors    *ConnectorsService
@@ -208,6 +210,7 @@ func New(opt Options, deps Deps) *App {
 	a.monitoring = NewMonitoringService(deps.Store, creds, a.cis)
 	a.alertPoll = newAlertPoller(a)
 	a.monitoring.polls = a.alertPoll.status
+	a.hostContext = NewHostContextService(deps.Store, creds)
 	a.status = NewStatusService(deps.Store, vault, db, dir, sessions, queue, a.ingestReady, opt)
 	return a
 }
@@ -229,7 +232,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerWallboards, a.registerRules, a.registerGrafana, a.registerOnboarding, a.registerResponse, a.registerTelegram} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerWallboards, a.registerRules, a.registerGrafana, a.registerOnboarding, a.registerResponse, a.registerTelegram, a.registerHostContext} {
 		register(mux)
 	}
 	a.registerRoutePreview(mux)

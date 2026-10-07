@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { api } from '../../../api'
-import { ConnectionCard, ErrorBanner } from '../../../connections/ConnectionCard'
+import { ConnectionCard, ErrorFlash } from '../../../connections/ConnectionCard'
 import { useAction } from '../../../connections/useRequest'
 import { useLocale, useT } from '../../../i18n'
-import { Banner, formatDate } from '../../../ui'
+import { formatDate } from '../../../ui'
 import { useSession } from '../../session'
 import { formatBytes } from './format'
 import { strings } from './strings'
 import type { PostgresOverview, PostgresTest } from './types'
+import { Flash } from '../../../notify'
 
 export function CurrentConnection({ overview, sizeBytes }: { overview: PostgresOverview; sizeBytes?: number }) {
   const t = useT(strings)
@@ -42,16 +43,16 @@ export function CurrentConnection({ overview, sizeBytes }: { overview: PostgresO
         [t('pgs.pending'), t(overview.persist.pending ? 'yes' : 'no')],
       ]}
     >
-      <ErrorBanner error={test.error} strings={strings} />
+      <ErrorFlash error={test.error} strings={strings} />
       {result &&
         (result.ok ? (
-          <Banner kind="ok" title={t('pgs.test.ok')}>
+          <Flash kind="ok" title={t('pgs.test.ok')} trigger={result}>
             {t('pgs.test.okText', { version: result.version ?? '?', latency: result.latency_ms })}
-          </Banner>
+          </Flash>
         ) : (
-          <Banner kind="error" title={t('pgs.test.fail')}>
+          <Flash kind="error" title={t('pgs.test.fail')} trigger={result}>
             {result.error}
-          </Banner>
+          </Flash>
         ))}
     </ConnectionCard>
   )

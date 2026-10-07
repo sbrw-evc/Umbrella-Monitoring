@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Check, Search } from 'lucide-react'
 import { useT } from '../../i18n'
-import { Banner, Button, Input, Modal } from '../../ui'
+import { Button, Input, Modal } from '../../ui'
 import type { Action } from '../profile/useAction'
 import { MemberLine } from './MemberList'
 import { orgStrings } from './strings'
 import type { Member } from './types'
 import './org.css'
+import { Flash } from '../../notify'
 
 export function matchesUser(u: { name: string; username: string }, query: string) {
   const q = query.trim().toLowerCase()
@@ -97,9 +98,9 @@ export function MemberPicker({
         </ul>
       )}
       {action.error && (
-        <Banner kind="error" title={action.error.message}>
+        <Flash kind="error" title={action.error.message}>
           {action.error.detail}
-        </Banner>
+        </Flash>
       )}
     </Modal>
   )

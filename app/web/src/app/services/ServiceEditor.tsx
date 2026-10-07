@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
 import { Button, Field, Input, Modal, Select, Textarea } from '../../ui'
@@ -137,7 +137,8 @@ function EditorForm({ service, tree, tags, onClose, onSaved }: Props) {
           />
         )}
       </Field>
-      <ErrorBanner error={saver.error ?? all.error} strings={strings} />
+      <ErrorBanner error={all.error} strings={strings} />
+      <ErrorFlash error={saver.error} strings={strings} />
       <div className="modal-foot">
         <Button type="button" variant="ghost" onClick={onClose}>
           {t('svc.cancel')}

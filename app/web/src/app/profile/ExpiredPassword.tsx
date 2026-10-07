@@ -1,12 +1,13 @@
 import type { FormEvent } from 'react'
 import { useT } from '../../i18n'
-import { Banner, Brand, Button, Preferences } from '../../ui'
+import { Brand, Button, Preferences } from '../../ui'
 import { useSession } from '../session'
 import { strings } from '../strings'
 import { PasswordFields } from './PasswordFields'
 import { useAction } from './useAction'
 import { usePasswordChange } from './usePasswordChange'
 import './password.css'
+import { Flash } from '../../notify'
 
 export function ExpiredPassword({ onSignOut }: { onSignOut: () => void }) {
   const t = useT(strings)
@@ -33,9 +34,9 @@ export function ExpiredPassword({ onSignOut }: { onSignOut: () => void }) {
           </div>
           <PasswordFields change={change} />
           {action.error && (
-            <Banner kind="error" title={action.error.message}>
+            <Flash kind="error" title={action.error.message}>
               {action.error.detail}
-            </Banner>
+            </Flash>
           )}
           <div className="card-actions">
             <Button variant="ghost" onClick={onSignOut}>

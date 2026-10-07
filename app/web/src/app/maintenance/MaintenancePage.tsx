@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Search, X } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Button, Field, formatDate, Input, Modal, Textarea } from '../../ui'
@@ -109,7 +109,8 @@ export function MaintenancePage() {
           </Button>
         </div>
       )}
-      <ErrorBanner error={list.error ?? act.error} strings={strings} />
+      <ErrorBanner error={list.error} strings={strings} />
+      <ErrorFlash error={act.error} strings={strings} />
       {list.data && shown.length === 0 && <p className="muted card mw-empty">{t('mw.empty')}</p>}
       {shown.length > 0 && (
         <div className="card cn-table-card">
@@ -340,7 +341,7 @@ function Editor({ value, onClose, onSaved }: { value: Editing; onClose: () => vo
           </div>
         )}
         <Field label={t('mw.comment')}>{(id) => <Textarea id={id} rows={2} value={d.comment} onChange={(e) => setD({ ...d, comment: e.target.value })} />}</Field>
-        <ErrorBanner error={save.error} strings={strings} />
+        <ErrorFlash error={save.error} strings={strings} />
       </div>
     </Modal>
   )

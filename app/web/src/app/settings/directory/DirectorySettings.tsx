@@ -14,6 +14,7 @@ import { EntraSettings } from './EntraSettings'
 import { DIRECTORY_CHANGED, GroupMappingSettings } from './GroupMappingSettings'
 import { strings } from './strings'
 import './directory.css'
+import { Flash } from '../../../notify'
 
 type DirectoryView = {
   config: Partial<LdapConfig>
@@ -149,9 +150,9 @@ export function DirectorySettings() {
                 </fieldset>
                 <LdapCheckResult check={check} draft={draft} />
                 {tester.error && (
-                  <Banner kind="error" title={tester.error.message}>
+                  <Flash kind="error" title={tester.error.message}>
                     {tester.error.detail}
-                  </Banner>
+                  </Flash>
                 )}
               </div>
             </motion.div>

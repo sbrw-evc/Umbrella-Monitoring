@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { ExternalLink } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Banner, Button, formatDate, Modal, Rows } from '../../ui'
@@ -61,7 +61,7 @@ export function CIDetail({ ci, editable, onClose, onEdit, onDelete, onChanged }:
   return (
     <Modal open={ci !== null} title={ci?.name ?? ''} onClose={close} footer={footer}>
       {ci && <Body ci={ci} editable={editable} onChanged={onChanged} />}
-      <ErrorBanner error={register.error} strings={strings} />
+      <ErrorFlash error={register.error} strings={strings} />
     </Modal>
   )
 }

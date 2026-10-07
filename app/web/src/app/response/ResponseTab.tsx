@@ -1,6 +1,6 @@
 import { ExternalLink } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Banner, Button, formatDate } from '../../ui'
@@ -85,7 +85,7 @@ export function ResponseTab({ id, status, actor, epoch }: { id: string; status: 
           <Button variant="ghost" busy={act.busy} onClick={() => void run('assess')}>{t('ir.do.assess')}</Button>
         </div>
       )}
-      <ErrorBanner error={act.error} strings={responseStrings} />
+      <ErrorFlash error={act.error} strings={responseStrings} />
     </div>
   )
 }

@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react'
 import { Choices } from '../Choice'
 import { useLocale, useT } from '../i18n'
-import { Banner, Field, formatDate, Input, Password, Rows, Switch, Textarea } from '../ui'
+import { Field, formatDate, Input, Password, Rows, Switch, Textarea } from '../ui'
 import { CheckResult, type Check } from './CheckResult'
 import { openBaoCheckKey, openBaoFailHint, openBaoMount, type OpenBaoAuth, type OpenBaoDraft, type OpenBaoReport } from './openbao'
 import { openBaoStrings } from './openbaoStrings'
+import { Flash } from '../notify'
 
 const AUTHS: OpenBaoAuth[] = ['approle', 'token']
 
@@ -97,12 +98,12 @@ export function OpenBaoCheckResult<R extends OpenBaoReport>({
       }}
       ok={(r) => (
         <>
-          <Banner kind="ok" title={t('ob.ok')}>
+          <Flash kind="ok" title={t('ob.ok')} trigger={r}>
             <p>{t('ob.ok.text', { version: r.status.version ?? '?', mount })}</p>
             <Rows
               rows={[[t('ob.policies'), r.status.policies?.join(', ')], [t('ob.expires'), formatDate(r.status.token_expires, locale)], ...(rows?.(r) ?? [])]}
             />
-          </Banner>
+          </Flash>
           {children?.(r)}
         </>
       )}

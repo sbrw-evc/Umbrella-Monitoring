@@ -8,6 +8,7 @@ import { ProfileCard } from '../../profile/ProfileCard'
 import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { strings } from './strings'
+import { Flash } from '../../../notify'
 
 type Source = 'ldap' | 'entra'
 
@@ -210,11 +211,11 @@ export function GroupMappingSettings() {
           ].filter(Boolean) as [ReactNode, ReactNode][]
         }
       />
-      {syncer.notice && <Banner kind="ok" title={syncer.notice} />}
+      {syncer.notice && <Flash kind="ok" title={syncer.notice} />}
       {syncer.error && (
-        <Banner kind="error" title={syncer.error.message}>
+        <Flash kind="error" title={syncer.error.message}>
           {syncer.error.detail}
-        </Banner>
+        </Flash>
       )}
       <fieldset className="plain-fieldset stack" disabled={!canEdit}>
         {draft.rows.length === 0 ? (

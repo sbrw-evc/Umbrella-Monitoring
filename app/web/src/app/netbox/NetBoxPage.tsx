@@ -11,6 +11,7 @@ import { useAction } from '../profile/useAction'
 import { useSession } from '../session'
 import { strings } from './strings'
 import './netbox.css'
+import { Flash } from '../../notify'
 
 type NetBoxConfig = {
   enabled: boolean
@@ -228,12 +229,12 @@ export function NetBoxPage() {
                   check={check}
                   currentKey={checkKey(draft, token)}
                   failTitle={t('nb.fail')}
-                  ok={(r) => <Banner kind="ok" title={t('nb.ok')}>{t('nb.ok.text', { ...r.probe, version: r.probe.version || '?' })}</Banner>}
+                  ok={(r) => <Flash kind="ok" title={t('nb.ok')} trigger={r}>{t('nb.ok.text', { ...r.probe, version: r.probe.version || '?' })}</Flash>}
                 />
                 {tester.error && (
-                  <Banner kind="error" title={tester.error.message}>
+                  <Flash kind="error" title={tester.error.message}>
                     {tester.error.detail}
-                  </Banner>
+                  </Flash>
                 )}
               </div>
             </motion.div>

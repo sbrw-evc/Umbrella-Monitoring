@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api'
 import { useT } from '../../i18n'
-import { Banner, Button, Modal } from '../../ui'
+import { Button, Modal } from '../../ui'
 import type { TreeIndex } from '../org/treeIndex'
 import type { UserRef } from '../org/types'
 import { useAction } from '../profile/useAction'
 import { teamDraft, type Team } from './team'
 import { TeamFields } from './TeamFields'
 import { strings } from './strings'
+import { Flash } from '../../notify'
 
 export function CreateTeamDialog({
   parent,
@@ -50,9 +51,9 @@ export function CreateTeamDialog({
     >
       <TeamFields draft={draft} onChange={setDraft} index={index} users={users} />
       {action.error && (
-        <Banner kind="error" title={action.error.message}>
+        <Flash kind="error" title={action.error.message}>
           {action.error.detail}
-        </Banner>
+        </Flash>
       )}
     </Modal>
   )
@@ -115,9 +116,9 @@ export function DeleteTeamDialog({
         </>
       )}
       {action.error && (
-        <Banner kind="error" title={action.error.message}>
+        <Flash kind="error" title={action.error.message}>
           {action.error.detail}
-        </Banner>
+        </Flash>
       )}
     </Modal>
   )

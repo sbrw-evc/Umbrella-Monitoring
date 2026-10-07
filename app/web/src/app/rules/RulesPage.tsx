@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Banner, Button, Field, formatDate, Input, Modal, Segmented, Select, Switch, Textarea } from '../../ui'
@@ -12,6 +12,7 @@ import { strings } from './strings'
 import { RULE_METHODS, SEVERITIES, severityText, type RuleMethod } from '../incidents/types'
 import '../connectors/connectors.css'
 import './rules.css'
+import { notify } from '../../notify'
 
 type Method = RuleMethod
 type Rule = {
@@ -188,7 +189,7 @@ function SourcesTable({ v, editor, onOpen, onChanged }: { v: View; editor: boole
   return (
     <>
       <p className="muted">{t('ms.systems.hint')}</p>
-      <ErrorBanner error={merge.error} strings={strings} />
+      <ErrorFlash error={merge.error} strings={strings} />
       <div className="card cn-table-card">
         <table className="cn-table rl-table">
           <thead>
@@ -424,7 +425,7 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
         </div>
         <Switch checked={d.enabled} onChange={(enabled) => set({ enabled })} label={t('rl.enabled')} />
         {editing?.last_eval_at && <p className="hint">{t('rl.lastEval', { at: formatDate(editing.last_eval_at, locale, timezone) })}</p>}
-        <ErrorBanner error={check.error ?? save.error} strings={strings} />
+        <ErrorFlash error={check.error ?? save.error} strings={strings} />
         {preview && <PreviewTable p={preview} />}
       </div>
     </Modal>
@@ -464,13 +465,11 @@ function SourceEditor({ value, onClose, onSaved }: { value: Source | 'new' | nul
   const editing = value && value !== 'new' ? value : null
   const blank: SourceDraft = { name: '', url: '', credential_id: '', skip_verify: false }
   const [d, setD] = useState<SourceDraft>(blank)
-  const [ok, setOk] = useState('')
   const creds = useResource<Credential[]>(value && can('credentials:view') ? '/api/credentials' : '', 0)
   const save = useAction()
   const test = useAction()
   useEffect(() => {
     setD(editing ? { name: editing.name, url: editing.url, credential_id: editing.credential_id ?? '', skip_verify: editing.skip_verify } : blank)
-    setOk('')
     save.clear()
     test.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -483,9 +482,8 @@ function SourceEditor({ value, onClose, onSaved }: { value: Source | 'new' | nul
     })
   const check = () =>
     test.run(async () => {
-      setOk('')
       const r = await api<{ series: number }>('POST', '/api/metric-sources/test', d)
-      setOk(t('ms.test.ok', { n: r.series }))
+      notify({ kind: 'ok', title: t('ms.test.ok', { n: r.series }) })
     })
   const remove = () =>
     editing &&
@@ -537,8 +535,7 @@ function SourceEditor({ value, onClose, onSaved }: { value: Source | 'new' | nul
           )}
         </Field>
         {d.url.startsWith('https') && <Switch checked={d.skip_verify} onChange={(skip_verify) => setD({ ...d, skip_verify })} label={t('ms.skip')} />}
-        {ok && <Banner kind="ok" title={ok} />}
-        <ErrorBanner error={test.error ?? save.error} strings={strings} />
+        <ErrorFlash error={test.error ?? save.error} strings={strings} />
       </div>
     </Modal>
   )

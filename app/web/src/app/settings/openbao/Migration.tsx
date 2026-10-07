@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { api } from '../../../api'
 import type { Check } from '../../../connections/CheckResult'
-import { ErrorBanner, MigrationActions, MigrationCard } from '../../../connections/ConnectionCard'
+import { ErrorFlash, MigrationActions, MigrationCard } from '../../../connections/ConnectionCard'
 import { MigrateConfirm } from '../../../connections/MigrateConfirm'
 import { openBaoBody, openBaoCheckKey, openBaoDraft, openBaoMount } from '../../../connections/openbao'
 import { OpenBaoCheckResult, OpenBaoForm } from '../../../connections/OpenBaoForm'
@@ -10,6 +10,7 @@ import { useT } from '../../../i18n'
 import { Banner, Switch } from '../../../ui'
 import { strings } from './strings'
 import type { OpenBaoMigrated, OpenBaoOverview, OpenBaoTargetReport } from './types'
+import { Flash } from '../../../notify'
 
 export function Migration({ current, onMigrated }: { current: OpenBaoOverview; onMigrated: () => void }) {
   const t = useT(strings)
@@ -56,11 +57,11 @@ export function Migration({ current, onMigrated }: { current: OpenBaoOverview; o
           )
         }
       </OpenBaoCheckResult>
-      {!confirming && <ErrorBanner error={action.error} strings={strings} />}
+      <ErrorFlash error={action.error} strings={strings} />
       {done && (
-        <Banner kind="ok" title={t('obs.move.done', { addr: done.addr, mount: done.mount })}>
+        <Flash kind="ok" title={t('obs.move.done', { addr: done.addr, mount: done.mount })}>
           {t('obs.move.doneText', { copied: done.copied, refs: done.refs })}
-        </Banner>
+        </Flash>
       )}
       <MigrationActions
         onCheck={runCheck}
@@ -86,7 +87,6 @@ export function Migration({ current, onMigrated }: { current: OpenBaoOverview; o
           <li>{t('obs.move.step4')}</li>
         </ol>
         {report && report.secrets > 0 && <Banner kind="warn" title={t('obs.move.notEmpty', { count: report.secrets })} />}
-        <ErrorBanner error={action.error} strings={strings} />
       </MigrateConfirm>
     </MigrationCard>
   )

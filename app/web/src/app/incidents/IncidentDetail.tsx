@@ -1,12 +1,14 @@
 import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { CalendarClock, ExternalLink, Link2, Plus } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Link } from '../../router'
 import { Banner, Button, formatDate, Modal, Rows, Segmented, Textarea } from '../../ui'
 import { ResponseTab } from '../response/ResponseTab'
+import { MachineTab } from './MachineTab'
+import { machineStrings } from './machineStrings'
 import { useSession } from '../session'
 import { BindCIForm, CreateCIForm, ResolveConfirm } from './CatalogForms'
 import { entryText, severityTone } from './format'
@@ -14,6 +16,7 @@ import { useLiveReload } from './live'
 import { IncidentDetails, SourceDetailsToggle } from './SourceDetails'
 import { strings } from './strings'
 import { severityText, type Detail, type Incident, type PD, type Person, type Severity } from './types'
+import { notify } from '../../notify'
 
 export function SeverityPill({ severity }: { severity: Severity }) {
   const t = useT(strings)
@@ -41,7 +44,7 @@ export function PDPill({ state }: { state: PD['state'] }) {
 
 type Props = { id: string | null; actor: boolean; onClose: () => void; onChanged: () => void; onOpen: (id: string) => void }
 
-type Tab = 'main' | 'timeline' | 'sources' | 'response'
+type Tab = 'main' | 'machine' | 'timeline' | 'sources' | 'response'
 
 // Mode: the card shows the incident, or one of the forms it leads to.
 type Mode = null | 'create' | 'bind' | 'resolve'
@@ -64,17 +67,16 @@ export function maintenanceURL(d: Detail, title: string) {
 
 export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props) {
   const t = useT(strings)
+  const tm = useT(machineStrings)
   const { can } = useSession()
   const [epoch, setEpoch] = useState(0)
   const [tab, setTab] = useState<Tab>('main')
   const [mode, setMode] = useState<Mode>(null)
-  const [note, setNote] = useState('')
   const detail = useResource<Detail>(id ? `/api/incidents/${encodeURIComponent(id)}` : '', epoch)
   const act = useAction()
   useEffect(() => {
     setTab('main')
     setMode(null)
-    setNote('')
     act.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
@@ -108,7 +110,7 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
     })
   const catalogDone = ({ bound }: { bound: string[] }) => {
     setMode(null)
-    setNote(t('inc.ci.done', { n: bound.length }))
+    notify({ kind: 'ok', title: t('inc.ci.done', { n: bound.length }) })
     refresh()
   }
 
@@ -161,13 +163,13 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
             <StatusPill status={a.status} />
             <PDPill state={a.pd.state} />
           </div>
-          {note && <Banner kind="ok" title={note} />}
           <Segmented
             label={t('inc.tab.main')}
             value={tab}
             onChange={setTab}
             options={[
               { value: 'main', label: t('inc.tab.main') },
+              { value: 'machine', label: tm('inc.tab.machine') },
               { value: 'timeline', label: `${t('inc.tab.timeline')} (${d.timeline.length})` },
               { value: 'sources', label: `${t('inc.tab.sources')} (${Object.keys(a.sources).length})` },
               ...(can('response:view') ? [{ value: 'response' as Tab, label: t('inc.tab.response') }] : []),
@@ -181,12 +183,13 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
               {actor && <CommentBox busy={act.busy} onComment={(text) => run('comment', { text })} />}
             </>
           )}
+          {tab === 'machine' && <MachineTab d={d} onOpen={onOpen} />}
           {tab === 'timeline' && <Timeline d={d} actor={actor} busy={act.busy} onComment={(text) => run('comment', { text })} />}
           {tab === 'sources' && <Sources d={d} />}
           {tab === 'response' && <ResponseTab id={a.id} status={a.status} actor={actor} epoch={epoch} />}
         </div>
       )}
-      <ErrorBanner error={act.error} strings={strings} />
+      <ErrorFlash error={act.error} strings={strings} />
     </Modal>
   )
 }

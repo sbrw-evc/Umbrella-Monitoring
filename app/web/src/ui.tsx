@@ -406,17 +406,22 @@ export function Modal({
   const t = useT(labels)
   const box = useRef<HTMLDivElement>(null)
   const titleId = useId()
+  // The latest onClose, so that a parent passing a new function on every render (a page that
+  // re-renders on a timer) does not re-run the effect: it would move the focus to the first
+  // field again and scroll the dialog back to the top.
+  const close = useRef(onClose)
+  close.current = onClose
   useEffect(() => {
     if (!open) return
     const prev = document.activeElement as HTMLElement | null
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close.current()
     window.addEventListener('keydown', onKey)
     requestAnimationFrame(() => box.current?.querySelector<HTMLElement>('input, select, textarea, button')?.focus())
     return () => {
       window.removeEventListener('keydown', onKey)
       prev?.focus()
     }
-  }, [open, onClose])
+  }, [open])
   return (
     <AnimatePresence>
       {open && (
