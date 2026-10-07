@@ -191,10 +191,15 @@ func TestCompileImpact(t *testing.T) {
 		"severity == 'critical'":                            true,
 		"'Payments' in services && labels['env'] == 'prod'": true,
 		"title.lowerAscii().contains('db')":                 true,
-		"severity ==":                                       false,
-		"unknown_var == 1":                                  false,
-		"severity":                                          false, // not a bool
-		"size(services) + 1":                                false,
+		// The examples of docs/impact.md.
+		"'Payments' in direct_services && severity in ['warning', 'low', 'info']": true,
+		"ci.startsWith('test-') || ('env' in labels && labels['env'] == 'test')":  true,
+		"ci_kind == 'device' && ci.matches('^core-')":                             true,
+		"method == 'red' && impact in ['critical', 'high']":                       true,
+		"severity ==":        false,
+		"unknown_var == 1":   false,
+		"severity":           false, // not a bool
+		"size(services) + 1": false,
 	} {
 		err := CompileImpact(model.ImpactPolicy{Rules: []model.ClassificationRule{{ID: "x", Name: "X", When: when}}})
 		if (err == nil) != ok {
