@@ -87,6 +87,7 @@ type App struct {
 	connectors    *ConnectorsService
 	queue         *ingest.Queue
 	alerts        *alert.Engine
+	feed          feed
 	pdGateway     *pagerduty.Gateway
 	pagerduty     *PagerDutyService
 	notifier      *notify.Service
@@ -264,6 +265,7 @@ func (a *App) Run(ctx context.Context) {
 	}
 	a.ready.Store(true)
 	wg.Go(func() { a.alerts.Run(ctx) })
+	wg.Go(func() { alert.Watch(ctx, a.deps.Backend.Pool, a.feed.publish) })
 	wg.Go(func() { a.pdGateway.Run(ctx) })
 	wg.Go(func() { a.notifier.Run(ctx) })
 	wg.Go(func() { a.ruleEngine.Run(ctx) })

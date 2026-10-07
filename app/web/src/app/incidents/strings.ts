@@ -3,8 +3,10 @@ import type { Dict } from '../../i18n'
 export const strings: Dict = {
   en: {
     'inc.search': 'Search by ID, title, item, signal, service or team',
-    'inc.refresh': 'Refresh',
-    'inc.auto': 'Updates every 10 seconds',
+    'inc.live': 'Live',
+    'inc.live.hint': 'The list updates by itself as soon as incidents change',
+    'inc.offline': 'Reconnecting…',
+    'inc.offline.hint': 'No live connection to the server: the list is reloaded every 10 seconds until it is back',
     'inc.count': '{shown} shown',
     'inc.more': 'Showing the first {n}. Narrow the filters to see the rest.',
     'inc.empty': 'No incidents match.',
@@ -272,8 +274,10 @@ export const strings: Dict = {
   },
   ru: {
     'inc.search': 'Поиск по ID, заголовку, КЕ, сигналу, сервису или команде',
-    'inc.refresh': 'Обновить',
-    'inc.auto': 'Обновляется каждые 10 секунд',
+    'inc.live': 'В реальном времени',
+    'inc.live.hint': 'Список обновляется сам, как только инциденты меняются',
+    'inc.offline': 'Переподключение…',
+    'inc.offline.hint': 'Нет живого соединения с сервером: пока оно не восстановится, список перезагружается каждые 10 секунд',
     'inc.count': 'Показано: {shown}',
     'inc.more': 'Показаны первые {n}. Уточните фильтры, чтобы увидеть остальные.',
     'inc.empty': 'Подходящих инцидентов нет.',
