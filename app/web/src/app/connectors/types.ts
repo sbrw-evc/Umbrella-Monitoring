@@ -317,10 +317,11 @@ export function outputsOf(t: NodeType | undefined, n: GraphNode): string[] {
 }
 
 // CredentialUse is a connector, monitoring system or metric source that uses a credential.
-export type CredentialUse = { kind: 'connector' | 'monitoring' | 'metric_source'; id: string; name: string }
+export type CredentialUse = { kind: 'connector' | 'monitoring' | 'metric_source' | 'log_source'; id: string; name: string }
 
 export function credentialUseLink(u: CredentialUse) {
   if (u.kind === 'monitoring') return `/monitoring?system=${encodeURIComponent(u.id)}`
   if (u.kind === 'metric_source') return '/rules?tab=sources'
+  if (u.kind === 'log_source') return '/monitoring?tab=context'
   return `/connectors/${encodeURIComponent(u.id)}`
 }

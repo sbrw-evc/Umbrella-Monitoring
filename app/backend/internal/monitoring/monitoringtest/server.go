@@ -23,6 +23,7 @@ type Zabbix struct {
 
 	mu        sync.Mutex
 	hosts     []map[string]any
+	items     []item
 	sessions  map[string]bool
 	Calls     []string
 	LoggedOut int
@@ -52,6 +53,91 @@ func (z *Zabbix) AddHost(id int, host, name string, disabled bool, groups []stri
 		ifaces = []map[string]any{}
 	}
 	z.hosts = append(z.hosts, map[string]any{"hostid": strconv.Itoa(id), "host": host, "name": name, "status": status, "interfaces": ifaces, "groups": gs})
+}
+
+type item struct {
+	hostID, itemID, name, key, units string
+	valueType                        int
+	values                           [][2]float64
+}
+
+// AddItem adds a numeric item of a host with its values, [unix seconds, value]. Value type 0
+// is float, 3 unsigned.
+func (z *Zabbix) AddItem(hostID, itemID int, name, key, units string, valueType int, values ...[2]float64) {
+	z.mu.Lock()
+	defer z.mu.Unlock()
+	z.items = append(z.items, item{hostID: strconv.Itoa(hostID), itemID: strconv.Itoa(itemID), name: name, key: key, units: units, valueType: valueType, values: values})
+}
+
+// keyMatches: the * of a search pattern is any text and the pattern may be anywhere in the key.
+func keyMatches(pattern, key string) bool {
+	parts := strings.Split(pattern, "*")
+	i := strings.Index(key, parts[0])
+	if i < 0 {
+		return false
+	}
+	rest := key[i+len(parts[0]):]
+	for _, p := range parts[1:] {
+		j := strings.Index(rest, p)
+		if j < 0 {
+			return false
+		}
+		rest = rest[j+len(p):]
+	}
+	return true
+}
+
+func (z *Zabbix) itemGet(p map[string]any) []map[string]any {
+	hosts, _ := p["hostids"].([]any)
+	filter, _ := p["filter"].(map[string]any)
+	search, _ := p["search"].(map[string]any)
+	out := []map[string]any{}
+	for _, it := range z.items {
+		if len(hosts) > 0 && hosts[0] != it.hostID {
+			continue
+		}
+		if k, ok := filter["key_"].(string); ok && k != it.key {
+			continue
+		}
+		if k, ok := search["key_"].(string); ok && !keyMatches(k, it.key) {
+			continue
+		}
+		out = append(out, map[string]any{"itemid": it.itemID, "name": it.name, "key_": it.key, "value_type": strconv.Itoa(it.valueType), "units": it.units})
+	}
+	return out
+}
+
+func (z *Zabbix) values(p map[string]any, trend bool) []map[string]any {
+	ids, _ := p["itemids"].([]any)
+	from, _ := p["time_from"].(float64)
+	till, _ := p["time_till"].(float64)
+	out := []map[string]any{}
+	for _, it := range z.items {
+		want := false
+		for _, id := range ids {
+			want = want || id == it.itemID
+		}
+		if !want {
+			continue
+		}
+		if vt, ok := p["history"].(float64); ok && int(vt) != it.valueType {
+			continue
+		}
+		for _, v := range it.values {
+			if v[0] < from || v[0] > till {
+				continue
+			}
+			row := map[string]any{"itemid": it.itemID, "clock": strconv.FormatInt(int64(v[0]), 10)}
+			val := strconv.FormatFloat(v[1], 'f', -1, 64)
+			if trend {
+				row["value_avg"] = val
+			} else {
+				row["value"] = val
+			}
+			out = append(out, row)
+		}
+	}
+	return out
 }
 
 func Iface(ip, dns string, available int) map[string]any {
@@ -140,6 +226,17 @@ func (z *Zabbix) serve(w http.ResponseWriter, r *http.Request) {
 			out = append(out, c)
 		}
 		reply(out)
+	case "item.get", "history.get", "trend.get":
+		var p map[string]any
+		_ = json.Unmarshal(req.Params, &p)
+		switch req.Method {
+		case "item.get":
+			reply(z.itemGet(p))
+		case "history.get":
+			reply(z.values(p, false))
+		default:
+			reply(z.values(p, true))
+		}
 	default:
 		fail(-32601, "Method not found.", req.Method)
 	}
@@ -151,7 +248,19 @@ type Prometheus struct {
 	Token   string
 	mu      sync.Mutex
 	series  []map[string]any
+	ranges  []map[string]any
 	Queries []string
+}
+
+// Range adds a series every range query answers with: labels and [unix seconds, value] points.
+func (p *Prometheus) Range(labels map[string]string, points ...[2]float64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	vals := make([][2]any, 0, len(points))
+	for _, pt := range points {
+		vals = append(vals, [2]any{pt[0], strconv.FormatFloat(pt[1], 'f', -1, 64)})
+	}
+	p.ranges = append(p.ranges, map[string]any{"metric": labels, "values": vals})
 }
 
 func StartPrometheus(t *testing.T) *Prometheus {
@@ -174,7 +283,7 @@ func (p *Prometheus) Target(job, instance string, up bool) {
 }
 
 func (p *Prometheus) serve(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/api/v1/query" {
+	if r.URL.Path != "/api/v1/query" && r.URL.Path != "/api/v1/query_range" {
 		http.NotFound(w, r)
 		return
 	}
@@ -187,6 +296,14 @@ func (p *Prometheus) serve(w http.ResponseWriter, r *http.Request) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.Queries = append(p.Queries, r.Form.Get("query"))
+	if r.URL.Path == "/api/v1/query_range" {
+		ranges := p.ranges
+		if ranges == nil {
+			ranges = []map[string]any{}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{"resultType": "matrix", "result": ranges}})
+		return
+	}
 	series := p.series
 	if series == nil {
 		series = []map[string]any{}

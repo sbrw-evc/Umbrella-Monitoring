@@ -306,3 +306,279 @@
     animation: none;
   }
 }
+
+/* The machine of an incident: graphs, events and logs around it. */
+.modal:has(.inc-machine) {
+  width: min(1120px, 100%);
+}
+
+.mc-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.mc-controls .btn-ghost {
+  margin-left: auto;
+}
+
+.mc-range {
+  margin: 0;
+  font-size: 13px;
+}
+
+.mc-range a {
+  margin-left: 3px;
+}
+
+.mc-panels {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr));
+  gap: 12px;
+}
+
+.mc-panel {
+  padding: 12px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.mc-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.mc-chart {
+  position: relative;
+  width: 100%;
+}
+
+.mc-chart svg {
+  display: block;
+  overflow: visible;
+}
+
+.mc-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.mc-axis {
+  fill: var(--muted);
+  font-size: 10.5px;
+}
+
+.mc-cross {
+  stroke: var(--muted);
+  stroke-dasharray: 3 3;
+}
+
+.mc-mark {
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+}
+
+.mc-mark-open {
+  stroke: var(--error);
+}
+
+.mc-mark-resolve {
+  stroke: var(--ok);
+}
+
+.mc-tick-event {
+  fill: var(--warn);
+}
+
+.mc-tick-incident {
+  fill: var(--error);
+}
+
+.mc-tip {
+  position: absolute;
+  top: 6px;
+  transform: translateX(10px);
+  pointer-events: none;
+  z-index: 2;
+  min-width: 160px;
+  max-width: 320px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+}
+
+.mc-tip-left {
+  transform: translateX(calc(-100% - 10px));
+}
+
+.mc-tip-at {
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.mc-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mc-tip-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.mc-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.mc-legend li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mc-line {
+  display: inline-block;
+  width: 14px;
+  border-top: 2px dashed;
+}
+
+.mc-line-open {
+  border-color: var(--error);
+}
+
+.mc-line-resolve {
+  border-color: var(--ok);
+}
+
+.mc-line-event {
+  width: 4px;
+  height: 8px;
+  border: none;
+  background: var(--warn);
+}
+
+.mc-empty,
+.mc-error {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.mc-section h3 {
+  margin: 4px 0 0;
+  font-size: 15px;
+}
+
+.mc-incidents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.mc-scroll {
+  max-height: 280px;
+  overflow: auto;
+}
+
+.mc-nowrap {
+  white-space: nowrap;
+}
+
+.mc-search {
+  display: flex;
+  gap: 8px;
+}
+
+.mc-search .input {
+  flex: 1;
+}
+
+.mc-names {
+  margin: 0;
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.mc-logs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.mc-logs li {
+  display: grid;
+  grid-template-columns: auto 64px minmax(60px, 120px) 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mc-logs li:last-child {
+  border-bottom: none;
+}
+
+.mc-log-at {
+  white-space: nowrap;
+}
+
+.mc-log-level {
+  justify-self: start;
+  font-size: 11px;
+}
+
+.mc-log-src {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-log-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .mc-logs li {
+    grid-template-columns: auto 1fr;
+  }
+
+  .mc-log-src,
+  .mc-log-level {
+    display: none;
+  }
+}
