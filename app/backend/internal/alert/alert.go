@@ -242,12 +242,15 @@ type Alert struct {
 	AckedAt    *time.Time `json:"acked_at,omitempty"`
 	// Suppressed: a maintenance window covers the item or its service; no trigger is sent and no
 	// backup notification, but an incident PagerDuty already has is still acknowledged and resolved.
-	Suppressed    bool       `json:"suppressed"`
-	MaintenanceID string     `json:"maintenance_id,omitempty"`
-	Route         Route      `json:"route"`
-	PD            PD         `json:"pd"`
-	Fallback      bool       `json:"fallback"`
-	FallbackAt    *time.Time `json:"fallback_at,omitempty"`
+	Suppressed    bool   `json:"suppressed"`
+	MaintenanceID string `json:"maintenance_id,omitempty"`
+	Route         Route  `json:"route"`
+	PD            PD     `json:"pd"`
+	// UnsuppressedAt is when a maintenance window over the alert last ended: backup
+	// notification waits its delay from then, as it does from OpenedAt.
+	UnsuppressedAt *time.Time `json:"unsuppressed_at,omitempty"`
+	Fallback       bool       `json:"fallback"`
+	FallbackAt     *time.Time `json:"fallback_at,omitempty"`
 	// FallbackState is pending from the moment backup notification is due until the notifier
 	// reports it was attempted (sent); Tick hands a pending one to the notifier again, so it
 	// survives a restart or a full queue. FallbackTry is when it was last handed over.

@@ -22,6 +22,7 @@ import { useLocale, useT } from '../../i18n'
 import { SEVERITY_TONE, severityText, type Severity } from '../incidents/types'
 import { useTheme } from '../../theme'
 import { Banner, Button, formatDate, Input, Rows, Segmented, Switch } from '../../ui'
+import { Link } from '../../router'
 import { useSession } from '../session'
 import { CI_H, CI_W, layout, SERVICE_H, SERVICE_W } from './layout'
 import { strings } from './strings'
@@ -320,7 +321,7 @@ function MapView() {
         <p>{t('map.basis.service')}</p>
         <p className="muted">
           {map.events.available
-            ? t('map.basis.events', { hours: map.events.window_hours })
+            ? t('map.basis.events')
             : t('map.basis.noEvents', { reason: map.events.error || t('map.basis.noEvents.db') })}
         </p>
       </details>
@@ -415,9 +416,9 @@ function ServicePanel({ service: s, map, onSelect }: { service: MapService; map:
 function CIPanel({ ci: c, map, onSelect }: { ci: MapCI; map: CMDBMap; onSelect: (s: Selected) => void }) {
   const t = useT(strings)
   const { locale } = useLocale()
-  const { timezone } = useSession()
+  const { timezone, can } = useSession()
   const services = map.services.filter((s) => c.services.includes(s.id)).map((s) => ({ id: s.id, name: s.name, level: s.health.level }))
-  const firing = c.events.critical + c.events.error + c.events.warning + c.events.info
+  const firing = c.events.critical + c.events.error + c.events.warning + (c.events.low ?? 0) + c.events.info + (c.events.maintenance ?? 0)
   return (
     <div className="stack map-panel-body">
       <HealthLabel level={c.health.level} />
@@ -432,12 +433,19 @@ function CIPanel({ ci: c, map, onSelect }: { ci: MapCI; map: CMDBMap; onSelect: 
             t('map.field.events'),
             firing ? (
               <div key="e" className="map-recent">
-                <span className="muted">{t('map.events.counts', { critical: c.events.critical, error: c.events.error, warning: c.events.warning, low: c.events.low ?? 0, info: c.events.info })}</span>
+                <span className="muted">
+                  {t('map.events.counts', { critical: c.events.critical, error: c.events.error, warning: c.events.warning, low: c.events.low ?? 0, info: c.events.info })}
+                  {(c.events.maintenance ?? 0) > 0 && t('map.events.maintenance', { count: c.events.maintenance ?? 0 })}
+                </span>
                 <ul>
-                  {c.events.recent.map((e, i) => (
-                    <li key={i}>
-                      <span className={`pill map-sev-${SEVERITY_TONE[e.severity as Severity] ?? 'info'}`}>{severityText(t, e.severity)}</span> {e.title}
-                      <span className="muted"> · {formatDate(e.last_seen, locale, timezone)}</span>
+                  {c.events.recent.map((e) => (
+                    <li key={e.incident_id}>
+                      <span className={`pill map-sev-${SEVERITY_TONE[e.severity as Severity] ?? 'info'}`}>{severityText(t, e.severity)}</span>{' '}
+                      {can('incidents:view') ? <Link to={`/incidents?id=${encodeURIComponent(e.incident_id)}`}>{e.incident_id}</Link> : e.incident_id} {e.title}
+                      <span className="muted">
+                        {' · '}
+                        {e.suppressed ? t('map.events.suppressed') : t(`map.events.status.${e.status}`)} · {formatDate(e.last_seen, locale, timezone)}
+                      </span>
                     </li>
                   ))}
                 </ul>

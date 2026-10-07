@@ -482,6 +482,8 @@ func unsuppress(c *change, now time.Time) {
 		return
 	}
 	a.Suppressed, a.MaintenanceID = false, ""
+	t := now
+	a.UnsuppressedAt = &t
 	if a.PD.State == PDSkipped && a.PD.ErrorCode == "" {
 		a.PD.State, a.PD.AttemptAt = PDPending, nil
 	}
@@ -493,6 +495,7 @@ func unsuppress(c *change, now time.Time) {
 func (a *Alert) reopen(now time.Time) {
 	a.Status, a.ResolvedAt, a.ResolvedBy, a.AckedBy, a.AckedAt = StatusOpen, nil, "", "", nil
 	a.OpenedAt, a.Fallback, a.FallbackAt, a.FallbackState, a.FallbackTry = now, false, nil, "", nil
+	a.UnsuppressedAt = nil
 	a.Notified, a.FollowUp, a.FollowUpTry = nil, "", nil
 	a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry, a.PD.AttemptAt, a.PD.Escalated = PDPending, "", "", "", nil, false
 	// PagerDuty opens a new incident for the trigger after a resolve: it goes by the current
@@ -618,6 +621,15 @@ func (e *Engine) taken(c *change, now time.Time) bool {
 	return true
 }
 
+// fallbackFrom is when the wait for PagerDuty started: the opening, or the end of the last
+// maintenance window over the alert, so PagerDuty gets its full time after a window too.
+func (a *Alert) fallbackFrom() time.Time {
+	if a.UnsuppressedAt != nil && a.UnsuppressedAt.After(a.OpenedAt) {
+		return *a.UnsuppressedAt
+	}
+	return a.OpenedAt
+}
+
 // fallbackDue starts backup notification of an open alert nobody has taken: PagerDuty is off,
 // did not take it in time, or skipped it (below its threshold), and the alert is severe enough.
 // Acknowledged and resolved alerts, alerts in maintenance and test alerts never go out. It
@@ -630,7 +642,7 @@ func (e *Engine) fallbackDue(c *change, p policy, now time.Time) bool {
 	case a.Fallback, a.Status != StatusOpen, a.Suppressed, a.IsTest(),
 		SeverityRank(a.Severity) < SeverityRank(p.minSeverity),
 		!first && (pdHas(a) || (p.pdOn && a.PD.State == PDOff)),
-		now.Sub(a.OpenedAt) < delay:
+		now.Sub(a.fallbackFrom()) < delay:
 		return false
 	}
 	reason := "pd_not_taken"
@@ -873,6 +885,25 @@ func (e *Engine) PDKeys(ctx context.Context, incidentKey, incidentID string) ([]
 // PDActive lists active alerts PagerDuty has an incident for, oldest first.
 func (e *Engine) PDActive(ctx context.Context, limit int) ([]Alert, error) {
 	rows, err := e.db.Query(ctx, "SELECT doc FROM alerts WHERE "+sqlActive+" AND pd_state IN ($1, $2) ORDER BY seq LIMIT $3", PDAccepted, PDAcked, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Alert
+	for rows.Next() {
+		a, err := scanAlert(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *a)
+	}
+	return out, rows.Err()
+}
+
+// ActiveOnCIs lists the active alerts bound to configuration items, newest first, for the
+// health of the items.
+func (e *Engine) ActiveOnCIs(ctx context.Context, limit int) ([]Alert, error) {
+	rows, err := e.db.Query(ctx, "SELECT doc FROM alerts WHERE "+sqlActive+" AND ci_id <> '' ORDER BY last_seen DESC LIMIT $1", limit)
 	if err != nil {
 		return nil, err
 	}

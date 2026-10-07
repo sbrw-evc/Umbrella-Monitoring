@@ -442,6 +442,21 @@ func TestMaintenance(t *testing.T) {
 	if got.Suppressed {
 		t.Error("no longer suppressed")
 	}
+	// PagerDuty gets its full time after the window, not the time since the alert opened.
+	if len(rec.fallback) != 0 {
+		t.Fatalf("no backup notification the moment the window ends: %+v", rec.fallback)
+	}
+	e.PDResult(ctx, a.ID, alert.PDTrigger, "", "", errors.New("Events API answered 503"))
+	c.advance(time.Minute)
+	e.Tick(ctx)
+	if len(rec.fallback) != 0 {
+		t.Fatalf("no backup notification a minute after the window: %+v", rec.fallback)
+	}
+	c.advance(alert.DefaultFallbackAfter)
+	e.Tick(ctx)
+	if len(rec.fallback) != 1 {
+		t.Fatalf("backup notification once the delay passed after the window: %+v", rec.fallback)
+	}
 }
 
 func TestRedUseLink(t *testing.T) {

@@ -10,7 +10,6 @@ import (
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
@@ -22,9 +21,9 @@ const (
 	HealthWarning  = "warning"
 	HealthCritical = "critical"
 
-	// eventWindow: firing events seen within it count toward health.
-	eventWindow     = 24 * time.Hour
 	maxRecentEvents = 5
+	// maxActive caps the active incidents read for one map.
+	maxActive = 5000
 )
 
 var healthRank = map[string]int{HealthUnknown: 0, HealthOK: 1, HealthWarning: 2, HealthCritical: 3}
@@ -56,16 +55,22 @@ func (h *Health) add(r HealthReason) {
 	h.Level = worse(h.Level, r.Level)
 }
 
+// MapEvent is an active incident of a configuration item.
 type MapEvent struct {
-	Title       string    `json:"title"`
-	Severity    string    `json:"severity"`
-	ConnectorID string    `json:"connector_id"`
-	LastSeen    time.Time `json:"last_seen"`
+	IncidentID string    `json:"incident_id"`
+	Title      string    `json:"title"`
+	Severity   string    `json:"severity"`
+	Status     string    `json:"status"`
+	Suppressed bool      `json:"suppressed,omitempty"`
+	LastSeen   time.Time `json:"last_seen"`
 }
 
+// MapEvents counts the active incidents of an item by severity. Incidents under a maintenance
+// window are counted apart and do not make the item worse.
 type MapEvents struct {
 	model.SeverityCounts
-	Recent []MapEvent `json:"recent"`
+	Maintenance int        `json:"maintenance"`
+	Recent      []MapEvent `json:"recent"`
 }
 
 type MapCI struct {
@@ -94,11 +99,10 @@ type MapService struct {
 	Health      Health   `json:"health"`
 }
 
-// MapEventsInfo says whether connector events were taken into account.
+// MapEventsInfo says whether active incidents were taken into account.
 type MapEventsInfo struct {
-	Available   bool   `json:"available"`
-	WindowHours int    `json:"window_hours"`
-	Error       string `json:"error,omitempty"`
+	Available bool   `json:"available"`
+	Error     string `json:"error,omitempty"`
 	// Scoped: the viewer sees incidents of some business services only, so events count only
 	// for the items of those services.
 	Scoped bool `json:"scoped,omitempty"`
@@ -113,18 +117,22 @@ type CMDBMap struct {
 
 var errEventsNotReady = errors.New("the event tables are not ready yet")
 
-type firingSource func(ctx context.Context, since time.Time) ([]ingest.FiringEvent, error)
+// activeSource lists the active incidents bound to configuration items. Health comes from
+// incidents, not raw connector events, so an incident resolved by hand or in PagerDuty, the
+// incidents of RED/USE rules and maintenance windows count here as on the incident board and
+// wallboards.
+type activeSource func(ctx context.Context) ([]alert.Alert, error)
 
 // CMDBService builds the map of business services, their configuration items and dependencies
 // with the health of each.
 type CMDBService struct {
 	st     *store.Store
-	firing firingSource
+	active activeSource
 	now    func() time.Time
 }
 
-func NewCMDBService(st *store.Store, firing firingSource) *CMDBService {
-	return &CMDBService{st: st, firing: firing, now: func() time.Time { return time.Now().UTC() }}
+func NewCMDBService(st *store.Store, active activeSource) *CMDBService {
+	return &CMDBService{st: st, active: active, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (a *App) registerCMDB(mux *http.ServeMux) {
@@ -135,16 +143,16 @@ func (a *App) cmdbMap(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, a.cmdb.Map(r.Context(), a.incidentScope(current(r).user)...))
 }
 
-// Map builds the map. With scope (business service ids) given, events are taken into account
-// only for the items of those services, as the viewer sees only their incidents.
+// Map builds the map. With scope (business service ids) given, incidents are taken into
+// account only for the items of those services, as the viewer sees only their incidents.
 func (s *CMDBService) Map(ctx context.Context, scope ...string) CMDBMap {
 	now := s.now()
 	out := CMDBMap{Services: []MapService{}, CIs: []MapCI{}, GeneratedAt: now,
-		Events: MapEventsInfo{WindowHours: int(eventWindow / time.Hour), Scoped: len(scope) > 0}}
-	var events []ingest.FiringEvent
-	if s.firing != nil {
+		Events: MapEventsInfo{Scoped: len(scope) > 0}}
+	var events []alert.Alert
+	if s.active != nil {
 		var err error
-		if events, err = s.firing(ctx, now.Add(-eventWindow)); err != nil {
+		if events, err = s.active(ctx); err != nil {
 			out.Events.Error = err.Error()
 		} else {
 			out.Events.Available = true
@@ -177,7 +185,7 @@ func (s *CMDBService) Map(ctx context.Context, scope ...string) CMDBMap {
 			}
 			cis[id] = m
 		}
-		attachEvents(d, cis, events, scope)
+		attachEvents(cis, events, scope)
 		for _, m := range cis {
 			m.Health = ciHealth(m)
 			out.CIs = append(out.CIs, *m)
@@ -207,48 +215,36 @@ func (s *CMDBService) Map(ctx context.Context, scope ...string) CMDBMap {
 	return out
 }
 
-// attachEvents matches firing events to configuration items by name, short name, IP address
-// or the DNS name the domain controller has for the item. With a scope, only items of those
-// services get events.
-func attachEvents(d *store.Data, cis map[string]*MapCI, events []ingest.FiringEvent, scope []string) {
-	index := map[string][]string{}
-	add := func(key, id string) {
-		if key = strings.ToLower(strings.TrimSpace(key)); key != "" && !slices.Contains(index[key], id) {
-			index[key] = append(index[key], id)
+// attachEvents counts the active incidents of each item; the alert engine has already bound
+// them to the item. With a scope, only items of those services get incidents. Test alerts do
+// not count.
+func attachEvents(cis map[string]*MapCI, alerts []alert.Alert, scope []string) {
+	for _, a := range alerts {
+		m := cis[a.CIID]
+		if m == nil || !alert.Active(a.Status) || a.IsTest() {
+			continue
 		}
-	}
-	for id, m := range cis {
 		if len(scope) > 0 && !slices.ContainsFunc(m.Services, func(s string) bool { return slices.Contains(scope, s) }) {
 			continue
 		}
-		for _, k := range alert.CIKeys(d.ConfigItems[id]) {
-			add(k, id)
+		sev := a.Severity
+		if !model.ValidSeverity(sev) {
+			sev = model.SeverityInfo
 		}
-	}
-	for _, e := range events {
-		var ids []string
-		// The forms of the ci field an item may be known by, the same the alert engine matches.
-		for _, k := range alert.EventKeys(e.CI) {
-			if ids = index[k]; len(ids) > 0 {
-				break
-			}
-		}
-		for _, id := range ids {
-			m := cis[id]
-			sev := e.Severity
-			if !model.ValidSeverity(sev) {
-				sev = model.SeverityInfo
-			}
+		if a.Suppressed {
+			m.Events.Maintenance++
+		} else {
 			m.Events.Add(sev, 1)
-			if len(m.Events.Recent) < maxRecentEvents {
-				m.Events.Recent = append(m.Events.Recent, MapEvent{Title: e.Title, Severity: e.Severity, ConnectorID: e.ConnectorID, LastSeen: e.LastSeen})
-			}
+		}
+		if len(m.Events.Recent) < maxRecentEvents {
+			m.Events.Recent = append(m.Events.Recent, MapEvent{IncidentID: a.ID, Title: a.Title, Severity: a.Severity, Status: a.Status,
+				Suppressed: a.Suppressed, LastSeen: a.LastSeen})
 		}
 	}
 }
 
 // ciHealth: the status of the item, the computer object of the domain controller and the
-// events that fire for the item.
+// active incidents of the item.
 func ciHealth(m *MapCI) Health {
 	h := Health{Level: HealthUnknown, Reasons: []HealthReason{}}
 	switch m.Status {
@@ -272,6 +268,9 @@ func ciHealth(m *MapCI) Health {
 	}
 	if m.Events.Warning > 0 {
 		h.add(HealthReason{Code: "events_warning", Level: HealthWarning, Count: m.Events.Warning})
+	}
+	if m.Events.Maintenance > 0 {
+		h.add(HealthReason{Code: "events_maintenance", Level: HealthOK, Count: m.Events.Maintenance})
 	}
 	return h
 }
