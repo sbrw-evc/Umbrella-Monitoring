@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -30,8 +31,12 @@ type machineView struct {
 		ID string `json:"id"`
 	} `json:"incidents"`
 	Panels []struct {
-		ID     string `json:"id"`
-		Series []struct {
+		ID        string   `json:"id"`
+		Alert     bool     `json:"alert"`
+		Query     string   `json:"query"`
+		Op        string   `json:"op"`
+		Threshold *float64 `json:"threshold"`
+		Series    []struct {
 			Name   string       `json:"name"`
 			Points [][2]float64 `json:"points"`
 		} `json:"series"`
@@ -57,6 +62,8 @@ func TestIncidentMachine(t *testing.T) {
 	f := newConnFixture(t, true)
 	prom := monitoringtest.StartPrometheus(t)
 	now := time.Now().UTC()
+	prom.AlertRule("cpu", `cpu_busy{job="node"} > 90`)
+	prom.Range(map[string]string{"instance": "db-09:9100", "job": "node"}, [2]float64{float64(now.Unix()), 1})
 	prom.Range(map[string]string{"instance": "web-01:9100", "job": "node"}, [2]float64{float64(now.Add(-5 * time.Minute).Unix()), 12}, [2]float64{float64(now.Unix()), 90})
 	var lokiQuery string
 	loki := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,11 +122,18 @@ func TestIncidentMachine(t *testing.T) {
 	if m.WindowMinutes != 30 || m.DefaultWindow != 30 || len(m.Hosts) != 1 || m.LogSources != 1 || m.EventsError != "" {
 		t.Fatalf("machine %+v", m)
 	}
-	if len(m.Panels) != 2 || len(m.Panels[0].Series) != 1 || len(m.Panels[0].Series[0].Points) != 2 || len(m.Panels[1].Series) != 0 || len(m.Panels[1].Errors) != 0 {
+	// The metric of the alert (the alerting rule named as the signal) comes first, with its
+	// threshold, and only the series of the machine.
+	if len(m.Panels) != 3 || !m.Panels[0].Alert || m.Panels[0].Query != `cpu_busy{job="node"}` || m.Panels[0].Op != ">" ||
+		m.Panels[0].Threshold == nil || *m.Panels[0].Threshold != 90 || len(m.Panels[0].Series) != 1 || m.Panels[0].Series[0].Name != "web-01:9100" {
+		t.Fatalf("alert panel %+v", m.Panels)
+	}
+	// The fake answers every query with all its series; the graphs keep what the selector chose.
+	if len(m.Panels[1].Series) != 2 || m.Panels[1].Alert || len(m.Panels[2].Series) != 0 || len(m.Panels[2].Errors) != 0 {
 		t.Fatalf("panels %+v", m.Panels)
 	}
-	if q := prom.Queries[len(prom.Queries)-1]; q != `cpu{instance=~"web-01:9100"}` {
-		t.Fatalf("query %s", q)
+	if !slices.Contains(prom.Queries, `cpu{instance=~"web-01:9100"}`) || !slices.Contains(prom.Queries, `cpu_busy{job="node"}`) {
+		t.Fatalf("queries %q", prom.Queries)
 	}
 	if len(m.Events) != 1 || len(m.Incidents) != 1 || m.Incidents[0].ID != id {
 		t.Fatalf("history %+v %+v", m.Events, m.Incidents)

@@ -249,7 +249,15 @@ type Prometheus struct {
 	mu      sync.Mutex
 	series  []map[string]any
 	ranges  []map[string]any
+	alerts  []map[string]any
 	Queries []string
+}
+
+// AlertRule adds an alerting rule the rules API lists.
+func (p *Prometheus) AlertRule(name, query string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.alerts = append(p.alerts, map[string]any{"name": name, "query": query, "type": "alerting"})
 }
 
 // Range adds a series every range query answers with: labels and [unix seconds, value] points.
@@ -283,6 +291,12 @@ func (p *Prometheus) Target(job, instance string, up bool) {
 }
 
 func (p *Prometheus) serve(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/v1/rules" {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "success", "data": map[string]any{"groups": []any{map[string]any{"name": "g", "rules": p.alerts}}}})
+		return
+	}
 	if r.URL.Path != "/api/v1/query" && r.URL.Path != "/api/v1/query_range" {
 		http.NotFound(w, r)
 		return

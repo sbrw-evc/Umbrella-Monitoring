@@ -89,3 +89,22 @@ func TestDownsample(t *testing.T) {
 		t.Fatalf("first bucket %v", out[0])
 	}
 }
+
+func TestSplitThreshold(t *testing.T) {
+	for _, c := range []struct {
+		in, expr, op string
+		th           float64
+		split        bool
+	}{
+		{`100 - avg(rate(cpu{mode="idle"}[5m])) * 100 > 90`, `100 - avg(rate(cpu{mode="idle"}[5m])) * 100`, ">", 90, true},
+		{`up == 0`, `up`, "==", 0, true},
+		{`disk_free_ratio < bool 0.1`, `disk_free_ratio`, "<", 0.1, true},
+		{`(x > 5)`, `(x > 5)`, "", 0, false},
+		{`rate(errors[5m])`, `rate(errors[5m])`, "", 0, false},
+	} {
+		expr, op, th := monitoring.SplitThreshold(c.in)
+		if expr != c.expr || op != c.op || (th != nil) != c.split || (th != nil && *th != c.th) {
+			t.Errorf("%s: %q %q %v", c.in, expr, op, th)
+		}
+	}
+}
