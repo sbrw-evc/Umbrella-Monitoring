@@ -8,6 +8,8 @@ import { Link } from '../../router'
 import { Banner, Button, formatDate, Modal, Rows, Segmented, Textarea } from '../../ui'
 import { useSession } from '../session'
 import { BindCIForm, CreateCIForm, ResolveConfirm } from './CatalogForms'
+import { IncidentImpact } from './IncidentImpact'
+import { IncidentResponse } from './IncidentResponse'
 import { entryText, severityTone } from './format'
 import { strings } from './strings'
 import { severityText, type Detail, type Incident, type PD, type Person, type Severity } from './types'
@@ -161,6 +163,8 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
           {tab === 'main' && (
             <>
               <Catalog d={d} onMode={setMode} />
+              <IncidentImpact a={a} />
+              <IncidentResponse a={a} />
               <Main d={d} onOpen={onOpen} />
               {actor && <CommentBox busy={act.busy} onComment={(text) => run('comment', { text })} />}
             </>

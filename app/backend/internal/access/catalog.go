@@ -95,6 +95,14 @@ var pages = []Page{
 		{"sync", Text{"Read host lists", "Загрузка списков хостов"}},
 		{"link", Text{"Link hosts to configuration items and create items from hosts", "Привязка хостов к КЕ и создание КЕ из хостов"}},
 	}},
+	{"impact", GroupAuto, Text{"Severity and impact", "Важность и влияние"}, []Feature{
+		view,
+		{"edit", Text{"Change the impact matrix and the classification rules", "Изменение матрицы влияния и правил классификации"}},
+	}},
+	{"response", GroupAuto, Text{"Response plans", "Планы реагирования"}, []Feature{
+		view,
+		{"edit", Text{"Change communication, escalation, war rooms and tracker issues by severity", "Изменение оповещения, эскалации, war room и задач по важности"}},
+	}},
 	{"credentials", GroupAuto, Text{"Credentials", "Учётные данные"}, []Feature{
 		view,
 		{"edit", Text{"Create, replace and delete credentials", "Создание, замена и удаление учётных данных"}},
@@ -113,6 +121,11 @@ var pages = []Page{
 		view,
 		{"test", Text{"Check connections and send test messages", "Проверка подключений и тестовые сообщения"}},
 		{"edit", Text{"Change PagerDuty, backup notification and Grafana", "Изменение PagerDuty, резервного оповещения и Grafana"}},
+	}},
+	{"settings.integrations", GroupSettings, Text{"Integrations", "Интеграции"}, []Feature{
+		view,
+		test,
+		{"edit", Text{"Connect Microsoft 365, Zoom and Jira Cloud", "Подключение Microsoft 365, Zoom и Jira Cloud"}},
 	}},
 	{"status", GroupSettings, Text{"System status", "Состояние системы"}, []Feature{view, {"defaults", Text{"Change default theme, language and time zone", "Изменение темы, языка и часового пояса по умолчанию"}}}},
 	{"settings.ldap", GroupSettings, Text{"LDAP / AD", "LDAP / AD"}, []Feature{view, test, {"edit", Text{"Change the connection", "Изменение подключения"}}}},

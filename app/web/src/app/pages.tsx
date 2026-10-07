@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import { Activity, BellRing, Boxes, CalendarClock, Briefcase, Cable, Database, Gauge, KeyRound, LockKeyhole, Network, Radar, Server, ShieldCheck, Siren, Tv, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
+import { Activity, BellRing, Blocks, ListChecks, Scale, Boxes, CalendarClock, Briefcase, Cable, Database, Gauge, KeyRound, LockKeyhole, Network, Radar, Server, ShieldCheck, Siren, Tv, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
 import { CIsPage } from './cis/CIsPage'
 import { IncidentsPage } from './incidents/IncidentsPage'
 import { CMDBMapPage } from './cmdb/CMDBMapPage'
@@ -9,6 +9,9 @@ import { MaintenancePage } from './maintenance/MaintenancePage'
 import { MonitoringPage } from './monitoring/MonitoringPage'
 import { NetBoxPage } from './netbox/NetBoxPage'
 import { RulesPage } from './rules/RulesPage'
+import { ImpactPage } from './impact/ImpactPage'
+import { ResponsePage } from './response/ResponsePage'
+import { IntegrationsSettings } from './settings/integrations/IntegrationsSettings'
 import { RolesPage } from './roles/RolesPage'
 import { ServicesPage } from './services/ServicesPage'
 import { AlertingSettings } from './settings/alerting/AlertingSettings'
@@ -50,11 +53,14 @@ export const PAGES: PageDef[] = [
   { id: 'rules', path: '/rules', icon: Gauge, Component: RulesPage, subtitle: 'page.rules.subtitle' },
   { id: 'netbox', path: '/netbox', icon: Server, Component: NetBoxPage, subtitle: 'page.netbox.subtitle' },
   { id: 'monitoring', path: '/monitoring', icon: Radar, Component: MonitoringPage, subtitle: 'page.monitoring.subtitle' },
+  { id: 'impact', path: '/impact', icon: Scale, Component: ImpactPage, subtitle: 'page.impact.subtitle' },
+  { id: 'response', path: '/response', icon: ListChecks, Component: ResponsePage, subtitle: 'page.response.subtitle' },
   { id: 'credentials', path: '/credentials', icon: LockKeyhole, Component: CredentialsPage, subtitle: 'page.credentials.subtitle' },
   { id: 'users', path: '/users', icon: Users, Component: UsersPage, subtitle: 'page.users.subtitle' },
   { id: 'teams', path: '/teams', icon: UsersRound, Component: TeamsPage, subtitle: 'page.teams.subtitle' },
   { id: 'roles', path: '/roles', icon: UserCog, Component: RolesPage, subtitle: 'page.roles.subtitle' },
   { id: 'settings.alerting', path: '/settings/alerting', icon: Siren, Component: AlertingSettings, subtitle: 'page.settings.alerting.subtitle' },
+  { id: 'settings.integrations', path: '/settings/integrations', icon: Blocks, Component: IntegrationsSettings, subtitle: 'page.settings.integrations.subtitle' },
   { id: 'status', path: '/settings/status', icon: Activity, Component: SystemStatus },
   { id: 'settings.ldap', path: '/settings/ldap', icon: Network, Component: DirectorySettings, subtitle: 'page.settings.subtitle' },
   { id: 'settings.postgres', path: '/settings/postgresql', icon: Database, Component: PostgresSettings, subtitle: 'page.settings.subtitle' },

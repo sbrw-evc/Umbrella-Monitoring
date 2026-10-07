@@ -143,6 +143,13 @@ type Settings struct {
 	NetBox        netbox.Config    `json:"netbox"`
 	Groups        GroupMappings    `json:"groups"`
 	Alerting      Alerting         `json:"alerting"`
+	// Impact finds the priority of incidents from event severity and business impact.
+	Impact ImpactPolicy `json:"impact"`
+	// Response is the incident response plans by severity: communication, escalation, war
+	// rooms, bridges and tracker issues.
+	Response ResponsePolicy `json:"response"`
+	// Integrations are the collaboration tools: Microsoft 365 (Teams), Zoom and Jira Cloud.
+	Integrations Integrations `json:"integrations"`
 	// NewUserRole is the role of accounts created by a directory sign-in or synchronization or by
 	// NetBox when no group mapping gives one. Empty or unknown: the system role "user".
 	NewUserRole string `json:"new_user_role"`

@@ -76,6 +76,10 @@ export type Incident = {
   maintenance_id?: string
   // excluded: the host is marked «Не является КЕ» on the monitoring systems page.
   excluded?: boolean
+  // event_severity: what the events said; severity is the priority found with the impact.
+  event_severity?: Severity
+  impact?: Impact
+  response?: IncidentResponse
   route: Route
   pd: PD
   fallback: boolean
@@ -166,4 +170,21 @@ export function urlOf(f: Filters, id: string | null) {
   if (id) p.set('id', id)
   const s = p.toString()
   return `/incidents${s ? `?${s}` : ''}`
+}
+
+// Impact tells how the priority was found (alert.Impact).
+export type Impact = {
+  level: string
+  services?: { id: string; name: string; criticality: string; direct: boolean }[]
+  rule?: string
+  steps?: { code: string; args?: Record<string, string> }[]
+  at: string
+}
+
+// IncidentResponse is what incident response did (alert.Response).
+export type IncidentResponse = {
+  plan?: Severity
+  war_room?: { kind: string; id: string; url: string }
+  bridges?: { kind: string; id: string; url: string }[]
+  issues?: { kind: 'resolution' | 'postmortem'; key: string; url: string }[]
 }

@@ -255,6 +255,13 @@ type Alert struct {
 	// Excluded: the host of the events is marked «Не является КЕ» on the monitoring systems
 	// page; the alert is suppressed (not sent anywhere) for that reason, not a window.
 	Excluded bool `json:"excluded,omitempty"`
+
+	// EventSeverity is the severity the firing events give (the highest of the sources);
+	// Severity is the priority found from it and the business impact (Impact).
+	EventSeverity string  `json:"event_severity,omitempty"`
+	Impact        *Impact `json:"impact,omitempty"`
+	// Response is what incident response did: war room, bridges, tracker issues.
+	Response *Response `json:"response,omitempty"`
 }
 
 // Notified is an address backup notification of the alert was sent to.
@@ -279,6 +286,20 @@ func (a *Alert) Clone() Alert {
 	c.Route.Owners = slices.Clone(a.Route.Owners)
 	c.Notified = slices.Clone(a.Notified)
 	c.PD.OldIncidents = slices.Clone(a.PD.OldIncidents)
+	if a.Impact != nil {
+		im := *a.Impact
+		im.Services, im.Steps = slices.Clone(im.Services), slices.Clone(im.Steps)
+		c.Impact = &im
+	}
+	if a.Response != nil {
+		r := *a.Response
+		if r.WarRoom != nil {
+			w := *r.WarRoom
+			r.WarRoom = &w
+		}
+		r.Bridges, r.Issues = slices.Clone(r.Bridges), slices.Clone(r.Issues)
+		c.Response = &r
+	}
 	return c
 }
 
