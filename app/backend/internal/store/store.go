@@ -26,6 +26,8 @@ type Data struct {
 	Rules         map[string]*model.Rule
 	// MonitoringSources are the Zabbix and Prometheus systems hosts are read from.
 	MonitoringSources map[string]*model.MonitoringSource
+	// LogSources are the log stores the incident card reads the lines of a machine from.
+	LogSources map[string]*model.LogSource
 	// NetBoxContacts maps NetBox contact IDs to the user accounts made or found for them.
 	NetBoxContacts map[int]string
 	NetBoxSync     model.SyncState
@@ -96,6 +98,9 @@ func (d *Data) init() {
 	}
 	if d.MonitoringSources == nil {
 		d.MonitoringSources = map[string]*model.MonitoringSource{}
+	}
+	if d.LogSources == nil {
+		d.LogSources = map[string]*model.LogSource{}
 	}
 	// gob drops empty lists: a snapshot gives back nil where the hosts had [].
 	for _, src := range d.MonitoringSources {

@@ -83,6 +83,7 @@ const (
 	UseConnector     = "connector"
 	UseMonitoring    = "monitoring"
 	UseMetricSource  = "metric_source"
+	UseLogSource     = "log_source"
 	credentialUseMax = 50
 )
 
@@ -125,7 +126,12 @@ func credentialUses(d *store.Data, id string) []CredentialUse {
 			out = append(out, CredentialUse{Kind: UseMetricSource, ID: src.ID, Name: src.Name})
 		}
 	}
-	order := map[string]int{UseConnector: 0, UseMonitoring: 1, UseMetricSource: 2}
+	for _, src := range d.LogSources {
+		if src.CredentialID == id {
+			out = append(out, CredentialUse{Kind: UseLogSource, ID: src.ID, Name: src.Name})
+		}
+	}
+	order := map[string]int{UseConnector: 0, UseMonitoring: 1, UseMetricSource: 2, UseLogSource: 3}
 	slices.SortFunc(out, func(a, b CredentialUse) int {
 		if a.Kind != b.Kind {
 			return order[a.Kind] - order[b.Kind]
