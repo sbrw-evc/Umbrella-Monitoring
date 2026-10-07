@@ -12,10 +12,13 @@ type Team struct {
 	Description string `json:"description"`
 	ParentID    string `json:"parent_id"`
 	LeadID      string `json:"lead_id"`
-	// Email and Telegram are the team's own channel (a duty mailbox, a group chat). With either
-	// set, backup notification goes to the channel and the lead instead of every member.
+	// Email, Telegram, Teams and Zoom are the team's own channel: a duty mailbox, a group chat,
+	// the webhook URL of a Microsoft Teams channel or of a Zoom chat. With any of them set,
+	// backup notification goes to the channel and the lead instead of every member.
 	Email     string    `json:"email"`
 	Telegram  string    `json:"telegram"`
+	Teams     string    `json:"teams"`
+	Zoom      string    `json:"zoom"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

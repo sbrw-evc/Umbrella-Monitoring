@@ -90,11 +90,13 @@ type PDRoute struct {
 }
 
 // Notify is backup notification: when nobody has taken a severe enough alert (PagerDuty is
-// off or did not take it in time), the people of its route get it by e-mail and Telegram, and
-// a follow-up once it is acknowledged or resolved.
+// off or did not take it in time), the people of its route get it by e-mail and Telegram, team
+// channels also in Microsoft Teams and Zoom, and a follow-up once it is acknowledged or resolved.
 type Notify struct {
 	Email    EmailChannel    `json:"email"`
 	Telegram TelegramChannel `json:"telegram"`
+	Teams    TeamsChannel    `json:"teams"`
+	Zoom     ZoomChannel     `json:"zoom"`
 	// DelaySeconds is how long an open alert waits before backup notification; 0 sends it at
 	// once. Nil is automatic: 2 minutes while PagerDuty is on (time for it to take the alert),
 	// at once while it is off.
@@ -102,10 +104,13 @@ type Notify struct {
 	// MinSeverity is the lowest severity that goes to backup notification; empty is error.
 	MinSeverity string `json:"min_severity"`
 	// Extra recipients that always get backup notification (a duty mailbox, a group chat).
-	ExtraEmails   []string   `json:"extra_emails"`
-	ExtraTelegram []string   `json:"extra_telegram"`
-	UpdatedAt     *time.Time `json:"updated_at,omitempty"`
-	UpdatedBy     string     `json:"updated_by,omitempty"`
+	ExtraEmails   []string `json:"extra_emails"`
+	ExtraTelegram []string `json:"extra_telegram"`
+	// ExtraTeams and ExtraZoom are webhook URLs of Teams channels and Zoom chats.
+	ExtraTeams []string   `json:"extra_teams"`
+	ExtraZoom  []string   `json:"extra_zoom"`
+	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
+	UpdatedBy  string     `json:"updated_by,omitempty"`
 	// Templates replace built-in message templates by name ("fallback.text", "followup.html"…);
 	// nil keeps the built-in ones.
 	Templates map[string]string `json:"templates,omitempty"`
@@ -133,6 +138,20 @@ type TelegramChannel struct {
 	TokenRef string `json:"-"`
 	// APIURL replaces https://api.telegram.org (a proxy, tests).
 	APIURL string `json:"api_url,omitempty"`
+}
+
+// TeamsChannel posts to Microsoft Teams channels through their incoming webhooks (a Workflows
+// "When a Teams webhook request is received" flow or a legacy Incoming Webhook). The webhook URL
+// is the address and carries its own secret, so the channel has no other one.
+type TeamsChannel struct {
+	Enabled bool `json:"enabled"`
+}
+
+// ZoomChannel posts to Zoom Team Chat channels through the Incoming Webhook app: the endpoint
+// URL is the address, the verification token (kept in OpenBao) goes in the Authorization header.
+type ZoomChannel struct {
+	Enabled  bool   `json:"enabled"`
+	TokenRef string `json:"-"`
 }
 
 // Grafana opens the context of an incident: a dashboard with the time around the incident and

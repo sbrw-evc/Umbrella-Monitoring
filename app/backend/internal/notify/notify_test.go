@@ -84,7 +84,7 @@ func setup(t *testing.T) (*notify.Service, *store.Store, *notifytest.SMTP, *noti
 			ExtraTelegram: []string{"-100200"},
 		}}
 	})
-	s := notify.New(st, secrets{"pw": "secret", "tg": tg.Token})
+	s := notify.New(st, secrets{"pw": "secret", "tg": tg.Token, "zm": "zoom-verification-token"})
 	s.Backoff = time.Millisecond
 	s.SetLinks(notify.NewLinks([]byte("0123456789abcdef0123456789abcdef")))
 	res := &results{}

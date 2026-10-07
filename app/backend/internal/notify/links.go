@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 )
 
 var ErrBadLink = errors.New("the link is not valid or has expired")
@@ -18,10 +20,13 @@ type Links struct{ key []byte }
 
 func NewLinks(key []byte) *Links { return &Links{key: key} }
 
-// Recipient forms: u:<user id>, e:<address>, t:<chat id>.
+// Recipient forms: u:<user id>, e:<address>, t:<chat id>, ms:<redacted Teams webhook>,
+// zm:<redacted Zoom webhook>. A webhook URL is a secret, so its recipient is the redacted form.
 func UserRecipient(id string) string       { return "u:" + id }
 func EmailRecipient(addr string) string    { return "e:" + addr }
 func TelegramRecipient(chat string) string { return "t:" + chat }
+func TeamsRecipient(url string) string     { return "ms:" + model.RedactURL(url) }
+func ZoomRecipient(url string) string      { return "zm:" + model.RedactURL(url) }
 
 func (l *Links) mac(payload string) string {
 	m := hmac.New(sha256.New, l.key)
