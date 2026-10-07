@@ -133,8 +133,9 @@ func (e *Engine) Reresolve(ctx context.Context) error {
 		}
 	}
 	for _, id := range ids {
-		var cmd *Command
+		var cmds []Command
 		err := pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
+			cmds = nil
 			// The same lock as folding events: dedup keys change here.
 			if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", int64(lockKey)); err != nil {
 				return err
@@ -144,7 +145,7 @@ func (e *Engine) Reresolve(ctx context.Context) error {
 				return err
 			}
 			c := &change{a: a}
-			cmd, err = e.reresolve(ctx, tx, c, w, now)
+			cmds, err = e.reresolve(ctx, tx, c, w, now)
 			if err != nil {
 				return err
 			}
@@ -153,8 +154,8 @@ func (e *Engine) Reresolve(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if cmd != nil {
-			e.pd.Send(*cmd)
+		for _, cmd := range cmds {
+			e.pd.Send(cmd)
 		}
 	}
 	return nil
@@ -170,7 +171,7 @@ func (w *world) resolutionChanged(a *Alert) bool {
 	return id != a.CIID || excluded != a.Excluded
 }
 
-func (e *Engine) reresolve(ctx context.Context, tx pgx.Tx, c *change, w *world, now time.Time) (*Command, error) {
+func (e *Engine) reresolve(ctx context.Context, tx pgx.Tx, c *change, w *world, now time.Time) ([]Command, error) {
 	a := c.a
 	name := a.EventCI
 	if name == "" {
@@ -189,7 +190,7 @@ func (e *Engine) reresolve(ctx context.Context, tx pgx.Tx, c *change, w *world, 
 		}
 		if other != nil && other.ID != a.ID && ci != nil {
 			// The item already has an alert of this signal: this one joins it.
-			return e.mergeInto(ctx, tx, c, other, ci.Name, "", now)
+			return e.mergeInto(ctx, tx, c, w, other, ci.Name, "", now)
 		}
 		if other == nil || other.ID == a.ID {
 			a.DedupKey = key
@@ -206,8 +207,16 @@ func (e *Engine) reresolve(ctx context.Context, tx pgx.Tx, c *change, w *world, 
 			}
 		}
 	}
+	// The services changed with the item: the priority is found again.
+	raised := e.prioritize(c, w, now)
 	wasExcluded := a.Excluded
-	if e.exclude(c, excluded, now) || !wasExcluded {
+	if e.exclude(c, excluded, now) {
+		return nil, nil
+	}
+	if !wasExcluded {
+		if raised {
+			return cmdList(e.raisedCmd(c.a, now)), nil
+		}
 		return nil, nil
 	}
 	// The host is no longer excluded: the alert goes on as a new one would.
@@ -222,7 +231,14 @@ func (e *Engine) reresolve(ctx context.Context, tx pgx.Tx, c *change, w *world, 
 	if pdHas(a) {
 		return nil, nil
 	}
-	return e.pdCmd(a, PDTrigger, now), nil
+	return cmdList(e.pdCmd(a, PDTrigger, now)), nil
+}
+
+func cmdList(cmd *Command) []Command {
+	if cmd == nil {
+		return nil
+	}
+	return []Command{*cmd}
 }
 
 // expireTests resolves the alerts of test events once they have lasted their lifetime

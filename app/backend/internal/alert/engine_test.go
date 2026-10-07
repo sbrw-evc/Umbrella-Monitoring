@@ -76,6 +76,8 @@ func catalog() *store.Store {
 		d.Services["S-2"] = &model.Service{ID: "S-2", Name: "Reports", OwnerTeamID: "T-3", Criticality: model.CriticalityLow,
 			Status: model.ServiceActive, CIIDs: []string{"CI-1"}}
 		d.Settings.Alerting.PagerDuty.Enabled = true
+		// The priority is the event severity here; impact_test.go turns the impact policy on.
+		d.Settings.Impact = model.ImpactPolicy{Configured: true}
 	})
 	return st
 }
@@ -312,7 +314,9 @@ func TestBindUnknownNow(t *testing.T) {
 	if list := active(t, e); len(list) != 3 {
 		t.Errorf("the merged alert is resolved: %d", len(list))
 	}
-	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDResolve {
+	// The alert it joined got a critical source: PagerDuty gets the raised severity.
+	cmds := rec.take()
+	if len(cmds) != 2 || cmds[0].Action != alert.PDTrigger || cmds[0].Alert.Severity != "critical" || cmds[1].Action != alert.PDResolve {
 		t.Errorf("the merged alert is resolved in PagerDuty: %+v", cmds)
 	}
 }
