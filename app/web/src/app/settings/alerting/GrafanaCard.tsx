@@ -27,7 +27,7 @@ export function GrafanaCard() {
   }, [load])
   if (!saved) {
     return (
-      <ProfileCard title={t('gf.title')} action={loader}>
+      <ProfileCard title={t('gf.title')} action={loader} inline>
         {!loader.error && <p className="muted">{t('loading')}</p>}
       </ProfileCard>
     )

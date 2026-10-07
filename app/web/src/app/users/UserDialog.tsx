@@ -7,17 +7,20 @@ import { useLocale, useT } from '../../i18n'
 import { Banner, Button, formatDate, Modal, Rows, SettingRow } from '../../ui'
 import { ProfileFieldsGrid } from '../profile/ProfileFieldsGrid'
 import { useAction, type Action } from '../profile/useAction'
+import { ADMIN } from '../roles/permissions'
 import { useSession } from '../session'
 import { profileChanged, profileOf, type ProfileFields } from '../types'
-import { AccessFields, type Access } from './AccessFields'
+import { AccessFields, ScopeField, type Access, type ScopeMode } from './AccessFields'
 import { SourcePill, StatusPill } from './Badges'
-import { adminOf, type ManagedUser, type Refs } from './model'
+import { adminOf, scopeModeOf, type ManagedUser, type Refs } from './model'
 import { freshPassword, NewPasswordFields, usePasswordValid, type NewPassword } from './NewPasswordFields'
 import { strings } from './strings'
+import { Flash, notify } from '../../notify'
 
 type Mode = 'edit' | 'password' | 'delete'
 
-const accessOf = (u: ManagedUser): Access => ({ role_id: u.role, team_id: u.team_id ?? '' })
+const accessOf = (u: ManagedUser): Access => ({ role_id: u.role, team_ids: u.team_ids ?? [] })
+const sameIds = (a: string[], b: string[]) => a.length === b.length && [...a].sort().every((x, i) => x === [...b].sort()[i])
 
 export function UserDialog({
   user,
@@ -34,7 +37,6 @@ export function UserDialog({
 }) {
   const t = useT(strings)
   const [mode, setMode] = useState<Mode>('edit')
-  const [flash, setFlash] = useState('')
   const [last, setLast] = useState(user)
   const shown = user ?? last
   const name = shown?.display_name ?? ''
@@ -50,13 +52,9 @@ export function UserDialog({
 
   useEffect(() => {
     setMode('edit')
-    setFlash('')
   }, [user?.id])
 
-  const switchTo = (m: Mode) => {
-    setFlash('')
-    setMode(m)
-  }
+  const switchTo = (m: Mode) => setMode(m)
 
   return (
     <Modal open={!!user} title={titles[mode]} onClose={onClose}>
@@ -70,7 +68,7 @@ export function UserDialog({
             exit={{ opacity: 0, x: mode === 'edit' ? 12 : -12 }}
             transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
           >
-            {mode === 'edit' && <EditView user={shown} refs={refs} flash={flash} onChanged={onChanged} onMode={switchTo} />}
+            {mode === 'edit' && <EditView user={shown} refs={refs} onChanged={onChanged} onMode={switchTo} />}
             {mode === 'password' && (
               <PasswordView
                 user={shown}
@@ -78,7 +76,7 @@ export function UserDialog({
                 onDone={(u) => {
                   onChanged(u)
                   setMode('edit')
-                  setFlash(t('usr.password.set'))
+                  notify({ kind: 'ok', title: t('usr.password.set') })
                 }}
               />
             )}
@@ -90,15 +88,14 @@ export function UserDialog({
   )
 }
 
-function Outcome({ action, flash }: { action: Action; flash?: string }) {
-  const notice = action.notice || (action.error || action.busy ? '' : flash)
+function Outcome({ action }: { action: Action }) {
   return (
     <>
-      {notice && <Banner kind="ok" title={notice} />}
+      {action.notice && <Flash kind="ok" title={action.notice} />}
       {action.error && (
-        <Banner kind="error" title={action.error.message}>
+        <Flash kind="error" title={action.error.message}>
           {action.error.detail}
-        </Banner>
+        </Flash>
       )}
     </>
   )
@@ -160,13 +157,11 @@ function UserSummary({ user }: { user: ManagedUser }) {
 function EditView({
   user,
   refs,
-  flash,
   onChanged,
   onMode,
 }: {
   user: ManagedUser
   refs: Refs
-  flash: string
   onChanged: (u: ManagedUser) => void
   onMode: (m: Mode) => void
 }) {
@@ -176,18 +171,25 @@ function EditView({
   const local = user.source === 'local'
   const [profile, setProfile] = useState<ProfileFields>(() => profileOf(user))
   const [access, setAccess] = useState<Access>(() => accessOf(user))
+  const [scope, setScope] = useState<string[]>(() => user.service_ids ?? [])
+  const [mode, setMode] = useState<ScopeMode>(() => scopeModeOf(user))
 
   useEffect(() => {
     setProfile(profileOf(user))
     setAccess(accessOf(user))
+    setScope(user.service_ids ?? [])
+    setMode(scopeModeOf(user))
   }, [user])
 
   const saved = accessOf(user)
-  const dirty = (local && profileChanged(profile, profileOf(user))) || access.role_id !== saved.role_id || access.team_id !== saved.team_id
+  const savedScope = user.service_ids ?? []
+  const scopeChanged = mode !== scopeModeOf(user) || scope.length !== savedScope.length || scope.some((id) => !savedScope.includes(id))
+  const dirty =
+    (local && profileChanged(profile, profileOf(user))) || access.role_id !== saved.role_id || !sameIds(access.team_ids, saved.team_ids) || scopeChanged
 
   const save = () =>
     action.run(async () => {
-      const body = { ...(local ? { profile } : {}), role_id: access.role_id, team_id: access.team_id }
+      const body = { ...(local ? { profile } : {}), role_id: access.role_id, team_ids: access.team_ids, scope_mode: mode, service_ids: scope }
       onChanged(await api<ManagedUser>('PUT', `/api/users/${encodeURIComponent(user.id)}`, body))
       return t('usr.saved')
     })
@@ -212,8 +214,17 @@ function EditView({
       </section>
       <section className="stack usr-section">
         <h3>{t('usr.section.access')}</h3>
-        <fieldset className="plain-fieldset" disabled={!rights.edit}>
+        <fieldset className="plain-fieldset stack" disabled={!rights.edit}>
           <AccessFields refs={refs} value={access} onChange={setAccess} roleLocked={rights.self} roleHint={roleHint} />
+          <ScopeField
+            refs={refs}
+            mode={mode}
+            value={scope}
+            known={user.services}
+            admin={access.role_id === ADMIN}
+            onMode={setMode}
+            onChange={setScope}
+          />
         </fieldset>
       </section>
       {(rights.lock || rights.password || rights.remove) && (
@@ -238,7 +249,7 @@ function EditView({
             )}
             {rights.remove && (
               <SettingRow label={t('usr.delete')} hint={t('usr.delete.hint')}>
-                <Button className="usr-danger" onClick={() => onMode('delete')}>
+                <Button variant="danger-soft" onClick={() => onMode('delete')}>
                   <Trash2 size={16} aria-hidden />
                   {t('usr.delete')}
                 </Button>
@@ -247,7 +258,7 @@ function EditView({
           </div>
         </section>
       )}
-      <Outcome action={action} flash={flash} />
+      <Outcome action={action} />
       {rights.edit && (
         <Footer>
           <Button variant="primary" onClick={save} busy={action.busy} disabled={!dirty}>
@@ -301,13 +312,14 @@ function DeleteView({ user, onBack, onDeleted }: { user: ManagedUser; onBack: ()
       <Banner kind="warn" title={t('usr.delete.text', { login: user.username })}>
         {user.source === 'ldap' && t('usr.delete.ldap')}
         {user.source === 'entra' && t('usr.delete.entra')}
+        {user.source === 'netbox' && t(user.netbox_recreates ? 'usr.delete.netbox' : 'usr.delete.netbox.off')}
       </Banner>
       <Outcome action={action} />
       <Footer>
         <Button variant="ghost" onClick={onBack}>
           {t('usr.back')}
         </Button>
-        <Button className="usr-danger-solid" onClick={remove} busy={action.busy}>
+        <Button variant="danger" onClick={remove} busy={action.busy}>
           <Trash2 size={16} aria-hidden />
           {t('usr.delete.confirm')}
         </Button>

@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/flow"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
@@ -22,16 +23,36 @@ const (
 )
 
 var (
-	ErrCredentialInUse = errors.New("the credential is used by connectors")
+	ErrCredentialInUse = errors.New("the credential is in use")
 	ErrSecretsDown     = errors.New("OpenBao is unavailable")
 )
 
-// credentialKinds: the plain fields and the secret fields of every credential type.
-var credentialKinds = map[string]struct{ fields, secrets []string }{
-	flow.CredBearer: {nil, []string{"token"}},
-	flow.CredBasic:  {[]string{"username"}, []string{"password"}},
-	flow.CredHeader: {[]string{"header"}, []string{"value"}},
-	flow.CredHMAC:   {nil, []string{"secret"}},
+// CredentialKind is a credential type with its plain fields and its secret fields.
+type CredentialKind struct {
+	Type    string   `json:"type"`
+	Fields  []string `json:"fields"`
+	Secrets []string `json:"secrets"`
+}
+
+// credentialKinds are the credential types in the order the web app offers them; it reads
+// them from GET /api/credentials/kinds.
+var credentialKinds = []CredentialKind{
+	{flow.CredBearer, []string{}, []string{"token"}},
+	{flow.CredBasic, []string{"username"}, []string{"password"}},
+	{flow.CredHeader, []string{"header"}, []string{"value"}},
+	{flow.CredHMAC, []string{}, []string{"secret"}},
+}
+
+func credentialKind(typ string) (CredentialKind, bool) {
+	i := slices.IndexFunc(credentialKinds, func(k CredentialKind) bool { return k.Type == typ })
+	if i < 0 {
+		return CredentialKind{}, false
+	}
+	return credentialKinds[i], true
+}
+
+func (a *App) listCredentialKinds(w http.ResponseWriter, r *http.Request) {
+	httpx.JSON(w, http.StatusOK, credentialKinds)
 }
 
 type CredentialInput struct {
@@ -50,11 +71,77 @@ type CredentialView struct {
 	Fields      map[string]string `json:"fields"`
 	SecretsSet  []string          `json:"secrets_set"`
 	Version     int               `json:"version"`
-	UsedBy      []ServiceRef      `json:"used_by"`
+	UsedBy      []CredentialUse   `json:"used_by"`
 	CreatedAt   time.Time         `json:"created_at"`
 	CreatedBy   string            `json:"created_by"`
 	UpdatedAt   time.Time         `json:"updated_at"`
 	UpdatedBy   string            `json:"updated_by"`
+}
+
+// Kinds of what uses a credential.
+const (
+	UseConnector     = "connector"
+	UseMonitoring    = "monitoring"
+	UseMetricSource  = "metric_source"
+	UseLogSource     = "log_source"
+	credentialUseMax = 50
+)
+
+// CredentialUse is a connector, monitoring system or metric source that uses a credential.
+type CredentialUse struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// CredentialInUseError names what still uses a credential that was asked to be deleted.
+type CredentialInUseError struct{ Uses []CredentialUse }
+
+func (e *CredentialInUseError) Error() string {
+	names := make([]string, 0, len(e.Uses))
+	for _, u := range e.Uses {
+		names = append(names, u.Name)
+	}
+	return "the credential is used by " + strings.Join(names, ", ")
+}
+
+func (e *CredentialInUseError) Unwrap() error { return ErrCredentialInUse }
+
+// credentialUses lists everything that uses the credential: connectors (draft or a version),
+// monitoring systems and metric sources, by kind and name.
+func credentialUses(d *store.Data, id string) []CredentialUse {
+	out := []CredentialUse{}
+	for _, cn := range d.Connectors {
+		if connectorUses(cn, id) {
+			out = append(out, CredentialUse{Kind: UseConnector, ID: cn.ID, Name: cn.Name})
+		}
+	}
+	for _, src := range d.MonitoringSources {
+		if src.CredentialID == id {
+			out = append(out, CredentialUse{Kind: UseMonitoring, ID: src.ID, Name: src.Name})
+		}
+	}
+	for _, src := range d.MetricSources {
+		if src.CredentialID == id {
+			out = append(out, CredentialUse{Kind: UseMetricSource, ID: src.ID, Name: src.Name})
+		}
+	}
+	for _, src := range d.LogSources {
+		if src.CredentialID == id {
+			out = append(out, CredentialUse{Kind: UseLogSource, ID: src.ID, Name: src.Name})
+		}
+	}
+	order := map[string]int{UseConnector: 0, UseMonitoring: 1, UseMetricSource: 2, UseLogSource: 3}
+	slices.SortFunc(out, func(a, b CredentialUse) int {
+		if a.Kind != b.Kind {
+			return order[a.Kind] - order[b.Kind]
+		}
+		return byName(a.Name, b.Name)
+	})
+	if len(out) > credentialUseMax {
+		out = out[:credentialUseMax]
+	}
+	return out
 }
 
 type CredentialsService struct {
@@ -71,7 +158,7 @@ func credentialPath(id string) string { return "credentials/" + id }
 
 func (s *CredentialsService) view(d *store.Data, c *model.Credential) CredentialView {
 	v := CredentialView{ID: c.ID, Name: c.Name, Type: c.Type, Description: c.Description, Fields: map[string]string{},
-		SecretsSet: []string{}, Version: c.Version, UsedBy: []ServiceRef{}, CreatedAt: c.CreatedAt, CreatedBy: c.CreatedBy,
+		SecretsSet: []string{}, Version: c.Version, UsedBy: credentialUses(d, c.ID), CreatedAt: c.CreatedAt, CreatedBy: c.CreatedBy,
 		UpdatedAt: c.UpdatedAt, UpdatedBy: c.UpdatedBy}
 	for k, val := range c.Fields {
 		v.Fields[k] = val
@@ -80,12 +167,6 @@ func (s *CredentialsService) view(d *store.Data, c *model.Credential) Credential
 		v.SecretsSet = append(v.SecretsSet, k)
 	}
 	slices.Sort(v.SecretsSet)
-	for _, cn := range d.Connectors {
-		if connectorUses(cn, c.ID) {
-			v.UsedBy = append(v.UsedBy, ServiceRef{ID: cn.ID, Name: cn.Name})
-		}
-	}
-	slices.SortFunc(v.UsedBy, func(a, b ServiceRef) int { return byName(a.Name, b.Name) })
 	return v
 }
 
@@ -170,12 +251,12 @@ func (in *CredentialInput) normalize(create bool) error {
 	if utf8.RuneCountInString(in.Description) > maxServiceDescription {
 		return invalid("invalid_credential_description", nil)
 	}
-	kind, ok := credentialKinds[in.Type]
+	kind, ok := credentialKind(in.Type)
 	if !ok {
 		return invalid("invalid_credential_type", nil)
 	}
 	fields := map[string]string{}
-	for _, f := range kind.fields {
+	for _, f := range kind.Fields {
 		v := strings.TrimSpace(in.Fields[f])
 		if v == "" || len(v) > 256 {
 			return invalid("invalid_credential_field", fmt.Errorf("%s is required", f))
@@ -187,7 +268,7 @@ func (in *CredentialInput) normalize(create bool) error {
 	}
 	in.Fields = fields
 	secretsIn := map[string]string{}
-	for _, k := range kind.secrets {
+	for _, k := range kind.Secrets {
 		v := in.Secrets[k]
 		if v == "" {
 			if create {
@@ -201,7 +282,7 @@ func (in *CredentialInput) normalize(create bool) error {
 		secretsIn[k] = v
 	}
 	for k := range in.Secrets {
-		if !slices.Contains(kind.secrets, k) {
+		if !slices.Contains(kind.Secrets, k) {
 			return invalid("invalid_credential_secret", fmt.Errorf("%s is not a secret of type %s", k, in.Type))
 		}
 	}
@@ -315,23 +396,9 @@ func (s *CredentialsService) Delete(ctx context.Context, actor, id string) error
 			err = ErrNotFound
 			return
 		}
-		for _, cn := range d.Connectors {
-			if connectorUses(cn, id) {
-				err = ErrCredentialInUse
-				return
-			}
-		}
-		for _, src := range d.MetricSources {
-			if src.CredentialID == id {
-				err = ErrCredentialInUse
-				return
-			}
-		}
-		for _, src := range d.MonitoringSources {
-			if src.CredentialID == id {
-				err = ErrCredentialInUse
-				return
-			}
+		if uses := credentialUses(d, id); len(uses) > 0 {
+			err = &CredentialInUseError{Uses: uses}
+			return
 		}
 		name = c.Name
 		delete(d.Credentials, id)
@@ -379,15 +446,4 @@ func (s *CredentialsService) Resolve(id string) (Resolved, error) {
 		out.Secrets[k] = v
 	}
 	return out, nil
-}
-
-func credentialError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, ErrCredentialInUse):
-		writeProblem(w, http.StatusConflict, "credential_in_use", nil)
-	case errors.Is(err, ErrSecretsDown):
-		writeProblem(w, http.StatusServiceUnavailable, "secrets_unavailable", err)
-	default:
-		writeError(w, err)
-	}
 }

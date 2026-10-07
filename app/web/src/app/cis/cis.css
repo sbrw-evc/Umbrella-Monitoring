@@ -103,3 +103,7 @@ button.ci-tile:hover {
   color: var(--muted);
   text-decoration: line-through;
 }
+
+.ci-aliases .hint {
+  margin-top: 4px;
+}

@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
-const MaxTeamDepth = 8
+// MaxTeamDepth is model.MaxTeamDepth, kept for callers of this package.
+const MaxTeamDepth = model.MaxTeamDepth
 
 var (
 	ErrTeamNameTaken     = errors.New("a sibling team with this name already exists")
@@ -36,6 +38,11 @@ type TeamInput struct {
 	Description *string `json:"description"`
 	ParentID    *string `json:"parent_id"`
 	LeadID      *string `json:"lead_id"`
+	Email       *string `json:"email"`
+	Telegram    *string `json:"telegram"`
+	// Teams and Zoom: incoming webhook URLs (https) of a Teams channel and a Zoom chat.
+	Teams *string `json:"teams"`
+	Zoom  *string `json:"zoom"`
 }
 
 type TeamView struct {
@@ -160,8 +167,9 @@ func (s *TeamsService) Delete(actor, id string) error {
 		}
 		cleared := 0
 		for _, u := range d.Users {
-			if u.TeamID == id {
-				u.TeamID = ""
+			if u.InTeam(id) {
+				u.TeamIDs = withoutID(u.TeamIDs, id)
+				u.MappedTeams = withoutID(u.MappedTeams, id)
 				cleared++
 			}
 		}
@@ -176,7 +184,7 @@ func (s *TeamsService) Delete(actor, id string) error {
 		delete(d.Teams, id)
 		dropMappingRefs(d, "", id)
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "team.delete", Object: id,
-			Detail: fmt.Sprintf("%s; %d child team(s) moved up, %d member(s) left without a team", path, len(children), cleared)})
+			Detail: fmt.Sprintf("%s; %d child team(s) moved up, %d member(s) removed from it", path, len(children), cleared)})
 		err = nil
 	})
 	return err
@@ -198,14 +206,15 @@ func (s *TeamsService) SetMembers(actor, id string, userIDs []string) (TeamView,
 		var added, removed []*model.User
 		for _, u := range users {
 			keep[u.ID] = true
-			if u.TeamID != id {
-				u.TeamID = id
+			if !u.InTeam(id) {
+				u.TeamIDs = append(slices.Clone(u.TeamIDs), id)
+				slices.Sort(u.TeamIDs)
 				added = append(added, u)
 			}
 		}
 		for _, u := range d.Users {
-			if u.TeamID == id && !keep[u.ID] {
-				u.TeamID = ""
+			if u.InTeam(id) && !keep[u.ID] {
+				u.TeamIDs = withoutID(u.TeamIDs, id)
 				removed = append(removed, u)
 			}
 		}
@@ -238,6 +247,34 @@ func applyTeamText(t *model.Team, in TeamInput) error {
 			return invalid("invalid_description", err)
 		}
 		t.Description = desc
+	}
+	if in.Email != nil {
+		e := strings.TrimSpace(*in.Email)
+		if e != "" && !notify.ValidEmail(e) {
+			return invalid("invalid_email", nil)
+		}
+		t.Email = e
+	}
+	if in.Telegram != nil {
+		c := strings.TrimSpace(*in.Telegram)
+		if c != "" && !notify.ValidChat(c) {
+			return invalid("invalid_telegram", nil)
+		}
+		t.Telegram = c
+	}
+	if in.Teams != nil {
+		v := strings.TrimSpace(*in.Teams)
+		if v != "" && !validWebhook(v) {
+			return invalid("invalid_teams", nil)
+		}
+		t.Teams = v
+	}
+	if in.Zoom != nil {
+		v := strings.TrimSpace(*in.Zoom)
+		if v != "" && !validWebhook(v) {
+			return invalid("invalid_zoom", nil)
+		}
+		t.Zoom = v
 	}
 	return nil
 }
@@ -336,8 +373,8 @@ func (h hierarchy) place(id, name, parentID string) error {
 func teamMembers(d *store.Data) map[string][]OrgMember {
 	out := map[string][]OrgMember{}
 	for _, u := range d.Users {
-		if u.TeamID != "" {
-			out[u.TeamID] = append(out[u.TeamID], orgMemberOf(d, u))
+		for _, t := range u.TeamIDs {
+			out[t] = append(out[t], orgMemberOf(d, u))
 		}
 	}
 	return out
@@ -380,10 +417,34 @@ func diffTeam(d *store.Data, cur, next *model.Team) string {
 	if cur.ParentID != next.ParentID {
 		parts = append(parts, fmt.Sprintf("parent %q -> %q", teamPath(d, cur.ParentID), teamPath(d, next.ParentID)))
 	}
+	if cur.Email != next.Email || cur.Telegram != next.Telegram {
+		parts = append(parts, fmt.Sprintf("channel %q %q -> %q %q", cur.Email, cur.Telegram, next.Email, next.Telegram))
+	}
+	// Webhook URLs carry a secret: the record shows them redacted.
+	if cur.Teams != next.Teams {
+		parts = append(parts, fmt.Sprintf("teams webhook %q -> %q", redactedOrEmpty(cur.Teams), redactedOrEmpty(next.Teams)))
+	}
+	if cur.Zoom != next.Zoom {
+		parts = append(parts, fmt.Sprintf("zoom webhook %q -> %q", redactedOrEmpty(cur.Zoom), redactedOrEmpty(next.Zoom)))
+	}
 	if cur.LeadID != next.LeadID {
 		parts = append(parts, fmt.Sprintf("lead %q -> %q", leadName(d, cur.LeadID), leadName(d, next.LeadID)))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// redacted is the team as people who cannot edit it see it: the webhook URLs of its channel carry
+// a secret and are redacted.
+func (v TeamView) redacted() TeamView {
+	v.Teams, v.Zoom = redactedOrEmpty(v.Teams), redactedOrEmpty(v.Zoom)
+	return v
+}
+
+func redactedOrEmpty(v string) string {
+	if v == "" {
+		return ""
+	}
+	return model.RedactURL(v)
 }
 
 func leadName(d *store.Data, id string) string {
@@ -391,4 +452,15 @@ func leadName(d *store.Data, id string) string {
 		return u.Username
 	}
 	return ""
+}
+
+// withoutID is a copy of ids without id; nil when nothing is left.
+func withoutID(ids []string, id string) []string {
+	var out []string
+	for _, x := range ids {
+		if x != id {
+			out = append(out, x)
+		}
+	}
+	return out
 }

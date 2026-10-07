@@ -1,5 +1,5 @@
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction } from '../../connections/useRequest'
 import { useT } from '../../i18n'
 import { Banner, Button, Modal } from '../../ui'
@@ -29,7 +29,7 @@ export function DeleteDialog({ service, onClose, onDeleted }: { service: Service
           <Button variant="ghost" onClick={close}>
             {t('svc.cancel')}
           </Button>
-          <Button variant="primary" className="svc-danger-solid" busy={remover.busy} onClick={confirm}>
+          <Button variant="danger" busy={remover.busy} onClick={confirm}>
             {t('svc.delete.confirm')}
           </Button>
         </>
@@ -41,7 +41,7 @@ export function DeleteDialog({ service, onClose, onDeleted }: { service: Service
           {service.dependents.length > 0 && (
             <Banner kind="warn" title={t('svc.delete.dependents', { names: service.dependents.map((d) => d.name).join(', ') })} />
           )}
-          <ErrorBanner error={remover.error} strings={strings} />
+          <ErrorFlash error={remover.error} strings={strings} />
         </>
       )}
     </Modal>

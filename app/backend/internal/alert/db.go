@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -58,6 +59,18 @@ CREATE TABLE IF NOT EXISTS alert_keys (
 );
 `
 
+// pdOffMigration: earlier versions marked every alert "failed" while PagerDuty was turned off
+// and put the English error on the timeline. Such alerts were never meant for PagerDuty: they
+// are "off", and the false failures are taken off the timeline. It runs at every start and
+// finds nothing once done.
+const pdOffMigration = `
+UPDATE alerts SET pd_state = 'off', attention = (status <> 'resolved'),
+	doc = jsonb_set(doc, '{pd}', ((doc->'pd') - 'error' - 'retry') || '{"state": "off"}'::jsonb)
+WHERE pd_state = 'failed' AND doc->'pd'->>'error' = 'PagerDuty is not enabled';
+DELETE FROM alert_timeline WHERE kind = 'pagerduty' AND code = 'pd_failed'
+	AND 'PagerDuty is not enabled' IN (args->>'error', args->>'detail');
+`
+
 // lockKey serializes folding events into alerts between workers and Umbrella instances, so
 // two events of the same item and signal never open two alerts.
 const lockKey = 0x756d622d616c7274
@@ -69,6 +82,12 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 		if _, err := tx.Exec(ctx, schema); err != nil {
 			return fmt.Errorf("create alert tables: %w", err)
+		}
+		if _, err := tx.Exec(ctx, feedSchema); err != nil {
+			return fmt.Errorf("create the incident change feed: %w", err)
+		}
+		if _, err := tx.Exec(ctx, pdOffMigration); err != nil {
+			return fmt.Errorf("mark alerts not sent to a disabled PagerDuty: %w", err)
 		}
 		return nil
 	})
@@ -134,18 +153,22 @@ func scanAlert(row pgx.Row) (*Alert, error) {
 	return a, nil
 }
 
+// sqlActive selects the alerts that are not resolved (open or acknowledged). The schema keeps
+// the literal in its partial index.
+const sqlActive = "status <> '" + StatusResolved + "'"
+
 func lockByID(ctx context.Context, tx pgx.Tx, id string) (*Alert, error) {
 	return scanAlert(tx.QueryRow(ctx, "SELECT doc FROM alerts WHERE id = $1 FOR UPDATE", id))
 }
 
 // current returns the alert of a key that is active or was resolved within the window.
 func current(ctx context.Context, tx pgx.Tx, key string, since time.Time) (*Alert, error) {
-	return scanAlert(tx.QueryRow(ctx, `SELECT doc FROM alerts WHERE dedup_key = $1 AND (status <> 'resolved' OR resolved_at >= $2)
-		ORDER BY (status <> 'resolved') DESC, last_seen DESC LIMIT 1 FOR UPDATE`, key, since))
+	return scanAlert(tx.QueryRow(ctx, `SELECT doc FROM alerts WHERE dedup_key = $1 AND (`+sqlActive+` OR resolved_at >= $2)
+		ORDER BY (`+sqlActive+`) DESC, last_seen DESC LIMIT 1 FOR UPDATE`, key, since))
 }
 
 func activeByKey(ctx context.Context, tx pgx.Tx, key string) (*Alert, error) {
-	return scanAlert(tx.QueryRow(ctx, "SELECT doc FROM alerts WHERE dedup_key = $1 AND status <> 'resolved' FOR UPDATE", key))
+	return scanAlert(tx.QueryRow(ctx, "SELECT doc FROM alerts WHERE dedup_key = $1 AND "+sqlActive+" FOR UPDATE", key))
 }
 
 func nextID(ctx context.Context, tx pgx.Tx) (string, int64, error) {
@@ -165,7 +188,7 @@ func searchText(a *Alert) string {
 	return strings.ToLower(strings.Join(parts, " "))
 }
 
-func attention(a *Alert) bool { return Active(a.Status) || a.PD.Retry != "" }
+func attention(a *Alert) bool { return Active(a.Status) || a.PD.Retry != "" || a.FollowUp != "" }
 
 // save writes the alert and appends the timeline entries.
 func save(ctx context.Context, tx pgx.Tx, a *Alert, entries []Entry) error {
@@ -218,21 +241,12 @@ type Filter struct {
 	PD         string
 	Fallback   bool
 	Suppressed bool
-	// HideSuppressed leaves out alerts covered by a maintenance window.
-	HideSuppressed bool
-	// Scope keeps alerts of any of its items, services or teams; an empty scope keeps all.
-	Scope Scope
-	Since time.Time
-	Limit int
+	Since      time.Time
+	Limit      int
+	// ScopeServiceIDs limits everything, counts included, to alerts of these business services;
+	// empty means no limit.
+	ScopeServiceIDs []string
 }
-
-type Scope struct {
-	CIIDs      []string
-	ServiceIDs []string
-	TeamIDs    []string
-}
-
-func (s Scope) Empty() bool { return len(s.CIIDs)+len(s.ServiceIDs)+len(s.TeamIDs) == 0 }
 
 type Counts struct {
 	Active       int            `json:"active"`
@@ -243,6 +257,8 @@ type Counts struct {
 	Fallback     int            `json:"fallback"`
 	Suppressed   int            `json:"suppressed"`
 	Unbound      int            `json:"unbound"`
+	// PDEnabled: PagerDuty is turned on; while it is off the interface hides what is about it.
+	PDEnabled bool `json:"pd_enabled"`
 }
 
 type Page struct {
@@ -262,7 +278,7 @@ func (f Filter) where() (string, []any) {
 	}
 	switch f.Status {
 	case "active":
-		conds = append(conds, "status <> 'resolved'")
+		conds = append(conds, sqlActive)
 	case StatusOpen, StatusAcknowledged, StatusResolved:
 		conds = append(conds, "status = "+arg(f.Status))
 	}
@@ -278,6 +294,12 @@ func (f Filter) where() (string, []any) {
 	if f.ServiceID != "" {
 		conds = append(conds, arg(f.ServiceID)+" = ANY(service_ids)")
 	}
+	if len(f.ScopeServiceIDs) > 0 {
+		if f.ServiceID != "" && !slices.Contains(f.ScopeServiceIDs, f.ServiceID) {
+			conds = append(conds, "FALSE")
+		}
+		conds = append(conds, "service_ids && "+arg(f.ScopeServiceIDs)+"::text[]")
+	}
 	if f.CIID != "" {
 		conds = append(conds, "ci_id = "+arg(f.CIID))
 	}
@@ -286,29 +308,13 @@ func (f Filter) where() (string, []any) {
 		conds = append(conds, "search LIKE "+arg("%"+q+"%"))
 	}
 	if f.PD == "failed" {
-		conds = append(conds, "pd_state IN ('pending', 'failed') AND status <> 'resolved'")
+		conds = append(conds, "pd_state IN ('"+PDPending+"', '"+PDFailed+"') AND "+sqlActive)
 	}
 	if f.Fallback {
 		conds = append(conds, "(doc->>'fallback')::boolean")
 	}
 	if f.Suppressed {
 		conds = append(conds, "(doc->>'suppressed')::boolean")
-	}
-	if f.HideSuppressed {
-		conds = append(conds, "NOT COALESCE((doc->>'suppressed')::boolean, false)")
-	}
-	if !f.Scope.Empty() {
-		var any []string
-		if len(f.Scope.CIIDs) > 0 {
-			any = append(any, "ci_id = ANY("+arg(f.Scope.CIIDs)+")")
-		}
-		if len(f.Scope.ServiceIDs) > 0 {
-			any = append(any, "service_ids && "+arg(f.Scope.ServiceIDs)+"::text[]")
-		}
-		if len(f.Scope.TeamIDs) > 0 {
-			any = append(any, "team_id = ANY("+arg(f.Scope.TeamIDs)+")")
-		}
-		conds = append(conds, "("+strings.Join(any, " OR ")+")")
 	}
 	if !f.Since.IsZero() {
 		conds = append(conds, "last_seen >= "+arg(f.Since))
@@ -319,6 +325,15 @@ func (f Filter) where() (string, []any) {
 	return strings.Join(conds, " AND "), args
 }
 
+// forCounts is the filter behind the incident tiles: active alerts narrowed by
+// everything except the fields the tiles themselves toggle (status,
+// severities, PagerDuty, fallback, suppressed), so each tile shows how many
+// alerts it would list together with the other filters.
+func (f Filter) forCounts() Filter {
+	f.Status, f.Severities, f.PD, f.Fallback, f.Suppressed, f.Limit = "active", nil, "", false, false, 0
+	return f
+}
+
 func list(ctx context.Context, q querier, f Filter) (Page, error) {
 	out := Page{Alerts: []Alert{}, Counts: Counts{BySeverity: map[string]int{}}}
 	limit := f.Limit
@@ -326,7 +341,7 @@ func list(ctx context.Context, q querier, f Filter) (Page, error) {
 		limit = 200
 	}
 	where, args := f.where()
-	rows, err := q.Query(ctx, "SELECT doc FROM alerts WHERE "+where+fmt.Sprintf(" ORDER BY (status <> 'resolved') DESC, last_seen DESC LIMIT %d", limit+1), args...)
+	rows, err := q.Query(ctx, "SELECT doc FROM alerts WHERE "+where+fmt.Sprintf(" ORDER BY ("+sqlActive+") DESC, last_seen DESC LIMIT %d", limit+1), args...)
 	if err != nil {
 		return out, err
 	}
@@ -346,8 +361,9 @@ func list(ctx context.Context, q querier, f Filter) (Page, error) {
 		out.Alerts, out.More = out.Alerts[:limit], true
 	}
 	c := &out.Counts
+	cwhere, cargs := f.forCounts().where()
 	rows, err = q.Query(ctx, `SELECT status, severity, pd_state, (doc->>'fallback')::boolean, (doc->>'suppressed')::boolean, ci_id = '', count(*)::int
-		FROM alerts WHERE status <> 'resolved' GROUP BY 1, 2, 3, 4, 5, 6`)
+		FROM alerts WHERE `+cwhere+` GROUP BY 1, 2, 3, 4, 5, 6`, cargs...)
 	if err != nil {
 		return out, err
 	}

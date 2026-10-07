@@ -42,8 +42,17 @@ export function useResource<T>(path: string, epoch: number) {
   return { data, error, busy, reload }
 }
 
-export function useAction() {
+export type ActionOptions = {
+  // quietSession: a 401 or an expired password is left to the session (which signs out or asks
+  // for a new password) instead of becoming the error of the action.
+  quietSession?: boolean
+}
+
+// useAction runs requests and keeps the busy state and the error of the last one. run returns
+// the result, or undefined when the request failed.
+export function useAction({ quietSession = false }: ActionOptions = {}) {
   const onError = useExpiry()
+  const { refresh } = useSession()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const run = useCallback(
@@ -54,13 +63,16 @@ export function useAction() {
         return await fn()
       } catch (e) {
         onError(e)
-        setError(e)
+        if (!quietSession) setError(e)
+        else if (e instanceof ApiError && e.code === 'password_expired') await refresh()
+        else if (!(e instanceof ApiError && e.status === 401)) setError(e)
         return undefined
       } finally {
         setBusy(false)
       }
     },
-    [onError],
+    [onError, quietSession, refresh],
   )
-  return { busy, error, run, clear: () => setError(null) }
+  const clear = useCallback(() => setError(null), [])
+  return { busy, error, run, clear }
 }

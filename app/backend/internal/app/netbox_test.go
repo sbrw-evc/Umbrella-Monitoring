@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -72,7 +73,7 @@ func newNetBoxFixture(t *testing.T) netboxFixture {
 func (f netboxFixture) connect(extra map[string]any) {
 	f.h.t.Helper()
 	cfg := map[string]any{"enabled": true, "url": f.nb.URL + "/", "sync_minutes": 60, "import_devices": true, "import_vms": true,
-		"import_services": true, "sync_contacts": true, "sync_directory": true}
+		"import_services": true, "sync_contacts": true, "sync_directory": true, "create_users": true}
 	for k, v := range extra {
 		cfg[k] = v
 	}
@@ -392,4 +393,121 @@ func TestNetBoxDirectory(t *testing.T) {
 	if got := f.byName("srv-app-01").Owners[0]; got.ID != owner.ID || got.Source != model.SourceLDAP {
 		t.Fatalf("owner after adoption = %+v", got)
 	}
+}
+
+func (f netboxFixture) syncState(query string) model.SyncState {
+	f.h.t.Helper()
+	var st model.SyncState
+	if code := f.admin.call(http.MethodPost, "/api/netbox/sync"+query, nil, &st); code != 200 || !st.OK {
+		f.h.t.Fatalf("sync = %d %+v", code, st)
+	}
+	return st
+}
+
+// syncBindings binds two NetBox items to a service and to monitoring hosts and returns a reader
+// of those bindings.
+func (f netboxFixture) syncBindings(db, sw app.CIView) func() ([]string, map[string]string) {
+	f.h.st.Write(func(d *store.Data) {
+		d.Services["SVC-9"] = &model.Service{ID: "SVC-9", Name: "Billing", Status: model.ServiceActive, CIIDs: []string{db.ID, sw.ID}}
+		d.MonitoringSources["MON-9"] = &model.MonitoringSource{ID: "MON-9", Name: "Zabbix", Links: map[string]string{"sw-core": sw.ID, "db": db.ID}}
+	})
+	return func() ([]string, map[string]string) {
+		var ids []string
+		var links map[string]string
+		f.h.st.Read(func(d *store.Data) {
+			ids = slices.Clone(d.Services["SVC-9"].CIIDs)
+			links = maps.Clone(d.MonitoringSources["MON-9"].Links)
+		})
+		return ids, links
+	}
+}
+
+// An item gone from NetBox is removed like a manual deletion: no service or monitoring host keeps
+// pointing at it.
+func TestNetBoxSyncRemovalDropsBindings(t *testing.T) {
+	f := newNetBoxFixture(t)
+	f.connect(nil)
+	f.sync()
+	db, sw := f.byName("srv-db-01"), f.byName("sw-core-01")
+	bindings := f.syncBindings(db, sw)
+
+	f.nb.Remove("dcim/devices", 3)
+	if st := f.syncState(""); st.Stats.Deleted != 1 || st.Stats.Held != 0 {
+		t.Fatalf("one gone = %+v", st.Stats)
+	}
+	if ids, links := bindings(); !slices.Equal(ids, []string{db.ID}) || len(links) != 1 || links["db"] != db.ID {
+		t.Fatalf("bindings of the deleted item must go: services %v, monitoring %v", ids, links)
+	}
+}
+
+// An answer without all or most of the known objects removes nothing, leaves a warning in the sync
+// state, and removes the items only when a person confirms it.
+func TestNetBoxSyncKeepsItemsOnIncompleteAnswer(t *testing.T) {
+	f := newNetBoxFixture(t)
+	f.connect(nil)
+	f.sync()
+	db, sw := f.byName("srv-db-01"), f.byName("sw-core-01")
+	bindings := f.syncBindings(db, sw)
+	all := f.list("").Items
+
+	// NetBox answers with nothing (a token that lost its permissions): everything stays.
+	objects := map[string][]map[string]any{}
+	for _, kind := range []string{"dcim/devices", "virtualization/virtual-machines", "ipam/services"} {
+		for id := 1; id <= 20; id++ {
+			if o := f.nb.Get(kind, id); o != nil {
+				objects[kind] = append(objects[kind], o)
+				f.nb.Remove(kind, id)
+			}
+		}
+	}
+	st := f.syncState("")
+	if st.Stats.Objects != 0 || st.Stats.Deleted != 0 || st.Stats.Unlinked != 0 || st.Stats.Held != len(all) || st.Stats.HeldReason != "empty" {
+		t.Fatalf("empty answer = %+v", st.Stats)
+	}
+	if got := f.byName("srv-db-01"); got.ID != db.ID || got.NetBox == nil {
+		t.Fatalf("item after an empty answer = %+v", got)
+	}
+	if ids, links := bindings(); !slices.Equal(ids, []string{db.ID, sw.ID}) || len(links) != 2 {
+		t.Fatalf("bindings after an empty answer: services %v, monitoring %v", ids, links)
+	}
+	var view app.NetBoxView
+	f.admin.call(http.MethodGet, "/api/netbox", nil, &view)
+	if view.Sync.Stats.Held != len(all) || view.Sync.Stats.HeldReason != "empty" {
+		t.Fatalf("the warning must stay in the sync state: %+v", view.Sync)
+	}
+
+	// Back, but all except one are missing: more than half, kept as well.
+	for kind, list := range objects {
+		for _, o := range list {
+			f.nb.Put(kind, o)
+		}
+	}
+	for kind, list := range objects {
+		for _, o := range list {
+			if id := o["id"].(int); kind != "dcim/devices" || id != db.NetBox.ID {
+				f.nb.Remove(kind, id)
+			}
+		}
+	}
+	if st := f.syncState(""); st.Stats.Objects != 1 || st.Stats.Deleted != 0 || st.Stats.Held != len(all)-1 || st.Stats.HeldReason != "share" {
+		t.Fatalf("partial answer = %+v", st.Stats)
+	}
+	if got := f.byName("sw-core-01"); got.ID != sw.ID || got.NetBox == nil {
+		t.Fatalf("item missing from a partial answer = %+v", got)
+	}
+	// The person confirms: they are removed, with their bindings.
+	if st := f.syncState("?confirm=removal"); st.Stats.Deleted != len(all)-1 || st.Stats.Held != 0 {
+		t.Fatalf("confirmed = %+v", st.Stats)
+	}
+	if l := f.list(""); len(l.Items) != 1 || l.Items[0].ID != db.ID {
+		t.Fatalf("after the confirmed removal = %+v", l.Items)
+	}
+	if ids, links := bindings(); !slices.Equal(ids, []string{db.ID}) || len(links) != 1 {
+		t.Fatalf("bindings after the confirmed removal: services %v, monitoring %v", ids, links)
+	}
+	f.h.st.Read(func(d *store.Data) {
+		if d.NetBoxSync.Stats.Held != 0 {
+			t.Fatalf("the warning must clear: %+v", d.NetBoxSync.Stats)
+		}
+	})
 }

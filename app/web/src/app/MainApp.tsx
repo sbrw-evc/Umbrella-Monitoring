@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api, ApiError, setCsrf, type Meta } from '../api'
 import { defaultPolicy, type PasswordPolicy } from '../policy'
-import { useT } from '../i18n'
+import { useLocale, useT } from '../i18n'
 import { RouterProvider, SCROLL_ROOT_ID, useRouter } from '../router'
 import { ExpiredPassword } from './profile/ExpiredPassword'
 import { PasswordExpiryNotice } from './profile/PasswordExpiryNotice'
 import { ProfilePage } from './profile/ProfilePage'
+import { PageBoundary } from './PageBoundary'
 import { PageHead } from './PageHead'
 import { resolve, visiblePages } from './pages'
 import { SessionProvider, useSession, type Session } from './session'
@@ -15,11 +16,15 @@ import { SignIn } from './SignIn'
 import { strings } from './strings'
 import { TopBar } from './TopBar'
 import type { User } from './types'
+import { setNotifyOwner, Toaster } from '../notify'
+import { ConfirmHost } from '../confirm'
 
 export default function MainApp({ meta }: { meta: Meta }) {
   return (
     <RouterProvider>
       <Shell meta={meta} />
+      <Toaster />
+      <ConfirmHost />
     </RouterProvider>
   )
 }
@@ -30,6 +35,8 @@ function Shell({ meta }: { meta: Meta }) {
   const [defaultTz, setDefaultTz] = useState(meta.default_timezone || 'UTC')
   const [policy, setPolicy] = useState<PasswordPolicy>(meta.password_policy ?? defaultPolicy)
   const t = useT(strings)
+
+  useEffect(() => setNotifyOwner(user?.id ?? ''), [user?.id])
 
   useEffect(() => {
     api<User>('GET', '/api/auth/me')
@@ -64,6 +71,16 @@ function Shell({ meta }: { meta: Meta }) {
       expire()
     }
   }, [expire])
+
+  // The server keeps the interface language: voice calls speak to the user in it.
+  const { locale } = useLocale()
+  const userLocale = user && !user.password_expired ? (user.locale ?? '') : null
+  useEffect(() => {
+    if (userLocale === null || userLocale === locale) return
+    api('PUT', '/api/auth/me/preferences', { locale })
+      .then(() => setUser((prev) => (prev ? { ...prev, locale } : prev)))
+      .catch(() => undefined)
+  }, [userLocale, locale])
 
   const permissions = useMemo(() => new Set(user?.permissions ?? []), [user?.permissions])
 
@@ -146,12 +163,16 @@ function Pages() {
         transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
       >
         {target.kind === 'profile' ? (
-          <ProfilePage />
+          <PageBoundary resetKey={path}>
+            <ProfilePage />
+          </PageBoundary>
         ) : (
           <>
             <PasswordExpiryNotice link />
             {target.page.subtitle && <PageHead page={target.page} />}
-            <target.page.Component />
+            <PageBoundary resetKey={path}>
+              <target.page.Component />
+            </PageBoundary>
           </>
         )}
       </motion.main>

@@ -3,9 +3,11 @@ package alert_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -19,6 +21,21 @@ type recorder struct {
 	mu       sync.Mutex
 	cmds     []alert.Command
 	fallback []alert.Alert
+	followUp []alert.Alert
+	// channels: the notifier has a channel turned on (alert.Notifier.On).
+	channels bool
+}
+
+func (r *recorder) On() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.channels
+}
+
+func (r *recorder) FollowUp(a alert.Alert) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.followUp = append(r.followUp, a)
 }
 
 func (r *recorder) Send(c alert.Command) {
@@ -49,10 +66,10 @@ func (c *clock) advance(d time.Duration) { c.t = c.t.Add(d) }
 func catalog() *store.Store {
 	st := store.New()
 	st.Write(func(d *store.Data) {
-		d.Users["U-1"] = &model.User{ID: "U-1", Username: "lead", Name: "Lead One", TeamID: "T-2", Profile: model.Profile{Email: "lead@example.com"}, Telegram: "1001"}
-		d.Users["U-2"] = &model.User{ID: "U-2", Username: "eng", Name: "Engineer Two", TeamID: "T-2", Profile: model.Profile{Email: "eng@example.com"}}
+		d.Users["U-1"] = &model.User{ID: "U-1", Username: "lead", Name: "Lead One", TeamIDs: []string{"T-2"}, Profile: model.Profile{Email: "lead@example.com"}, Telegram: "1001"}
+		d.Users["U-2"] = &model.User{ID: "U-2", Username: "eng", Name: "Engineer Two", TeamIDs: []string{"T-2"}, Profile: model.Profile{Email: "eng@example.com"}}
 		d.Users["U-3"] = &model.User{ID: "U-3", Username: "owner", Name: "Owner Three", Profile: model.Profile{Email: "owner@example.com"}}
-		d.Users["U-4"] = &model.User{ID: "U-4", Username: "gone", Name: "Gone", TeamID: "T-2", Disabled: true}
+		d.Users["U-4"] = &model.User{ID: "U-4", Username: "gone", Name: "Gone", TeamIDs: []string{"T-2"}, Disabled: true}
 		d.Teams["T-1"] = &model.Team{ID: "T-1", Name: "Platform"}
 		d.Teams["T-2"] = &model.Team{ID: "T-2", Name: "Payments SRE", ParentID: "T-1", LeadID: "U-1"}
 		d.Teams["T-3"] = &model.Team{ID: "T-3", Name: "Empty", ParentID: "T-2"}
@@ -66,6 +83,7 @@ func catalog() *store.Store {
 			Status: model.ServiceActive, CIIDs: []string{"CI-1", "CI-2"}}
 		d.Services["S-2"] = &model.Service{ID: "S-2", Name: "Reports", OwnerTeamID: "T-3", Criticality: model.CriticalityLow,
 			Status: model.ServiceActive, CIIDs: []string{"CI-1"}}
+		d.Settings.Alerting.PagerDuty.Enabled = true
 	})
 	return st
 }
@@ -245,6 +263,68 @@ func TestUnknownItemIsBoundLater(t *testing.T) {
 	}
 }
 
+func TestBindUnknownNow(t *testing.T) {
+	ctx := context.Background()
+	e, st, rec, _ := setup(t)
+	e.Ingest(ctx, []alert.Incoming{
+		ev("CON-1", "a", "edge-07:9100", "ping", "critical", "firing"),
+		ev("CON-1", "b", "edge-07:9100", "disk", "warning", "firing"),
+		ev("CON-1", "c", "other-host", "ping", "critical", "firing"),
+	})
+	rec.take()
+	if bound, err := e.BindUnknown(ctx, "admin"); err != nil || len(bound) != 0 {
+		t.Fatalf("nothing to bind yet: %v %v", bound, err)
+	}
+
+	// The event name becomes an alias of an item already in a service: both alerts of the name
+	// are bound and routed at once, without waiting for another event.
+	st.Write(func(d *store.Data) { d.ConfigItems["CI-2"].Aliases = []string{"edge-07:9100"} })
+	bound, err := e.BindUnknown(ctx, "admin")
+	if err != nil || len(bound) != 2 {
+		t.Fatalf("bound = %v, %v", bound, err)
+	}
+	p, _ := e.List(ctx, alert.Filter{Status: "active", CIID: "CI-2"})
+	if len(p.Alerts) != 2 || p.Alerts[0].Route.Team == nil || p.Alerts[0].Route.Team.ID != "T-2" || p.Alerts[0].CIName != "app-01" {
+		t.Fatalf("bound alerts = %+v", p.Alerts)
+	}
+	_, entries, _ := e.Get(ctx, p.Alerts[0].ID)
+	codes := map[string]int{}
+	for _, en := range entries {
+		codes[en.Code]++
+	}
+	if codes["ci_bound"] != 1 || codes["routed"] != 1 {
+		t.Errorf("timeline = %v", codes)
+	}
+
+	// Later events under the alias fold into the same alert.
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "edge-07:9100", "ping", "critical", "firing")})
+	if p2, _ := e.List(ctx, alert.Filter{Status: "active", CIID: "CI-2"}); len(p2.Alerts) != 2 {
+		t.Errorf("future events match the alias: %+v", p2.Alerts)
+	}
+	if list := active(t, e); len(list) != 3 {
+		t.Errorf("no new alert: %d", len(list))
+	}
+
+	// An alert of a name that turns out to be an item that already has an alert of the signal
+	// is merged into it.
+	e.Ingest(ctx, []alert.Incoming{ev("CON-2", "x", "lonely", "ping", "error", "firing")})
+	rec.take()
+	st.Write(func(d *store.Data) { d.ConfigItems["CI-3"].Aliases = []string{"other-host"} })
+	if bound, err = e.BindUnknown(ctx, ""); err != nil || len(bound) != 1 {
+		t.Fatalf("merge = %v %v", bound, err)
+	}
+	p, _ = e.List(ctx, alert.Filter{Status: "active", CIID: "CI-3"})
+	if len(p.Alerts) != 1 || len(p.Alerts[0].Sources) != 2 || p.Alerts[0].Severity != "critical" {
+		t.Fatalf("merged = %+v", p.Alerts)
+	}
+	if list := active(t, e); len(list) != 3 {
+		t.Errorf("the merged alert is resolved: %d", len(list))
+	}
+	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDResolve {
+		t.Errorf("the merged alert is resolved in PagerDuty: %+v", cmds)
+	}
+}
+
 func TestActionsAndPagerDuty(t *testing.T) {
 	ctx := context.Background()
 	e, _, rec, c := setup(t)
@@ -264,7 +344,7 @@ func TestActionsAndPagerDuty(t *testing.T) {
 	b := active(t, e)[0]
 	rec.take()
 	// PagerDuty is down: the trigger fails and is retried; after 2 minutes backup notification.
-	e.PDResult(ctx, b.ID, alert.PDTrigger, "default", errors.New("Events API answered 503"))
+	e.PDResult(ctx, b.ID, alert.PDTrigger, "default", "", errors.New("Events API answered 503"))
 	got, _, _ := e.Get(ctx, b.ID)
 	if got.PD.State != alert.PDFailed || got.PD.Retry != "trigger" {
 		t.Fatalf("pd = %+v", got.PD)
@@ -293,11 +373,11 @@ func TestActionsAndPagerDuty(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec.take()
-	e.PDResult(ctx, b.ID, alert.PDTrigger, "Payments", nil)
+	e.PDResult(ctx, b.ID, alert.PDTrigger, "Payments", "", nil)
 	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDAcknowledge {
 		t.Errorf("the acknowledgement follows: %+v", cmds)
 	}
-	e.PDResult(ctx, b.ID, alert.PDAcknowledge, "Payments", nil)
+	e.PDResult(ctx, b.ID, alert.PDAcknowledge, "Payments", "", nil)
 
 	// Resolved in PagerDuty: resolved here.
 	keys, err := e.PDKeys(ctx, "umb-"+b.ID, "")
@@ -327,7 +407,7 @@ func TestBelowThresholdIsNotRetried(t *testing.T) {
 	e, _, rec, c := setup(t)
 	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "app-01", "errors", "warning", "firing")})
 	a := active(t, e)[0]
-	e.PDResult(ctx, a.ID, alert.PDTrigger, "", alert.ErrPDSkipped)
+	e.PDResult(ctx, a.ID, alert.PDTrigger, "", "", alert.ErrPDSkipped)
 	rec.take()
 	c.advance(5 * time.Minute)
 	e.Tick(ctx)
@@ -378,7 +458,274 @@ func TestRedUseLink(t *testing.T) {
 	if len(p.Alerts) != 1 || p.Alerts[0].RelatedID == "" {
 		t.Fatalf("red linked to use: %+v", p.Alerts)
 	}
-	if p.Counts.Active != 2 || p.Counts.BySeverity["error"] != 1 || p.Counts.PDNotTaken != 2 {
-		t.Errorf("counts = %+v", p.Counts)
+	if p.Counts.Active != 1 || p.Counts.BySeverity["error"] != 1 || p.Counts.PDNotTaken != 1 {
+		t.Errorf("counts follow the method filter = %+v", p.Counts)
+	}
+	if p, _ = e.List(ctx, alert.Filter{Status: "active"}); p.Counts.Active != 2 || p.Counts.PDNotTaken != 2 {
+		t.Errorf("counts without filters = %+v", p.Counts)
+	}
+}
+
+func TestLongCommentKeepsCharacters(t *testing.T) {
+	ctx := context.Background()
+	e, _, _, _ := setup(t)
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "c", "db-01", "disk", "error", "firing")})
+	a := active(t, e)[0]
+	// 4001 two-byte letters: a byte cut at 4000 would land inside the 2000th one.
+	text := "ж" + strings.Repeat("ы", 4000)
+	if _, err := e.Act(ctx, a.ID, "comment", "eng", text); err != nil {
+		t.Fatal(err)
+	}
+	_, entries, err := e.Get(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := entries[len(entries)-1].Args["text"]
+	if !utf8.ValidString(got) || utf8.RuneCountInString(got) != 4000 || got != text[:len(text)-len("ы")] {
+		t.Errorf("comment kept %d characters, valid UTF-8 %v", utf8.RuneCountInString(got), utf8.ValidString(got))
+	}
+}
+
+// An incident PagerDuty took is still acknowledged and resolved there when a maintenance
+// window covers the alert; the start of a window alone resolves nothing.
+func TestWindowDoesNotStrandPagerDutyIncidents(t *testing.T) {
+	ctx := context.Background()
+	e, st, rec, c := setup(t)
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "app-01", "errors", "critical", "firing")})
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "b", "app-01", "latency", "critical", "firing")})
+	list := active(t, e)
+	if len(list) != 2 {
+		t.Fatalf("two alerts: %+v", list)
+	}
+	for _, a := range list {
+		e.PDResult(ctx, a.ID, alert.PDTrigger, "default", "", nil)
+	}
+	rec.take()
+	st.Write(func(d *store.Data) {
+		d.Maintenance["MW-1"] = &model.Maintenance{ID: "MW-1", Title: "Repair", ServiceIDs: []string{"S-1"},
+			Start: c.t, End: c.t.Add(time.Hour)}
+	})
+	c.advance(time.Minute)
+	e.Tick(ctx)
+	if cmds := rec.take(); len(cmds) != 0 {
+		t.Fatalf("a window that starts sends nothing: %+v", cmds)
+	}
+	for _, a := range active(t, e) {
+		if !a.Suppressed || a.PD.State != alert.PDAccepted {
+			t.Fatalf("suppressed and still open in PagerDuty: %+v", a)
+		}
+	}
+
+	// Fixed during the window: the source resolves, the incident is resolved in PagerDuty.
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "app-01", "errors", "critical", "resolved")})
+	cmds := rec.take()
+	if len(cmds) != 1 || cmds[0].Action != alert.PDResolve {
+		t.Fatalf("resolve goes to PagerDuty in a window: %+v", cmds)
+	}
+	// The resolve fails: it is retried in the window too.
+	e.PDResult(ctx, cmds[0].Alert.ID, alert.PDResolve, "default", "", errors.New("Events API answered 503"))
+	c.advance(2 * time.Minute)
+	e.Tick(ctx)
+	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDResolve {
+		t.Fatalf("the resolve is retried in a window: %+v", cmds)
+	}
+	e.PDResult(ctx, cmds[0].Alert.ID, alert.PDResolve, "default", "", nil)
+
+	// Acknowledged in Umbrella during the window: acknowledged in PagerDuty.
+	other := active(t, e)[0]
+	if _, err := e.Act(ctx, other.ID, "ack", "eng", ""); err != nil {
+		t.Fatal(err)
+	}
+	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDAcknowledge {
+		t.Fatalf("ack goes to PagerDuty in a window: %+v", cmds)
+	}
+	if _, err := e.Act(ctx, other.ID, "resolve", "eng", ""); err != nil {
+		t.Fatal(err)
+	}
+	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDResolve {
+		t.Fatalf("manual resolve goes to PagerDuty in a window: %+v", cmds)
+	}
+
+	// An alert that opened in the window and never went to PagerDuty: nothing until the window
+	// ends, then the trigger while it still fires.
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "c", "app-01", "queue", "critical", "firing")})
+	if cmds := rec.take(); len(cmds) != 0 {
+		t.Fatalf("no trigger in a window: %+v", cmds)
+	}
+	c.advance(time.Hour)
+	e.Tick(ctx)
+	if cmds := rec.take(); len(cmds) != 1 || cmds[0].Action != alert.PDTrigger || cmds[0].Alert.Signal != "queue" {
+		t.Fatalf("the trigger after the window: %+v", cmds)
+	}
+}
+
+// A late webhook about the PagerDuty incident of an earlier opening leaves the reopened alert
+// alone.
+func TestStaleWebhookAfterReopen(t *testing.T) {
+	ctx := context.Background()
+	e, _, rec, c := setup(t)
+	fire := ev("CON-1", "a", "app-01", "errors", "critical", "firing")
+	e.Ingest(ctx, []alert.Incoming{fire})
+	a := active(t, e)[0]
+	e.PDResult(ctx, a.ID, alert.PDTrigger, "default", "default", nil)
+	if err := e.PDInbound(ctx, alert.PDUpdate{DedupKey: a.PD.Key, EventType: "incident.triggered", IncidentID: "Q1", OccurredAt: c.t}); err != nil {
+		t.Fatal(err)
+	}
+	c.advance(time.Minute)
+	resolved := fire
+	resolved.Status = alert.SourceResolved
+	e.Ingest(ctx, []alert.Incoming{resolved})
+	c.advance(10 * time.Second)
+	e.Ingest(ctx, []alert.Incoming{fire})
+	reopenedAt := c.t
+	rec.take()
+	if got := active(t, e); len(got) != 1 || got[0].ID != a.ID || got[0].PD.IncidentID != "" {
+		t.Fatalf("reopened without the old incident: %+v", got)
+	}
+
+	// The resolve of the old incident Q1 lands after the reopening.
+	c.advance(time.Second)
+	if err := e.PDInbound(ctx, alert.PDUpdate{DedupKey: a.PD.Key, EventType: "incident.resolved", Actor: "Jane", IncidentID: "Q1", OccurredAt: c.t}); err != nil {
+		t.Fatal(err)
+	}
+	// An acknowledgement made before the reopening, of an incident never seen here.
+	if err := e.PDInbound(ctx, alert.PDUpdate{DedupKey: a.PD.Key, EventType: "incident.acknowledged", Actor: "Jane", IncidentID: "Q0", OccurredAt: reopenedAt.Add(-5 * time.Second)}); err != nil {
+		t.Fatal(err)
+	}
+	got, entries, _ := e.Get(ctx, a.ID)
+	if got.Status != alert.StatusOpen || got.PD.IncidentID != "" {
+		t.Fatalf("stale webhooks changed the reopened alert: %+v", got)
+	}
+	stale := 0
+	for _, en := range entries {
+		if en.Code == "pd_stale" {
+			stale++
+		}
+	}
+	if stale != 2 {
+		t.Errorf("stale webhooks are on the timeline: %d", stale)
+	}
+
+	// The new incident acknowledges the alert.
+	if err := e.PDInbound(ctx, alert.PDUpdate{DedupKey: a.PD.Key, EventType: "incident.acknowledged", Actor: "Jane", IncidentID: "Q2", OccurredAt: c.t}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := e.Get(ctx, a.ID); got.Status != alert.StatusAcknowledged || got.PD.IncidentID != "Q2" {
+		t.Fatalf("the current incident applies: %+v", got)
+	}
+}
+
+// Backup notification is pending until the notifier reports the attempt: when the process
+// stops before that (or the queue was full), a later tick, also of a new process, hands it
+// over again.
+func TestFallbackSurvivesRestart(t *testing.T) {
+	ctx := context.Background()
+	e, st, lost, c := setup(t)
+	e.Ingest(ctx, []alert.Incoming{ev("CON-1", "a", "app-01", "errors", "critical", "firing")})
+	a := active(t, e)[0]
+	e.PDResult(ctx, a.ID, alert.PDTrigger, "default", "", errors.New("Events API answered 503"))
+	c.advance(alert.DefaultFallbackAfter)
+	e.Tick(ctx)
+	if len(lost.fallback) != 1 {
+		t.Fatalf("backup notification is due: %+v", lost.fallback)
+	}
+	got, _, _ := e.Get(ctx, a.ID)
+	if !got.Fallback || got.FallbackState != alert.FallbackPending {
+		t.Fatalf("pending until the notifier reports: %+v", got)
+	}
+
+	// The process stops before the notifier sent anything; a new one starts on the same database.
+	e2 := alert.New(e.DB(), st)
+	rec := &recorder{}
+	e2.SetSender(rec)
+	e2.SetNotifier(rec)
+	e2.SetClock(c.now)
+	c.advance(time.Minute)
+	e2.Tick(ctx)
+	if len(rec.fallback) != 0 {
+		t.Fatalf("not handed over again too soon: %+v", rec.fallback)
+	}
+	c.advance(alert.DefaultFallbackRetry)
+	e2.Tick(ctx)
+	if len(rec.fallback) != 1 || rec.fallback[0].ID != a.ID {
+		t.Fatalf("handed over again after the restart: %+v", rec.fallback)
+	}
+	if err := e2.FallbackDone(ctx, a.ID, nil); err != nil {
+		t.Fatal(err)
+	}
+	c.advance(2 * alert.DefaultFallbackRetry)
+	e2.Tick(ctx)
+	if len(rec.fallback) != 1 {
+		t.Fatalf("sent once it is reported: %+v", rec.fallback)
+	}
+	if got, _, _ := e2.Get(ctx, a.ID); got.FallbackState != alert.FallbackSent || !got.Fallback {
+		t.Fatalf("state = %+v", got)
+	}
+}
+
+// A reopened alert starts backup notification afresh: a notification still pending from the
+// earlier opening is not sent at once.
+func TestFallbackResetOnReopen(t *testing.T) {
+	ctx := context.Background()
+	e, _, rec, c := setup(t)
+	fire := ev("CON-1", "a", "app-01", "errors", "critical", "firing")
+	e.Ingest(ctx, []alert.Incoming{fire})
+	a := active(t, e)[0]
+	e.PDResult(ctx, a.ID, alert.PDTrigger, "default", "", errors.New("Events API answered 503"))
+	c.advance(alert.DefaultFallbackAfter)
+	e.Tick(ctx)
+	if len(rec.fallback) != 1 {
+		t.Fatalf("due: %+v", rec.fallback)
+	}
+	resolved := fire
+	resolved.Status = alert.SourceResolved
+	e.Ingest(ctx, []alert.Incoming{resolved})
+	c.advance(alert.DefaultFallbackRetry)
+	e.Ingest(ctx, []alert.Incoming{fire})
+	e.Tick(ctx)
+	if len(rec.fallback) != 1 {
+		t.Fatalf("not sent right after the reopening: %d", len(rec.fallback))
+	}
+	if got, _, _ := e.Get(ctx, a.ID); got.Fallback || got.FallbackState != "" || got.FallbackTry != nil {
+		t.Fatalf("reset: %+v", got)
+	}
+}
+
+// A reopen window set in the alerting policy replaces the default of 10 minutes.
+func TestCustomReopenWindow(t *testing.T) {
+	ctx := context.Background()
+	e, st, _, c := setup(t)
+	st.Write(func(d *store.Data) { d.Settings.Alerting.Policy = &model.AlertPolicy{ReopenWindowSeconds: 3600} })
+	fire := func(status string) {
+		t.Helper()
+		if err := e.Ingest(ctx, []alert.Incoming{ev("CON-1", "z1", "db-01.example.com", "cpu", "warning", status)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fire("firing")
+	first := active(t, e)[0].ID
+	fire("resolved")
+	// Beyond the default window, within the policy's one: the same alert reopens.
+	c.advance(30 * time.Minute)
+	fire("firing")
+	if list := active(t, e); len(list) != 1 || list[0].ID != first {
+		t.Fatalf("reopened within the policy window: %+v", list)
+	}
+	_, entries, err := e.Get(ctx, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened := false
+	for _, en := range entries {
+		reopened = reopened || (en.Code == "reopened" && en.Args["window"] == "1h0m0s")
+	}
+	if !reopened {
+		t.Fatalf("timeline = %+v", entries)
+	}
+	fire("resolved")
+	c.advance(61 * time.Minute)
+	fire("firing")
+	if list := active(t, e); len(list) != 1 || list[0].ID == first {
+		t.Fatalf("a new alert after the policy window: %+v", list)
 	}
 }

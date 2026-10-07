@@ -1,9 +1,10 @@
 import { Choices } from '../Choice'
 import { useT } from '../i18n'
-import { Banner, Field, Input, Password, Rows, Switch, Textarea } from '../ui'
+import { Field, Input, Password, Rows, Switch, Textarea } from '../ui'
 import { CheckResult, type Check } from './CheckResult'
 import { LDAP_ATTRS, ldapCheckKey, ldapFailHint, withKind, type LdapDraft, type LdapKind, type LdapReport } from './ldap'
 import { ldapStrings } from './ldapStrings'
+import { Flash } from '../notify'
 
 const KINDS: LdapKind[] = ['ad', 'openldap']
 
@@ -99,7 +100,7 @@ export function LdapCheckResult({ check, draft, container }: { check: Check<Ldap
         return hint && t(hint)
       }}
       ok={(r) => (
-        <Banner kind="ok" title={t('ld.ok')}>
+        <Flash kind="ok" title={t('ld.ok')} trigger={r}>
           <p>
             {t('ld.ok.text')} {r.probe.admin_group && t('ld.ok.group')}
           </p>
@@ -120,7 +121,7 @@ export function LdapCheckResult({ check, draft, container }: { check: Check<Ldap
               />
             </>
           )}
-        </Banner>
+        </Flash>
       )}
     />
   )

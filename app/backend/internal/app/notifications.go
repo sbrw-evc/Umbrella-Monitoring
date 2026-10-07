@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -16,15 +17,19 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/tgbot"
 )
 
 const (
 	notifySecretPath = "notify"
 	maxExtraTargets  = 50
+	// maxFallbackDelay bounds the wait of backup notification: an hour.
+	maxFallbackDelay = 3600
 )
 
-// NotificationsService keeps the settings of backup notification; the SMTP password and the
-// bot token are kept in OpenBao.
+// NotificationsService keeps the settings of backup notification; the SMTP password, the bot
+// token and the Zoom verification token are kept in OpenBao. Webhook URLs of Teams and Zoom are
+// settings like other addresses: administrators see them to edit them.
 type NotificationsService struct {
 	st      *store.Store
 	secrets Secrets
@@ -37,34 +42,62 @@ func NewNotificationsService(st *store.Store, secrets Secrets, n *notify.Service
 
 type NotifyView struct {
 	model.Notify
-	HasPassword bool   `json:"has_password"`
-	HasToken    bool   `json:"has_token"`
-	PublicURL   string `json:"public_url"`
+	HasPassword bool `json:"has_password"`
+	HasToken    bool `json:"has_token"`
+	// HasZoomToken: the Zoom verification token is stored (it is never shown).
+	HasZoomToken bool   `json:"has_zoom_token"`
+	PublicURL    string `json:"public_url"`
 	// Links: acknowledgement links are put in messages (the public address is set and the
 	// signing key is ready).
 	Links bool `json:"links"`
+	// PDEnabled: PagerDuty is on; AutoDelaySeconds is the wait of backup notification when no
+	// delay is set (DelaySeconds is null): 2 minutes with PagerDuty, none without it.
+	PDEnabled        bool `json:"pd_enabled"`
+	AutoDelaySeconds int  `json:"auto_delay_seconds"`
+	// DefaultTemplates are the built-in message templates by name: what Templates replace.
+	DefaultTemplates map[string]string `json:"default_templates"`
+	// BotStatus is the state of the Telegram bot built into Umbrella.
+	BotStatus *tgbot.Status `json:"bot_status,omitempty"`
 }
 
 func (s *NotificationsService) View() NotifyView {
 	var n model.Notify
 	var pub string
+	var pdOn bool
 	s.st.Read(func(d *store.Data) {
 		n = d.Settings.Alerting.Notify
 		n.ExtraEmails = slices.Clone(n.ExtraEmails)
 		n.ExtraTelegram = slices.Clone(n.ExtraTelegram)
+		n.ExtraTeams = slices.Clone(n.ExtraTeams)
+		n.ExtraZoom = slices.Clone(n.ExtraZoom)
+		n.Templates = maps.Clone(n.Templates)
 		pub = d.Settings.Alerting.PublicURL
+		pdOn = d.Settings.Alerting.PagerDuty.Enabled
 	})
+	auto := 0
+	if pdOn {
+		auto = int(alert.DefaultFallbackAfter.Seconds())
+	}
 	if n.ExtraEmails == nil {
 		n.ExtraEmails = []string{}
 	}
 	if n.ExtraTelegram == nil {
 		n.ExtraTelegram = []string{}
 	}
+	if n.ExtraTeams == nil {
+		n.ExtraTeams = []string{}
+	}
+	if n.ExtraZoom == nil {
+		n.ExtraZoom = []string{}
+	}
 	if n.Email.Security == "" {
 		n.Email.Security = model.SMTPStartTLS
 	}
-	return NotifyView{Notify: n, HasPassword: n.Email.PasswordRef != "", HasToken: n.Telegram.TokenRef != "", PublicURL: pub,
-		Links: pub != "" && s.n.Links() != nil}
+	if n.MinSeverity == "" {
+		n.MinSeverity = alert.DefaultFallbackSeverity
+	}
+	return NotifyView{Notify: n, HasPassword: n.Email.PasswordRef != "", HasToken: n.Telegram.TokenRef != "", HasZoomToken: n.Zoom.TokenRef != "", PublicURL: pub,
+		Links: pub != "" && s.n.Links() != nil, PDEnabled: pdOn, AutoDelaySeconds: auto, DefaultTemplates: notify.DefaultTemplates()}
 }
 
 type EmailInput struct {
@@ -83,13 +116,55 @@ type TelegramInput struct {
 	Enabled bool   `json:"enabled"`
 	Token   string `json:"token"`
 	APIURL  string `json:"api_url"`
+	// Bot turns on the bot built into Umbrella; nil keeps the saved value (older clients).
+	Bot *bool `json:"bot,omitempty"`
+}
+
+type TeamsInput struct {
+	Enabled bool `json:"enabled"`
+}
+
+// ZoomInput: Token is the verification token of the Incoming Webhook app; empty keeps the stored
+// one.
+type ZoomInput struct {
+	Enabled bool   `json:"enabled"`
+	Token   string `json:"token"`
 }
 
 type NotifyInput struct {
 	Email         EmailInput    `json:"email"`
 	Telegram      TelegramInput `json:"telegram"`
+	Teams         TeamsInput    `json:"teams"`
+	Zoom          ZoomInput     `json:"zoom"`
 	ExtraEmails   []string      `json:"extra_emails"`
 	ExtraTelegram []string      `json:"extra_telegram"`
+	// ExtraTeams and ExtraZoom: webhook URLs (https).
+	ExtraTeams []string `json:"extra_teams"`
+	ExtraZoom  []string `json:"extra_zoom"`
+	// DelaySeconds: null is automatic (2 minutes with PagerDuty, at once without it), 0 at once.
+	DelaySeconds *int `json:"delay_seconds"`
+	// MinSeverity: empty is error.
+	MinSeverity string `json:"min_severity"`
+	// Templates replace built-in message templates by name; absent (null) keeps the saved ones,
+	// {} goes back to the built-in ones.
+	Templates map[string]string `json:"templates,omitempty"`
+}
+
+// maxTemplateSize bounds one message template.
+const maxTemplateSize = 16 << 10
+
+// cleanTemplates checks the message templates of a form.
+func cleanTemplates(in map[string]string) (map[string]string, error) {
+	for n, v := range in {
+		if len(v) > maxTemplateSize {
+			return nil, invalid("template_invalid", fmt.Errorf("%s: longer than %d bytes", n, maxTemplateSize))
+		}
+	}
+	out, err := notify.CleanTemplates(in)
+	if err != nil {
+		return nil, invalid("template_invalid", err)
+	}
+	return out, nil
 }
 
 func cleanList(in []string, valid func(string) bool, code string) ([]string, error) {
@@ -145,21 +220,50 @@ func (s *NotificationsService) Save(ctx context.Context, actor string, in Notify
 	if err != nil {
 		return NotifyView{}, err
 	}
+	extraTeams, err := cleanList(in.ExtraTeams, validWebhook, "teams_invalid")
+	if err != nil {
+		return NotifyView{}, err
+	}
+	extraZoom, err := cleanList(in.ExtraZoom, validWebhook, "zoom_invalid")
+	if err != nil {
+		return NotifyView{}, err
+	}
+	if in.DelaySeconds != nil && (*in.DelaySeconds < 0 || *in.DelaySeconds > maxFallbackDelay) {
+		return NotifyView{}, invalid("delay_invalid", nil)
+	}
+	if in.MinSeverity != "" && alert.SeverityRank(in.MinSeverity) == 0 {
+		return NotifyView{}, invalid("severity_invalid", nil)
+	}
+	templates := n.Templates
+	if in.Templates != nil {
+		if templates, err = cleanTemplates(in.Templates); err != nil {
+			return NotifyView{}, err
+		}
+	}
 	token := strings.TrimSpace(in.Telegram.Token)
 	if in.Telegram.Enabled && token == "" && n.Telegram.TokenRef == "" {
 		return NotifyView{}, invalid("token_required", nil)
 	}
-	pwRef, tokenRef := n.Email.PasswordRef, n.Telegram.TokenRef
+	zoomToken := strings.TrimSpace(in.Zoom.Token)
+	if in.Zoom.Enabled && zoomToken == "" && n.Zoom.TokenRef == "" {
+		return NotifyView{}, invalid("zoom_token_required", nil)
+	}
+	pwRef, tokenRef, zoomRef := n.Email.PasswordRef, n.Telegram.TokenRef, n.Zoom.TokenRef
 	if in.Email.ClearPassword || strings.TrimSpace(e.Username) == "" {
 		pwRef = ""
 	}
 	if e.Password != "" {
-		if pwRef, err = s.put(ctx, "smtp_password", e.Password); err != nil {
+		if pwRef, err = putSecret(ctx, s.secrets, notifySecretPath, "smtp_password", e.Password); err != nil {
 			return NotifyView{}, err
 		}
 	}
 	if token != "" {
-		if tokenRef, err = s.put(ctx, "telegram_token", token); err != nil {
+		if tokenRef, err = putSecret(ctx, s.secrets, notifySecretPath, "telegram_token", token); err != nil {
+			return NotifyView{}, err
+		}
+	}
+	if zoomToken != "" {
+		if zoomRef, err = putSecret(ctx, s.secrets, notifySecretPath, "zoom_token", zoomToken); err != nil {
 			return NotifyView{}, err
 		}
 	}
@@ -168,15 +272,50 @@ func (s *NotificationsService) Save(ctx context.Context, actor string, in Notify
 	if n.Email.Security == "" {
 		n.Email.Security = model.SMTPStartTLS
 	}
-	n.Telegram = model.TelegramChannel{Enabled: in.Telegram.Enabled, TokenRef: tokenRef, APIURL: api}
+	bot := n.Telegram.Bot
+	if in.Telegram.Bot != nil {
+		bot = *in.Telegram.Bot
+	}
+	n.Telegram = model.TelegramChannel{Enabled: in.Telegram.Enabled, TokenRef: tokenRef, APIURL: api, Bot: bot}
+	n.Teams = model.TeamsChannel{Enabled: in.Teams.Enabled}
+	n.Zoom = model.ZoomChannel{Enabled: in.Zoom.Enabled, TokenRef: zoomRef}
 	n.ExtraEmails, n.ExtraTelegram = extraEmails, extraTelegram
+	n.ExtraTeams, n.ExtraZoom = extraTeams, extraZoom
+	n.DelaySeconds, n.MinSeverity = in.DelaySeconds, in.MinSeverity
+	n.Templates = templates
 	now := time.Now().UTC()
 	n.UpdatedAt, n.UpdatedBy = &now, actor
+	detail := fmt.Sprintf("email=%v telegram=%v teams=%v zoom=%v delay=%s min_severity=%s", n.Email.Enabled, n.Telegram.Enabled, n.Teams.Enabled, n.Zoom.Enabled,
+		delayText(n.DelaySeconds), n.MinSeverity)
+	if len(n.Templates) > 0 {
+		names := slices.Sorted(maps.Keys(n.Templates))
+		detail += " templates=" + strings.Join(names, ",")
+	}
 	s.st.Write(func(d *store.Data) {
 		d.Settings.Alerting.Notify = n
-		d.AddAudit(store.AuditEntry{Actor: actor, Action: "settings.notify", Detail: fmt.Sprintf("email=%v telegram=%v", n.Email.Enabled, n.Telegram.Enabled)})
+		d.AddAudit(store.AuditEntry{Actor: actor, Action: "settings.notify", Detail: detail})
 	})
 	return s.View(), nil
+}
+
+func delayText(v *int) string {
+	if v == nil {
+		return "auto"
+	}
+	return fmt.Sprintf("%ds", *v)
+}
+
+// validWebhook: an incoming webhook URL of Teams or Zoom; the API takes https only.
+func validWebhook(v string) bool {
+	return strings.HasPrefix(v, "https://") && notify.ValidWebhook(v)
+}
+
+// validAddress checks an address of a channel as the API takes it: webhook URLs are https.
+func validAddress(kind, v string) bool {
+	if kind == notify.ChannelTeams || kind == notify.ChannelZoom {
+		return validWebhook(v)
+	}
+	return notify.ValidAddress(kind, v)
 }
 
 func validFrom(v string) bool {
@@ -190,27 +329,26 @@ func validFrom(v string) bool {
 	return notify.ValidEmail(v)
 }
 
-func (s *NotificationsService) put(ctx context.Context, key, value string) (string, error) {
-	if s.secrets == nil {
-		return "", credentials.ErrUnavailable
-	}
-	ref, err := s.secrets.PutRef(ctx, notifySecretPath, key, value)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", credentials.ErrUnavailable, err)
-	}
-	return ref, nil
-}
-
 func (a *App) registerNotifications(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/notifications", a.authed(a.can("settings.alerting:view", a.notifyView)))
 	mux.HandleFunc("PUT /api/notifications", a.authed(a.can("settings.alerting:edit", a.notifySave)))
 	mux.HandleFunc("POST /api/notifications/test", a.authed(a.can("settings.alerting:test", a.notifyTest)))
+	mux.HandleFunc("POST /api/notifications/preview", a.authed(a.can("settings.alerting:view", a.notifyPreview)))
 	mux.HandleFunc("GET /ack/{token}", a.ackPage)
 	mux.HandleFunc("POST /ack/{token}", a.ackPage)
 }
 
 func (a *App) notifyView(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, a.notifications.View())
+	httpx.JSON(w, http.StatusOK, a.withBot(a.notifications.View()))
+}
+
+// withBot adds the state of the Telegram bot to the view.
+func (a *App) withBot(v NotifyView) NotifyView {
+	if a.tgBot != nil {
+		st := a.tgBot.Status()
+		v.BotStatus = &st
+	}
+	return v
 }
 
 func (a *App) notifySave(w http.ResponseWriter, r *http.Request) {
@@ -219,7 +357,41 @@ func (a *App) notifySave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.notifications.Save(r.Context(), current(r).user.Username, in)
-	settingsRespond(w, out, err)
+	settingsRespond(w, a.withBot(out), err)
+}
+
+type notifyPreviewInput struct {
+	// Templates: the overrides being edited; null previews the saved ones.
+	Templates map[string]string `json:"templates"`
+	// Locale: en or ru; empty is the default language.
+	Locale string `json:"locale"`
+}
+
+// notifyPreview renders the messages of a sample incident with templates that are not saved yet.
+func (a *App) notifyPreview(w http.ResponseWriter, r *http.Request) {
+	var in notifyPreviewInput
+	if !httpx.Decode(w, r, &in) {
+		return
+	}
+	set := a.settings.Get()
+	templates := set.Alerting.Notify.Templates
+	if in.Templates != nil {
+		var err error
+		if templates, err = cleanTemplates(in.Templates); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
+	locale := in.Locale
+	if locale == "" {
+		locale = set.DefaultLocale
+	}
+	out, err := notify.PreviewTemplates(locale, templates)
+	if err != nil {
+		writeError(w, invalid("template_invalid", err))
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"messages": out})
 }
 
 type notifyTestInput struct {
@@ -236,32 +408,22 @@ func (a *App) notifyTest(w http.ResponseWriter, r *http.Request) {
 	u := current(r).user
 	to := strings.TrimSpace(in.To)
 	out := map[string]any{"ok": true}
-	var err error
-	switch in.Channel {
-	case notify.ChannelEmail:
-		if to == "" {
-			to = u.Email
-		}
-		if !notify.ValidEmail(to) {
-			writeError(w, invalid("email_invalid", nil))
-			return
-		}
-		err = a.notifier.TestEmail(r.Context(), to)
-	case notify.ChannelTelegram:
-		if to == "" {
-			to = u.Telegram
-		}
-		if !notify.ValidChat(to) {
-			writeError(w, invalid("telegram_invalid", nil))
-			return
-		}
-		var bot string
-		bot, err = a.notifier.TestTelegram(r.Context(), to)
-		out["bot"] = bot
-	default:
+	if !slices.Contains(notify.Channels(), in.Channel) {
 		writeError(w, invalid("channel_invalid", nil))
 		return
 	}
+	if to == "" {
+		to = notify.UserAddress(in.Channel, u)
+	}
+	if !validAddress(in.Channel, to) {
+		writeError(w, invalid(in.Channel+"_invalid", nil))
+		return
+	}
+	info, err := a.notifier.Test(r.Context(), in.Channel, to)
+	for k, v := range info {
+		out[k] = v
+	}
+	shown := notify.ShowAddress(in.Channel, to)
 	switch {
 	case errors.Is(err, notify.ErrDisabled):
 		writeError(w, invalid("channel_disabled", nil))
@@ -270,7 +432,7 @@ func (a *App) notifyTest(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		httpx.Error(w, http.StatusBadGateway, "notify_failed", err)
 	default:
-		out["to"] = to
+		out["to"] = shown
 		httpx.JSON(w, http.StatusOK, out)
 	}
 }
@@ -294,27 +456,22 @@ a{color:var(--accent)}
 {{if .Open}}<p><a href="{{.Open}}">{{.OpenText}}</a></p>{{end}}
 </main></body></html>`))
 
-var ackWords = map[string]map[string]string{
-	"ru": {"ask": "Подтвердить, что вы взяли инцидент в работу?", "button": "Подтвердить", "done": "Инцидент подтверждён. Спасибо!",
-		"already": "Инцидент уже подтверждён.", "resolved": "Инцидент уже решён.", "bad": "Ссылка недействительна или устарела.",
-		"unavailable": "Сервис инцидентов сейчас недоступен. Попробуйте позже.", "open": "Открыть в Umbrella"},
-	"en": {"ask": "Acknowledge that you are on this incident?", "button": "Acknowledge", "done": "The incident is acknowledged. Thank you!",
-		"already": "The incident is already acknowledged.", "resolved": "The incident is already resolved.", "bad": "The link is not valid or has expired.",
-		"unavailable": "Incidents are not available now. Try again later.", "open": "Open in Umbrella"},
-}
-
 // ackPage acknowledges an incident from the link of a notification. GET only shows the page,
-// because messengers open links to make previews; the button posts the form.
+// because messengers open links to make previews; the button posts the form. Its words are
+// the notification words (page.*) of the default language.
 func (a *App) ackPage(w http.ResponseWriter, r *http.Request) {
 	lang := "ru"
 	if a.settings.Get().DefaultLocale == "en" {
 		lang = "en"
 	}
-	words := ackWords[lang]
+	words := map[string]string{}
+	for _, k := range []string{"ask", "button", "done", "already", "resolved", "bad", "unavailable"} {
+		words[k] = notify.Word(lang, "page."+k)
+	}
 	page := struct {
 		Lang, ID, Title, Message, Button, Open, OpenText string
 		Form                                             bool
-	}{Lang: lang, Button: words["button"], OpenText: words["open"]}
+	}{Lang: lang, Button: words["button"], OpenText: notify.Word(lang, "open")}
 	render := func(status int) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
@@ -340,7 +497,7 @@ func (a *App) ackPage(w http.ResponseWriter, r *http.Request) {
 	}
 	page.ID, page.Title = al.ID, al.Title
 	if pub := a.settings.Get().Alerting.PublicURL; pub != "" {
-		page.Open = strings.TrimRight(pub, "/") + "/incidents?id=" + al.ID
+		page.Open = model.IncidentURL(pub, al.ID)
 	}
 	switch {
 	case al.Status == alert.StatusResolved:
@@ -390,6 +547,10 @@ func (a *App) linkActor(who string) string {
 		return v
 	case "t":
 		return "telegram " + v
+	case "ms":
+		return "teams " + v
+	case "zm":
+		return "zoom " + v
 	}
 	return "link"
 }

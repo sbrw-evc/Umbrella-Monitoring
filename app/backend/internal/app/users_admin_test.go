@@ -14,18 +14,21 @@ import (
 const adminPass = "Admin-pass-2026"
 
 type managed struct {
-	ID                 string `json:"id"`
-	Username           string `json:"username"`
-	DisplayName        string `json:"display_name"`
-	LastName           string `json:"last_name"`
-	Source             string `json:"source"`
-	Role               string `json:"role"`
-	RoleName           string `json:"role_name"`
-	TeamID             string `json:"team_id"`
-	TeamName           string `json:"team_name"`
-	Disabled           bool   `json:"disabled"`
-	MustChangePassword bool   `json:"must_change_password"`
-	PasswordExpired    bool   `json:"password_expired"`
+	ID          string   `json:"id"`
+	Username    string   `json:"username"`
+	DisplayName string   `json:"display_name"`
+	LastName    string   `json:"last_name"`
+	Source      string   `json:"source"`
+	Role        string   `json:"role"`
+	RoleName    string   `json:"role_name"`
+	TeamIDs     []string `json:"team_ids"`
+	Teams       []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"teams"`
+	Disabled           bool `json:"disabled"`
+	MustChangePassword bool `json:"must_change_password"`
+	PasswordExpired    bool `json:"password_expired"`
 	Permissions        []string
 }
 
@@ -147,12 +150,12 @@ func TestUsersLifecycle(t *testing.T) {
 		t.Fatalf("weak problem = %+v", p)
 	}
 	create(map[string]any{"username": "ivan", "password": "Valid-pass-2026", "role_id": "ghost"}, 400, &p)
-	create(map[string]any{"username": "ivan", "password": "Valid-pass-2026", "team_id": "ghost"}, 400, &p)
+	create(map[string]any{"username": "ivan", "password": "Valid-pass-2026", "team_ids": []string{"ghost"}}, 400, &p)
 	create(map[string]any{"username": "ivan", "password": "Valid-pass-2026", "email": "not-mail"}, 400, &p)
 
 	var u managed
-	create(map[string]any{"username": " ivan ", "password": "Valid-pass-2026", "last_name": "Petrov", "first_name": "Ivan", "team_id": "TEAM-2"}, 201, &u)
-	if u.Username != "ivan" || u.Source != "local" || u.Role != model.RoleUser || u.TeamName != "Team TEAM-2" || !u.MustChangePassword || !u.PasswordExpired ||
+	create(map[string]any{"username": " ivan ", "password": "Valid-pass-2026", "last_name": "Petrov", "first_name": "Ivan", "team_ids": []string{"TEAM-2"}}, 201, &u)
+	if u.Username != "ivan" || u.Source != "local" || u.Role != model.RoleUser || len(u.Teams) != 1 || u.Teams[0].Name != "Team TEAM-2" || !u.MustChangePassword || !u.PasswordExpired ||
 		u.DisplayName != "Petrov Ivan" {
 		t.Fatalf("created = %+v", u)
 	}
@@ -169,8 +172,8 @@ func TestUsersLifecycle(t *testing.T) {
 	}
 
 	expect(t, "edit", admin.call(http.MethodPut, "/api/users/"+u.ID, map[string]any{
-		"profile": map[string]any{"last_name": "Sidorov", "first_name": "Ivan", "email": "ivan@example.org"}, "team_id": "", "role_id": model.RoleAdmin}, &u), 200, u)
-	if u.LastName != "Sidorov" || u.TeamID != "" || u.Role != model.RoleAdmin || !h.audited("user.update", u.ID) {
+		"profile": map[string]any{"last_name": "Sidorov", "first_name": "Ivan", "email": "ivan@example.org"}, "team_ids": []string{}, "role_id": model.RoleAdmin}, &u), 200, u)
+	if u.LastName != "Sidorov" || len(u.TeamIDs) != 0 || u.Role != model.RoleAdmin || !h.audited("user.update", u.ID) {
 		t.Fatalf("edited = %+v", u)
 	}
 
@@ -254,8 +257,8 @@ func TestUsersDirectoryAccounts(t *testing.T) {
 		t.Fatalf("ldap profile = %+v", p)
 	}
 	var u managed
-	expect(t, "ldap same profile", admin.call(http.MethodPut, "/api/users/"+id, map[string]any{"profile": map[string]any{}, "team_id": "TEAM-1", "role_id": model.RoleAdmin}, &u), 200, u)
-	if u.TeamID != "TEAM-1" || u.Role != model.RoleAdmin || u.Source != "ldap" {
+	expect(t, "ldap same profile", admin.call(http.MethodPut, "/api/users/"+id, map[string]any{"profile": map[string]any{}, "team_ids": []string{"TEAM-1"}, "role_id": model.RoleAdmin}, &u), 200, u)
+	if len(u.TeamIDs) != 1 || u.TeamIDs[0] != "TEAM-1" || u.Role != model.RoleAdmin || u.Source != "ldap" {
 		t.Fatalf("ldap edit = %+v", u)
 	}
 	expect(t, "ldap password", admin.call(http.MethodPut, "/api/users/"+id+"/password", map[string]any{"password": "Valid-pass-2026"}, &p), 409, p)

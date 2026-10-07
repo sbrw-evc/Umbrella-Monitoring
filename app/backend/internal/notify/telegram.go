@@ -1,80 +1,64 @@
 package notify
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"regexp"
-	"strings"
+	"strconv"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/telegram"
 )
 
-const telegramAPI = "https://api.telegram.org"
+// ValidChat checks a Telegram chat address: a numeric chat ID or the @name of a channel.
+func ValidChat(v string) bool { return telegram.ValidChat(v) }
 
-// chatID: a numeric chat ID (negative for groups) or the @name of a channel.
-var chatID = regexp.MustCompile(`^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{3,31})$`)
+// Callback data of the buttons under incident messages; the bot built into Umbrella answers
+// them (tgbot).
+const (
+	CallbackAck     = "ack:"
+	CallbackResolve = "res:"
+)
 
-func ValidChat(v string) bool { return chatID.MatchString(v) }
-
-type telegramReply struct {
-	OK          bool   `json:"ok"`
-	Description string `json:"description"`
-	ErrorCode   int    `json:"error_code"`
-	Result      struct {
-		Username  string `json:"username"`
-		FirstName string `json:"first_name"`
-	} `json:"result"`
+// telegramKeyboard is the buttons under a message: with the bot on, buttons that acknowledge
+// and resolve the incident in the name of whoever presses them (the bot knows them by their
+// linked account) instead of the signed acknowledgement link; the links of the message open
+// pages. A follow-up (final) keeps only the links that open pages.
+func telegramKeyboard(bot bool, m composed) *telegram.Keyboard {
+	var k telegram.Keyboard
+	actions := bot && m.incident != "" && !m.final
+	if actions {
+		w := lang(m.locale)
+		k.Rows = append(k.Rows, []telegram.Button{{Text: "✅ " + w["ack"], Data: CallbackAck + m.incident}, {Text: "✔️ " + w["resolve"], Data: CallbackResolve + m.incident}})
+	}
+	var row []telegram.Button
+	for _, l := range m.links {
+		if l.ack && (actions || m.final) {
+			continue
+		}
+		row = append(row, telegram.Button{Text: l.title, URL: l.url})
+	}
+	if len(row) > 0 {
+		k.Rows = append(k.Rows, row)
+	}
+	if len(k.Rows) == 0 {
+		return nil
+	}
+	return &k
 }
 
-// errPermanent marks a failure retrying will not fix.
-type errPermanent struct{ error }
-
-func telegramCall(ctx context.Context, client *http.Client, api, token, method string, body any) (telegramReply, error) {
-	var out telegramReply
-	if api == "" {
-		api = telegramAPI
+func sendTelegram(ctx context.Context, c *telegram.Client, bot bool, chat string, m composed) (string, error) {
+	reply := 0
+	if m.replyTo != "" {
+		reply, _ = strconv.Atoi(m.replyTo)
 	}
-	if token == "" {
-		return out, errPermanent{errors.New("the Telegram bot token is not set")}
+	if reply != 0 {
+		// The buttons of the first message no longer apply: the incident was taken.
+		_ = c.SetKeyboard(ctx, chat, reply, telegramKeyboard(bot, composed{links: m.links, final: true, locale: m.locale}))
 	}
-	raw, err := json.Marshal(body)
+	id, err := c.Send(ctx, telegram.Outgoing{Chat: chat, HTML: m.html, Keyboard: telegramKeyboard(bot, m), ReplyTo: reply})
 	if err != nil {
-		return out, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(api, "/")+"/bot"+token+"/"+method, bytes.NewReader(raw))
-	if err != nil {
-		return out, errPermanent{errors.New("the Telegram API address is not valid")}
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	if err != nil {
-		// The error carries the URL with the token in it.
-		return out, errors.New(strings.ReplaceAll(err.Error(), token, "…"))
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	_ = json.Unmarshal(data, &out)
-	if resp.StatusCode/100 != 2 || !out.OK {
-		msg := out.Description
-		if msg == "" {
-			msg = http.StatusText(resp.StatusCode)
+		if telegram.Permanent(err) {
+			return "", errPermanent{err}
 		}
-		err := fmt.Errorf("Telegram: %d %s", resp.StatusCode, msg)
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusTooManyRequests {
-			return out, errPermanent{err}
-		}
-		return out, err
+		return "", err
 	}
-	return out, nil
-}
-
-func sendTelegram(ctx context.Context, client *http.Client, api, token, chat, html string) error {
-	_, err := telegramCall(ctx, client, api, token, "sendMessage", map[string]any{
-		"chat_id": chat, "text": html, "parse_mode": "HTML",
-		"link_preview_options": map[string]bool{"is_disabled": true},
-	})
-	return err
+	return strconv.Itoa(id), nil
 }

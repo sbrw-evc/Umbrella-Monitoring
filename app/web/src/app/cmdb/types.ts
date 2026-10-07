@@ -18,7 +18,7 @@ export type MapCI = {
   netbox_url?: string
   directory?: 'matched' | 'missing' | 'disabled'
   services: string[]
-  events: { critical: number; error: number; warning: number; info: number; recent: MapEvent[] }
+  events: { critical: number; error: number; warning: number; low?: number; info: number; recent: MapEvent[] }
   health: Health
 }
 

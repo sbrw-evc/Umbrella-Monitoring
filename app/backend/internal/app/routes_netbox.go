@@ -20,14 +20,7 @@ func (a *App) registerNetBox(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/cis/{id}", a.authed(a.can("cis:edit", a.updateCI)))
 	mux.HandleFunc("DELETE /api/cis/{id}", a.authed(a.can("cis:edit", a.deleteCI)))
 	mux.HandleFunc("POST /api/cis/{id}/netbox", a.authed(a.can("cis:edit", a.registerCI)))
-}
-
-func respondNetBox(w http.ResponseWriter, status int, out any, err error) {
-	if err != nil {
-		netboxError(w, err)
-		return
-	}
-	httpx.JSON(w, status, out)
+	mux.HandleFunc("PUT /api/cis/{id}/aliases", a.authed(a.can("cis:edit", a.setCIAliases)))
 }
 
 func (a *App) netboxView(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +33,7 @@ func (a *App) netboxSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.netbox.Save(r.Context(), current(r).user.Username, in)
-	respondNetBox(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) netboxTest(w http.ResponseWriter, r *http.Request) {
@@ -49,18 +42,23 @@ func (a *App) netboxTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.netbox.Test(r.Context(), in)
-	respondNetBox(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) netboxSync(w http.ResponseWriter, r *http.Request) {
 	// The synchronization finishes even if the browser stops waiting.
-	out, err := a.netbox.Sync(context.WithoutCancel(r.Context()), current(r).user.Username)
-	respondNetBox(w, http.StatusOK, out, err)
+	sync := a.netbox.Sync
+	// ?confirm=removal: the person saw the warning about missing items and removes them anyway.
+	if r.URL.Query().Get("confirm") == "removal" {
+		sync = a.netbox.SyncConfirmed
+	}
+	out, err := sync(context.WithoutCancel(r.Context()), current(r).user.Username)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) netboxChoices(w http.ResponseWriter, r *http.Request) {
 	out, err := a.netbox.Choices(r.Context())
-	respondNetBox(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) listCIs(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +69,7 @@ func (a *App) listCIs(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) getCI(w http.ResponseWriter, r *http.Request) {
 	out, err := a.cis.Get(r.PathValue("id"))
-	respondNetBox(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) createCI(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +78,7 @@ func (a *App) createCI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.cis.Create(r.Context(), current(r).user.Username, in)
-	respondNetBox(w, http.StatusCreated, out, err)
+	reply(w, http.StatusCreated, out, err)
 }
 
 func (a *App) updateCI(w http.ResponseWriter, r *http.Request) {
@@ -89,17 +87,17 @@ func (a *App) updateCI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.cis.Update(r.Context(), current(r).user.Username, r.PathValue("id"), in)
-	respondNetBox(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) registerCI(w http.ResponseWriter, r *http.Request) {
 	out, err := a.cis.Register(r.Context(), current(r).user.Username, r.PathValue("id"))
-	respondNetBox(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) deleteCI(w http.ResponseWriter, r *http.Request) {
 	if err := a.cis.Delete(r.Context(), current(r).user.Username, r.PathValue("id")); err != nil {
-		netboxError(w, err)
+		writeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

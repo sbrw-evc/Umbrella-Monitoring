@@ -15,6 +15,8 @@ import (
 //	${a|$b|$c}              first non-empty of a, b, c
 //	${a|text}, ${a|"x y"}   literal default when everything before it is empty
 //	${a|lower}              filters: lower, upper, trim, json, default:"x", date:"RFC3339"
+//	${a|firstline}          text filters: firstline, lastline, errorline, oneline, nohtml, noansi,
+//	                        unescape, truncate:N, head:N (lines), tail:N (lines)
 //	$${                     a literal "${"
 type Template struct {
 	src   string
@@ -164,6 +166,9 @@ func parseExpr(s string) ([]tplOp, error) {
 		name, arg, hasArg := strings.Cut(seg, ":")
 		if filters[name] && (hasArg || name != "default" && name != "date") {
 			arg, _ = unquote(strings.TrimSpace(arg))
+			if err := checkTextFilter(name, arg); err != nil {
+				return nil, fmt.Errorf("${%s}: %w", s, err)
+			}
 			if name == "date" && arg == "" {
 				arg = "RFC3339"
 			}
@@ -251,6 +256,9 @@ func evalExpr(ops []tplOp, data map[string]any) (any, error) {
 }
 
 func applyFilter(name, arg string, v any) (any, error) {
+	if out, ok := applyTextFilter(name, arg, v); ok {
+		return out, nil
+	}
 	switch name {
 	case "lower":
 		return strings.ToLower(Stringify(v)), nil

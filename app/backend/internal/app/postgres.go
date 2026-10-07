@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/config"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
@@ -20,6 +23,7 @@ type PostgresDatabase interface {
 	Config() store.PGConfig
 	Stats(ctx context.Context) (store.PGStats, error)
 	Ping(ctx context.Context) (time.Duration, error)
+	Pool() *pgxpool.Pool
 }
 
 type PostgresSecrets interface {
@@ -85,12 +89,33 @@ type PostgresProbe struct {
 }
 
 func (s *PostgresService) Probe(ctx context.Context, target config.PostgresTarget) PostgresProbe {
-	probe, err := store.ProbePostgres(ctx, target.Config())
+	probe, err := probeTarget(ctx, target.Config())
 	rep := PostgresProbe{OK: err == nil, Probe: probe}
 	if err != nil {
 		rep.Error = err.Error()
 	}
 	return rep
+}
+
+// probeTarget is store.ProbePostgres where alerts or received requests left without a snapshot
+// (a database Umbrella ran on before) also count as Umbrella data that a switch must not merge into.
+func probeTarget(ctx context.Context, cfg store.PGConfig) (store.PGProbe, error) {
+	probe, err := store.ProbePostgres(ctx, cfg)
+	if err != nil || probe.HasState {
+		return probe, err
+	}
+	cfg, _ = cfg.Normalize()
+	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(cctx, cfg.DSN())
+	if err != nil {
+		return probe, fmt.Errorf("PostgreSQL %s: %w", cfg.Where(), err)
+	}
+	defer conn.Close(context.Background())
+	if probe.HasState, err = umbrellaData(cctx, conn); err != nil {
+		return probe, fmt.Errorf("PostgreSQL %s: %w", cfg.Where(), err)
+	}
+	return probe, nil
 }
 
 type PostgresMigration struct {
@@ -113,7 +138,7 @@ func (s *PostgresService) Migrate(ctx context.Context, actor string, in Postgres
 	if sameDatabase(s.db.Config(), target) {
 		return PostgresMigrated{}, invalid("postgres_same_database", nil)
 	}
-	probe, err := store.ProbePostgres(ctx, target)
+	probe, err := probeTarget(ctx, target)
 	if err != nil {
 		return PostgresMigrated{}, invalid("postgres_unavailable", err)
 	}
@@ -154,7 +179,7 @@ func (s *PostgresService) transfer(ctx context.Context, actor string, target sto
 		return config.File{}, noop, err
 	}
 	if info.HasState && !overwrite {
-		return config.File{}, noop, errors.New("the target database already holds Umbrella data")
+		return config.File{}, noop, errTargetHasData
 	}
 	s.st.Write(func(d *store.Data) {
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "settings.postgres.migrate", Detail: s.db.Where() + " -> " + target.Where()})
@@ -163,7 +188,10 @@ func (s *PostgresService) transfer(ctx context.Context, actor string, target sto
 	if err != nil {
 		return config.File{}, noop, err
 	}
-	if err := backend.Save(ctx, data); err != nil {
+	// The workers of the source are stopped (Runtime.Switch), so alerts, their timelines, the
+	// link signing key and the intake queue are copied as they are, together with the snapshot.
+	err = copyUmbrella(ctx, s.db.Pool(), backend.Pool(), overwrite, func(tx pgx.Tx) error { return store.SaveIn(ctx, tx, data) })
+	if err != nil {
 		return config.File{}, noop, fmt.Errorf("write the data to %s: %w", target.Where(), err)
 	}
 	ref, restore, err := s.storePassword(ctx, target.Password)

@@ -33,7 +33,7 @@ func EventKeys(v string) []string {
 }
 
 // CIKeys are the names a configuration item is known by: its name, the short host name, its
-// IP addresses and the DNS name the domain controller has for it. Events and the hosts of
+// IP addresses, its aliases and the DNS name the domain controller has for it. Events and the hosts of
 // monitoring systems are matched against them with EventKeys.
 func CIKeys(ci *model.ConfigItem) []string {
 	keys := []string{ci.Name}
@@ -43,6 +43,7 @@ func CIKeys(ci *model.ConfigItem) []string {
 		}
 	}
 	keys = append(keys, ci.IPs...)
+	keys = append(keys, ci.Aliases...)
 	if ci.Directory != nil && ci.Directory.DNSName != "" {
 		keys = append(keys, ci.Directory.DNSName)
 	}
@@ -55,6 +56,7 @@ func CIKeys(ci *model.ConfigItem) []string {
 type world struct {
 	cis         map[string]model.ConfigItem
 	index       map[string][]string
+	hostLinks   map[string]string
 	services    []model.Service
 	teams       map[string]model.Team
 	users       map[string]model.User
@@ -71,6 +73,7 @@ func snapshot(st *store.Store) *world {
 		}
 	}
 	st.Read(func(d *store.Data) {
+		w.indexHostLinks(d)
 		for id, ci := range d.ConfigItems {
 			c := *ci
 			c.Owners = slices.Clone(ci.Owners)
@@ -92,8 +95,10 @@ func snapshot(st *store.Store) *world {
 			c := *u
 			c.Avatar = nil
 			w.users[id] = c
-			if u.TeamID != "" && !u.Disabled {
-				w.members[u.TeamID] = append(w.members[u.TeamID], id)
+			if !u.Disabled {
+				for _, t := range u.TeamIDs {
+					w.members[t] = append(w.members[t], id)
+				}
 			}
 		}
 		for _, m := range d.Maintenance {
@@ -110,47 +115,73 @@ func snapshot(st *store.Store) *world {
 	return w
 }
 
-// resolve finds the configuration item an event is about: a ci label wins over the ci field;
-// the item is matched by ID, name, short name, IP address or the DNS name of its computer
-// object. An ambiguous name matches nothing.
+// resolve finds the configuration item an event is about (see resolveCI); a host said to
+// belong to no item resolves to nothing.
 func (w *world) resolve(name string, labels map[string]string) *model.ConfigItem {
-	if v := strings.TrimSpace(labels["ci"]); v != "" {
-		name = v
-	}
-	if strings.TrimSpace(name) == "" {
-		return nil
-	}
-	for _, k := range EventKeys(name) {
-		ids := w.index[k]
-		if len(ids) == 1 {
-			ci := w.cis[ids[0]]
-			return &ci
-		}
-		if len(ids) > 1 {
-			return nil
-		}
-	}
-	return nil
+	ci, _ := w.resolveCI(name, labels)
+	return ci
 }
 
-var criticalityRank = map[string]int{model.CriticalityCritical: 4, model.CriticalityHigh: 3, model.CriticalityMedium: 2, model.CriticalityLow: 1}
+// resolveCI finds the configuration item an event is about: a ci label wins over the ci field.
+// The hosts linked by hand on the monitoring systems page come first: a linked host resolves
+// to its item, a host marked as no item is excluded. Then the item is matched by ID, name,
+// short name, IP address or the DNS name of its computer object. An ambiguous name matches
+// nothing.
+func (w *world) resolveCI(name string, labels map[string]string) (ci *model.ConfigItem, excluded bool) {
+	name = eventCIName(name, labels)
+	if name == "" {
+		return nil, false
+	}
+	keys := EventKeys(name)
+	for _, k := range keys {
+		if id, ok := w.hostLinks[k]; ok {
+			if id == model.HostNoCI {
+				return nil, true
+			}
+			c := w.cis[id]
+			return &c, false
+		}
+	}
+	for _, k := range keys {
+		ids := w.index[k]
+		if len(ids) == 1 {
+			c := w.cis[ids[0]]
+			return &c, false
+		}
+		if len(ids) > 1 {
+			return nil, false
+		}
+	}
+	return nil, false
+}
 
 // route: the item belongs to business services; the owning team of the most critical active
 // one gets the alert, with its lead and members. A team with nobody hands it to its parent.
-// The people responsible for the item in NetBox are kept as owners.
+// The people responsible for the item are kept as owners.
 func (w *world) route(ci *model.ConfigItem, now time.Time) Route {
-	r := Route{Services: []Ref{}, People: []Person{}, Owners: []Person{}, Via: ViaNone, At: now}
 	if ci == nil {
-		return r
+		return Route{Services: []Ref{}, People: []Person{}, Owners: []Person{}, Via: ViaNone, At: now}
 	}
+	var owners []Person
+	for _, o := range ci.Owners {
+		if u, ok := w.users[o.UserID]; ok && !u.Disabled {
+			owners = append(owners, w.person(u, o.Role))
+		}
+	}
+	return w.routeServices(w.servicesOf(ci.ID), owners, now)
+}
+
+// servicesOf lists the active and planned services of an item, the one whose team gets its
+// alerts first: by criticality, active before planned, then by name.
+func (w *world) servicesOf(ciID string) []model.Service {
 	var svcs []model.Service
 	for _, s := range w.services {
-		if s.Status != model.ServiceRetired && slices.Contains(s.CIIDs, ci.ID) {
+		if s.Status != model.ServiceRetired && slices.Contains(s.CIIDs, ciID) {
 			svcs = append(svcs, s)
 		}
 	}
 	slices.SortStableFunc(svcs, func(a, b model.Service) int {
-		if c := cmp.Compare(criticalityRank[b.Criticality], criticalityRank[a.Criticality]); c != 0 {
+		if c := cmp.Compare(model.CriticalityRank(b.Criticality), model.CriticalityRank(a.Criticality)); c != 0 {
 			return c
 		}
 		if a.Status != b.Status {
@@ -163,27 +194,41 @@ func (w *world) route(ci *model.ConfigItem, now time.Time) Route {
 		}
 		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	})
+	return svcs
+}
+
+// routeServices is the rule chain after the item: the first of the ordered services with an
+// owning team is the primary service and its team gets the alert; the people are the lead and
+// members of that team, or of its nearest ancestor that has anybody. Without people the
+// owners of the item get it.
+func (w *world) routeServices(svcs []model.Service, owners []Person, now time.Time) Route {
+	r := Route{Services: []Ref{}, People: []Person{}, Owners: []Person{}, Via: ViaNone, At: now}
+	r.Owners = append(r.Owners, owners...)
 	for _, s := range svcs {
 		r.Services = append(r.Services, Ref{ID: s.ID, Name: s.Name})
 	}
-	for _, o := range ci.Owners {
-		if u, ok := w.users[o.UserID]; ok && !u.Disabled {
-			r.Owners = append(r.Owners, w.person(u, o.Role))
-		}
+	if len(svcs) > 0 {
+		r.Service = &Ref{ID: svcs[0].ID, Name: svcs[0].Name}
 	}
 	for _, s := range svcs {
 		t, ok := w.teams[s.OwnerTeamID]
 		if !ok {
 			continue
 		}
+		r.Service = &Ref{ID: s.ID, Name: s.Name}
 		r.Team = &Ref{ID: t.ID, Name: t.Name}
 		seen := map[string]bool{}
-		for cur, depth := t, 0; depth < 16 && len(r.People) == 0; depth++ {
+		for cur, depth := t, 0; depth < model.MaxTeamDepth && len(r.People) == 0 && r.Channel == nil; depth++ {
 			if seen[cur.ID] {
 				break
 			}
 			seen[cur.ID] = true
 			r.People = w.teamPeople(cur)
+			if ch := TeamChannel(cur); !ch.Empty() {
+				// A team with its own channel: the channel and the lead, not every member.
+				r.Channel = &ch
+				r.People = slices.DeleteFunc(r.People, func(p Person) bool { return p.Role != "lead" })
+			}
 			p, ok := w.teams[cur.ParentID]
 			if !ok {
 				break
@@ -193,12 +238,58 @@ func (w *world) route(ci *model.ConfigItem, now time.Time) Route {
 		break
 	}
 	switch {
-	case len(r.People) > 0:
+	case len(r.People) > 0 || r.Channel != nil:
 		r.Via = ViaService
 	case len(r.Owners) > 0:
 		r.Via = ViaCIOwners
 	}
 	return r
+}
+
+// PreviewCI is the route an incident of the item would take now, computed by the same rules
+// as the engine. ok is false when the item does not exist.
+func PreviewCI(st *store.Store, ciID string, now time.Time) (r Route, ok bool) {
+	w := snapshot(st)
+	ci, ok := w.cis[ciID]
+	if !ok {
+		return Route{}, false
+	}
+	return w.route(&ci, now), true
+}
+
+// PreviewService is the route of an incident of an item that belongs to this service only.
+// Elsewhere lists the items of the service whose incidents go by another, more critical
+// service instead.
+func PreviewService(st *store.Store, serviceID string, now time.Time) (r Route, elsewhere []Elsewhere, ok bool) {
+	w := snapshot(st)
+	i := slices.IndexFunc(w.services, func(s model.Service) bool { return s.ID == serviceID })
+	if i < 0 {
+		return Route{}, nil, false
+	}
+	svc := w.services[i]
+	r = w.routeServices([]model.Service{svc}, nil, now)
+	elsewhere = []Elsewhere{}
+	for _, id := range svc.CIIDs {
+		ci, found := w.cis[id]
+		if !found {
+			continue
+		}
+		cr := w.route(&ci, now)
+		if cr.Service != nil && cr.Service.ID != svc.ID {
+			elsewhere = append(elsewhere, Elsewhere{CI: Ref{ID: ci.ID, Name: ci.Name}, Service: *cr.Service, Team: cr.Team})
+		}
+	}
+	slices.SortFunc(elsewhere, func(a, b Elsewhere) int {
+		return strings.Compare(strings.ToLower(a.CI.Name), strings.ToLower(b.CI.Name))
+	})
+	return r, elsewhere, true
+}
+
+// Elsewhere is an item of a service whose incidents are routed by another service.
+type Elsewhere struct {
+	CI      Ref  `json:"ci"`
+	Service Ref  `json:"service"`
+	Team    *Ref `json:"team,omitempty"`
 }
 
 func (w *world) teamPeople(t model.Team) []Person {

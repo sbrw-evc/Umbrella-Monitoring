@@ -24,9 +24,7 @@ import (
 var Ops = []string{">", ">=", "<", "<=", "==", "!="}
 
 const (
-	MinInterval     = 10 * time.Second
-	DefaultInterval = 30 * time.Second
-	maxPreview      = 200
+	maxPreview = 200
 	// ConnectorPrefix marks the alert sources of rules: rule:<id>.
 	ConnectorPrefix = "rule:"
 )
@@ -56,6 +54,27 @@ type Engine struct {
 	mu       sync.Mutex
 	sink     Sink
 	lastEval map[string]time.Time
+	// unsent are the resolved events of released rules that the sink did not take; Tick
+	// sends them again (a released rule has no state left to recompute them from).
+	unsent []unsent
+}
+
+type unsent struct {
+	rule   string
+	events []alert.Incoming
+	since  time.Time
+}
+
+// maxUnsent is how long the events of a released rule are retried before they are dropped
+// with an error in the log.
+const maxUnsent = 24 * time.Hour
+
+// transition is a change of a series made by an evaluation, kept to undo it when its event
+// does not reach the alert engine.
+type transition struct {
+	key    string
+	fired  time.Time         // the series started firing at this time
+	series *model.RuleSeries // the series stopped firing and was removed (a copy)
 }
 
 func New(st *store.Store, creds Credentials) *Engine {
@@ -79,13 +98,13 @@ func Normalize(r *model.Rule) error {
 	r.CILabel = strings.TrimSpace(r.CILabel)
 	r.Title = strings.TrimSpace(r.Title)
 	switch {
-	case r.Name == "" || len(r.Name) > 200:
+	case r.Name == "" || len(r.Name) > RuleLimits.MaxName:
 		return errors.New("name")
-	case r.Method != model.MethodRED && r.Method != model.MethodUSE:
+	case !slices.Contains(model.RuleMethods, r.Method):
 		return errors.New("method")
 	case r.SourceID == "":
 		return errors.New("source")
-	case r.Query == "" || len(r.Query) > 8000:
+	case r.Query == "" || len(r.Query) > RuleLimits.MaxQuery:
 		return errors.New("query")
 	case !slices.Contains(Ops, r.Op):
 		return errors.New("op")
@@ -98,22 +117,22 @@ func Normalize(r *model.Rule) error {
 		r.Signal = r.Method + "." + strings.ToLower(strings.Join(strings.Fields(r.Name), "_"))
 	}
 	if r.For == "" {
-		r.For = "0s"
+		r.For = RuleDefaults.For
 	}
-	if d, err := time.ParseDuration(r.For); err != nil || d < 0 || d > 24*time.Hour {
+	if d, err := time.ParseDuration(r.For); err != nil || d < 0 || d > MaxFor {
 		return errors.New("for")
 	}
 	if r.Interval == "" {
-		r.Interval = DefaultInterval.String()
+		r.Interval = RuleDefaults.Interval
 	}
-	if d, err := time.ParseDuration(r.Interval); err != nil || d < MinInterval || d > time.Hour {
+	if d, err := time.ParseDuration(r.Interval); err != nil || d < MinInterval || d > MaxInterval {
 		return errors.New("interval")
 	}
 	if r.CILabel == "" {
-		r.CILabel = "instance"
+		r.CILabel = RuleDefaults.CILabel
 	}
 	if r.Title == "" {
-		r.Title = r.Name + ": ${ci} = ${value}"
+		r.Title = RuleDefaults.title(r.Name)
 	}
 	return nil
 }
@@ -185,10 +204,7 @@ func Title(r model.Rule, ci string, v float64, labels map[string]string) string 
 func (e *Engine) source(id string) (model.MetricSource, *Auth, error) {
 	var src *model.MetricSource
 	e.st.Read(func(d *store.Data) {
-		if s := d.MetricSources[id]; s != nil {
-			cp := *s
-			src = &cp
-		}
+		src = d.MetricSource(id)
 	})
 	if src == nil {
 		return model.MetricSource{}, nil, ErrSourceNotFound
@@ -287,6 +303,7 @@ func (e *Engine) Run(ctx context.Context) {
 
 // Tick evaluates the rules that are due.
 func (e *Engine) Tick(ctx context.Context) {
+	e.resend(ctx)
 	now := e.now()
 	var due []string
 	e.st.Read(func(d *store.Data) {
@@ -351,6 +368,7 @@ func (e *Engine) Evaluate(ctx context.Context, id string) error {
 	}
 	now := e.now()
 	var events []alert.Incoming
+	var trans []transition
 	e.st.Update(func(d *store.Data) bool {
 		p := d.Rules[id]
 		if p == nil {
@@ -378,6 +396,8 @@ func (e *Engine) Evaluate(ctx context.Context, id string) error {
 				if st != nil {
 					if st.Firing {
 						events = append(events, incoming(*p, key, st, s.Value, "resolved"))
+						cp := *st
+						trans = append(trans, transition{key: key, series: &cp})
 					}
 					delete(p.State, key)
 					changed = true
@@ -395,6 +415,7 @@ func (e *Engine) Evaluate(ctx context.Context, id string) error {
 				fired := now
 				st.FiredAt = &fired
 				events = append(events, incoming(*p, key, st, s.Value, "firing"))
+				trans = append(trans, transition{key: key, fired: fired})
 				changed = true
 			}
 		}
@@ -404,40 +425,110 @@ func (e *Engine) Evaluate(ctx context.Context, id string) error {
 			}
 			if st.Firing {
 				events = append(events, incoming(*p, key, st, st.Value, "resolved"))
+				cp := *st
+				trans = append(trans, transition{key: key, series: &cp})
 			}
 			delete(p.State, key)
 			changed = true
 		}
-		pending, firing := 0, 0
-		for _, st := range p.State {
-			if st.Firing {
-				firing++
-			} else {
-				pending++
-			}
-		}
-		if p.SeriesCount != len(samples) || p.Pending != pending || p.Firing != firing {
+		if recount(p, len(samples)) {
 			changed = true
 		}
-		p.SeriesCount, p.Pending, p.Firing = len(samples), pending, firing
 		return changed
 	})
 	if len(events) > 0 {
-		e.emit(ctx, r.ID, events)
+		if serr := e.emit(ctx, r.ID, events); serr != nil {
+			e.undo(id, trans)
+			if err == nil {
+				err = serr
+			}
+		}
 	}
 	return err
 }
 
-func (e *Engine) emit(ctx context.Context, id string, events []alert.Incoming) {
+// recount refreshes the series counters of a rule and reports whether they changed.
+func recount(p *model.Rule, series int) bool {
+	pending, firing := 0, 0
+	for _, st := range p.State {
+		if st.Firing {
+			firing++
+		} else {
+			pending++
+		}
+	}
+	changed := p.SeriesCount != series || p.Pending != pending || p.Firing != firing
+	p.SeriesCount, p.Pending, p.Firing = series, pending, firing
+	return changed
+}
+
+// undo takes back the transitions whose events the alert engine did not take (the database is
+// down), so the state of a series changes only once its event is applied: a series that
+// started firing is pending again and fires at the next evaluation, a series that stopped
+// firing is firing again and is resolved at the next evaluation.
+func (e *Engine) undo(id string, trans []transition) {
+	e.st.Update(func(d *store.Data) bool {
+		p := d.Rules[id]
+		if p == nil {
+			return false
+		}
+		if p.State == nil {
+			p.State = map[string]*model.RuleSeries{}
+		}
+		for _, t := range trans {
+			cur := p.State[t.key]
+			switch {
+			case t.series != nil:
+				if cur == nil {
+					p.State[t.key] = t.series
+				}
+			case cur != nil && cur.Firing && cur.FiredAt != nil && cur.FiredAt.Equal(t.fired):
+				cur.Firing, cur.FiredAt = false, nil
+			}
+		}
+		recount(p, p.SeriesCount)
+		return true
+	})
+}
+
+func (e *Engine) emit(ctx context.Context, id string, events []alert.Incoming) error {
 	e.mu.Lock()
 	sink := e.sink
 	e.mu.Unlock()
 	if sink == nil {
-		return
+		return nil
 	}
-	if err := sink.Ingest(ctx, events); err != nil {
-		slog.Error("rule events not applied", "rule", id, "err", err)
+	err := sink.Ingest(ctx, events)
+	if err != nil {
+		slog.Error("rule events not applied, will retry", "rule", id, "err", err)
 	}
+	return err
+}
+
+// resend retries the events of released rules that the sink did not take.
+func (e *Engine) resend(ctx context.Context) {
+	e.mu.Lock()
+	todo := e.unsent
+	e.unsent = nil
+	e.mu.Unlock()
+	var left []unsent
+	for _, u := range todo {
+		if ctx.Err() != nil {
+			left = append(left, u)
+			continue
+		}
+		if e.emit(ctx, u.rule, u.events) == nil {
+			continue
+		}
+		if e.now().Sub(u.since) > maxUnsent {
+			slog.Error("rule events dropped after retrying", "rule", u.rule, "events", len(u.events), "since", u.since)
+			continue
+		}
+		left = append(left, u)
+	}
+	e.mu.Lock()
+	e.unsent = append(left, e.unsent...)
+	e.mu.Unlock()
 }
 
 func incoming(r model.Rule, key string, st *model.RuleSeries, v float64, status string) alert.Incoming {
@@ -472,26 +563,9 @@ func (e *Engine) Release(ctx context.Context, r model.Rule) {
 	e.mu.Lock()
 	delete(e.lastEval, r.ID)
 	e.mu.Unlock()
-	if len(events) > 0 {
-		e.emit(ctx, r.ID, events)
-	}
-}
-
-// Templates are ready rules for node_exporter, cAdvisor and HTTP services.
-func Templates() []model.Rule {
-	t := func(method, signal, name, query, label, op string, thr float64, hold string, sev, title string) model.Rule {
-		return model.Rule{Method: method, Signal: signal, Name: name, Query: query, CILabel: label, Op: op, Threshold: thr, For: hold,
-			Interval: "30s", Severity: sev, Title: title, Enabled: true}
-	}
-	return []model.Rule{
-		t(model.MethodUSE, "use.cpu.utilization", "CPU utilization", `100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])))`, "instance", ">", 90, "5m", "warning", "CPU ${ci}: ${value}% (threshold ${threshold}%)"),
-		t(model.MethodUSE, "use.mem.utilization", "Memory utilization", `100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)`, "instance", ">", 90, "5m", "warning", "Memory ${ci}: ${value}% used"),
-		t(model.MethodUSE, "use.disk.utilization", "Disk space", `100 * (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay|squashfs"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay|squashfs"})`, "instance", ">", 85, "5m", "error", "Disk ${labels.mountpoint} on ${ci}: ${value}%"),
-		t(model.MethodUSE, "use.cpu.saturation", "CPU saturation (load per core)", `node_load5 / on (instance) count by (instance) (node_cpu_seconds_total{mode="idle"})`, "instance", ">", 2, "10m", "error", "Load per core ${ci}: ${value}"),
-		t(model.MethodUSE, "use.net.errors", "Network errors", `sum by (instance) (increase(node_network_receive_errs_total[5m]) + increase(node_network_transmit_errs_total[5m]))`, "instance", ">", 0, "0s", "warning", "Network errors on ${ci}: ${value} in 5 min"),
-		t(model.MethodUSE, "use.container.cpu", "Container CPU", `100 * sum by (name) (rate(container_cpu_usage_seconds_total{name!=""}[2m]))`, "name", ">", 80, "5m", "warning", "CPU of container ${ci}: ${value}%"),
-		t(model.MethodRED, "red.rate", "No requests", `sum by (job) (rate(http_requests_total[5m]))`, "job", "<", 0.1, "10m", "error", "Requests to ${ci}: ${value}/s"),
-		t(model.MethodRED, "red.errors", "5xx error ratio", `100 * sum by (job) (rate(http_requests_total{code=~"5.."}[5m])) / sum by (job) (rate(http_requests_total[5m]))`, "job", ">", 5, "5m", "critical", "5xx errors ${ci}: ${value}%"),
-		t(model.MethodRED, "red.duration", "p99 latency", `histogram_quantile(0.99, sum by (job, le) (rate(http_request_duration_seconds_bucket[5m])))`, "job", ">", 1, "5m", "error", "p99 of ${ci}: ${value} s"),
+	if len(events) > 0 && e.emit(ctx, r.ID, events) != nil {
+		e.mu.Lock()
+		e.unsent = append(e.unsent, unsent{rule: r.ID, events: events, since: e.now()})
+		e.mu.Unlock()
 	}
 }

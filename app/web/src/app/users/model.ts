@@ -1,17 +1,24 @@
 import { TreeIndex } from '../org/treeIndex'
+import { ADMIN } from '../roles/permissions'
 import type { User } from '../types'
+
+export type ScopeService = { id: string; name: string; missing?: boolean }
 
 export type ManagedUser = User & {
   display_name: string
-  team_name?: string
+  teams?: ScopeService[]
+  services?: ScopeService[]
   disabled: boolean
   created_at: string
   password_changed_at?: string
+  /** A NetBox contact account that the next NetBox synchronization creates again. */
+  netbox_recreates?: boolean
 }
 
 export type RoleRef = { id: string; name: string; system: boolean }
 export type TeamRef = { id: string; name: string; parent_id: string }
-export type Refs = { roles: RoleRef[]; teams: TeamRef[] }
+export type ServiceRef = { id: string; name: string }
+export type Refs = { roles: RoleRef[]; teams: TeamRef[]; services: ServiceRef[]; new_user_role?: string }
 
 export type Filters = { q: string; source: string; role: string; team: string; status: string }
 
@@ -41,5 +48,16 @@ export function teamOptions(teams: TeamRef[]): TeamOption[] {
 }
 
 export function adminOf(u: { role: string }) {
-  return u.role === 'admin'
+  return u.role === ADMIN
+}
+
+/** scopeModeOf: the scope mode, also for accounts saved before modes existed. */
+export function scopeModeOf(u: { scope_mode?: string; service_ids?: string[] }): 'all' | 'teams' | 'services' {
+  if (u.scope_mode === 'teams' || u.scope_mode === 'services' || u.scope_mode === 'all') return u.scope_mode
+  return (u.service_ids?.length ?? 0) > 0 ? 'services' : 'all'
+}
+
+/** scopedOf: the user sees incidents of some business services only. */
+export function scopedOf(u: { role: string; scope_mode?: string; service_ids?: string[] }) {
+  return !adminOf(u) && scopeModeOf(u) !== 'all'
 }

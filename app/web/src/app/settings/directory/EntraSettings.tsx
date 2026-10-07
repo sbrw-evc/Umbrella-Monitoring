@@ -11,6 +11,7 @@ import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { DIRECTORY_CHANGED } from './GroupMappingSettings'
 import { strings } from './strings'
+import { Flash } from '../../../notify'
 
 const CALLBACK = '/api/auth/entra/callback'
 const CLOUDS = ['global', 'usgov', 'china'] as const
@@ -264,16 +265,16 @@ export function EntraSettings() {
                   currentKey={checkKey(draft)}
                   failTitle={t('en.fail')}
                   ok={(r) => (
-                    <Banner kind="ok" title={t('en.ok')}>
+                    <Flash kind="ok" title={t('en.ok')} trigger={r}>
                       <p>{t('en.ok.text')}</p>
                       <Rows rows={[[t('en.issuer'), r.probe.issuer && <code key="i">{r.probe.issuer}</code>]]} />
-                    </Banner>
+                    </Flash>
                   )}
                 />
                 {tester.error && (
-                  <Banner kind="error" title={tester.error.message}>
+                  <Flash kind="error" title={tester.error.message}>
                     {tester.error.detail}
-                  </Banner>
+                  </Flash>
                 )}
               </div>
             </motion.div>

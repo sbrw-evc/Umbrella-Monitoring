@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 )
 
 // Webhook is the compiled configuration of trigger.webhook, applied by the intake before a
@@ -55,12 +57,14 @@ const (
 
 var CredentialTypes = []string{CredBearer, CredBasic, CredHeader, CredHMAC}
 
-var severityOptions = []Option{
-	{SeverityCritical, Text{"Critical", "Критическая"}},
-	{SeverityError, Text{"Error", "Ошибка"}},
-	{SeverityWarning, Text{"Warning", "Предупреждение"}},
-	{SeverityInfo, Text{"Info", "Информация"}},
-}
+// severityOptions are the levels of model.Severities, most severe first, shown with their priority.
+var severityOptions = func() []Option {
+	out := make([]Option, 0, len(model.Severities))
+	for _, s := range model.Severities {
+		out = append(out, Option{s.Name, Text{s.Priority + " · " + s.Title.En, s.Priority + " · " + s.Title.Ru}})
+	}
+	return out
+}()
 
 func init() {
 	register(&NodeType{
@@ -307,8 +311,8 @@ func init() {
 		Type: "map.severity", Version: 1, Category: CategoryTransform, Inputs: 1, Outputs: []string{OutMain}, CanFail: true,
 		Title: Text{"Severity table", "Таблица severity"},
 		Description: Text{
-			"Translates the source's value into critical, error, warning or info by a table.",
-			"Переводит значение источника в critical, error, warning или info по таблице.",
+			"Translates the source's value into a priority by a table: P1 critical, P2 error, P3 warning, P4 low or P5 info.",
+			"Переводит значение источника в приоритет по таблице: P1 critical, P2 error, P3 warning, P4 low или P5 info.",
 		},
 		Params: []Param{
 			{Key: "source", Kind: KindTemplate, Required: true, Placeholder: "${labels.severity}",
@@ -443,11 +447,22 @@ func init() {
 			{Key: "method", Kind: KindSelect, Default: MethodOther, Title: Text{"Method", "Метод"},
 				Options: []Option{{MethodRED, Text{"RED", "RED"}}, {MethodUSE, Text{"USE", "USE"}}, {MethodOther, Text{"Other", "Другое"}}}},
 			{Key: "severity", Kind: KindTemplate, Default: "${severity}", Title: Text{"Severity", "Severity"},
-				Help: Text{"critical, error, warning or info; common synonyms are recognized.", "critical, error, warning или info; распространённые синонимы распознаются."}},
+				Help: Text{"critical (P1), error (P2), warning (P3), low (P4) or info (P5); common synonyms and P1…P5 are recognized.", "critical (P1), error (P2), warning (P3), low (P4) или info (P5); распространённые синонимы и P1…P5 распознаются."}},
 			{Key: "status", Kind: KindTemplate, Default: "${status}", Title: Text{"Status", "Статус"},
 				Help: Text{"resolved, ok, closed, recovery… mean resolved; empty means firing.", "resolved, ok, closed, recovery… — resolved; пусто — firing."}},
 			{Key: "external_id", Kind: KindTemplate, Placeholder: "${fingerprint}", Title: Text{"ID in the source", "ID в источнике"}},
 			{Key: "value", Kind: KindTemplate, Placeholder: "${value}", Title: Text{"Value", "Значение"}},
+			{Key: "description", Kind: KindTemplate, Placeholder: "${text|$annotations.description}",
+				Title: Text{"Description (full text)", "Описание (полный текст)"},
+				Help: Text{"Shown in the incident collapsed to its first lines and expanded on demand; up to 64 KB. A multi-line or long title or value is cut to one line and its full text is added here.",
+					"Показывается в инциденте свёрнутым до первых строк и разворачивается по запросу; до 64 КБ. Многострочный или длинный заголовок или значение обрезаются до одной строки, а их полный текст добавляется сюда."}},
+			{Key: "fields", Kind: KindTable,
+				Title: Text{"Incident fields", "Поля инцидента"},
+				Help:  Text{"Named values shown in the incident in this order; empty values are left out. Links are clickable.", "Именованные значения, показываемые в инциденте в этом порядке; пустые не показываются. Ссылки кликабельны."},
+				Columns: []Param{
+					{Key: "name", Kind: KindString, Required: true, Title: Text{"Name", "Название"}, Placeholder: "Дашборд"},
+					{Key: "value", Kind: KindTemplate, Title: Text{"Value", "Значение"}, Placeholder: "${dashboardURL}"},
+				}},
 			{Key: "dedup_key", Kind: KindTemplate,
 				Title: Text{"Deduplication key", "Ключ дедупликации"},
 				Help: Text{"Repeated deliveries with the same key update one event, and resolved replaces firing. Do not put the status in the key. Default: ID in the source, otherwise configuration item and signal.",
@@ -458,6 +473,20 @@ func init() {
 			method := c.choice("method")
 			sev, status := c.template("severity"), c.template("status")
 			ext, value, key := c.template("external_id"), c.template("value"), c.template("dedup_key")
+			desc := c.template("description")
+			type field struct {
+				name string
+				val  *Template
+			}
+			var fields []field
+			for i, row := range c.table("fields") {
+				t, err := CompileTemplate(row["value"])
+				if err != nil {
+					c.fail("fields", "template", "row %d: %v", i+1, err)
+					continue
+				}
+				fields = append(fields, field{strings.TrimSpace(row["name"]), t})
+			}
 			return func(x *Exec, r Record, emit func(string, Record)) error {
 				var errs []error
 				render := func(t *Template) string {
@@ -477,6 +506,18 @@ func init() {
 				if l, ok := r.Data["labels"].(map[string]any); ok {
 					out["labels"] = deepCopy(l)
 				}
+				if desc != nil {
+					out["description"] = render(desc)
+				}
+				if len(fields) > 0 {
+					list := make([]any, 0, len(fields))
+					for _, f := range fields {
+						if v := render(f.val); v != "" {
+							list = append(list, map[string]any{"name": f.name, "value": v})
+						}
+					}
+					out["fields"] = list
+				}
 				if err := errors.Join(errs...); err != nil {
 					return err
 				}
@@ -488,7 +529,7 @@ func init() {
 				}
 				s, ok := NormalizeSeverity(out["severity"].(string))
 				if !ok {
-					return fmt.Errorf("severity %q is not critical, error, warning or info", out["severity"])
+					return fmt.Errorf("severity %q is not critical, error, warning, low or info", out["severity"])
 				}
 				out["severity"] = s
 				st, ok := NormalizeStatus(out["status"].(string))

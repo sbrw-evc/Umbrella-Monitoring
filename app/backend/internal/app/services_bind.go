@@ -352,8 +352,9 @@ func dropCI(d *store.Data, id string) {
 
 // applyServiceTags follows the NetBox tags of linked services after a synchronization: items
 // read from NetBox with the tag of a service belong to it, items without it do not. A service
-// whose tag is gone from NetBox is unlinked and keeps its bindings.
-func applyServiceTags(d *store.Data, cfg netbox.Config, tags []netbox.Tag, seen map[string]bool, now time.Time, stats *model.SyncStats) {
+// whose tag is gone from NetBox is unlinked and keeps its bindings, unless the answer is held as
+// incomplete (keep).
+func applyServiceTags(d *store.Data, cfg netbox.Config, tags []netbox.Tag, seen map[string]bool, now time.Time, stats *model.SyncStats, keep bool) {
 	byID, bySlug := map[int]netbox.Tag{}, map[string]netbox.Tag{}
 	for _, t := range tags {
 		byID[t.ID], bySlug[strings.ToLower(t.Slug)] = t, t
@@ -371,6 +372,9 @@ func applyServiceTags(d *store.Data, cfg netbox.Config, tags []netbox.Tag, seen 
 		t, ok := byID[svc.NetBox.TagID]
 		if !ok || !strings.EqualFold(t.Slug, svc.NetBox.Slug) {
 			t, ok = bySlug[strings.ToLower(svc.NetBox.Slug)]
+		}
+		if !ok && keep {
+			continue
 		}
 		if !ok {
 			svc.NetBox = nil

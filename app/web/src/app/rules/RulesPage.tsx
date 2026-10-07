@@ -1,16 +1,21 @@
 import { useEffect, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Banner, Button, Field, formatDate, Input, Modal, Segmented, Select, Switch, Textarea } from '../../ui'
 import { useSession } from '../session'
+import { Link } from '../../router'
+import { SourcesExplainer } from '../connectors/QuickConnect'
 import { strings } from './strings'
+import { RULE_METHODS, SEVERITIES, severityText, type RuleMethod } from '../incidents/types'
 import '../connectors/connectors.css'
 import './rules.css'
+import { notify } from '../../notify'
+import { ask } from '../../confirm'
 
-type Method = 'red' | 'use'
+type Method = RuleMethod
 type Rule = {
   id: string
   name: string
@@ -33,18 +38,21 @@ type Rule = {
   source_name?: string
   last_eval_at?: string
 }
-type Source = { id: string; name: string; url: string; credential_id?: string; credential_name?: string; skip_verify: boolean; rules: number }
-type View = { rules: Rule[]; sources: Source[]; templates: Rule[]; ops: string[] }
+type Source = { id: string; name: string; url: string; credential_id?: string; credential_name?: string; skip_verify: boolean; rules: number; system: boolean; system_id?: string }
+// FormDefaults is rules.FormDefaults: the fields a new rule starts with.
+type FormDefaults = Pick<Rule, 'method' | 'ci_label' | 'op' | 'threshold' | 'for' | 'interval' | 'severity' | 'enabled'>
+type View = { rules: Rule[]; sources: Source[]; templates: Rule[]; ops: string[]; defaults?: { form?: FormDefaults } }
 type Preview = { series: { ci: string; labels: Record<string, string>; value: number; match: boolean; title: string }[]; total: number; matched: number; error?: string }
 type Credential = { id: string; name: string; type: string }
 
-const SEVERITIES = ['info', 'warning', 'error', 'critical']
+// The rule editor lists severities from the mildest up.
+const SEVERITY_OPTIONS = [...SEVERITIES].reverse()
 
 export function RulesPage() {
   const t = useT(strings)
   const { can } = useSession()
   const editor = can('rules:edit')
-  const [tab, setTab] = useState<'rules' | 'sources'>('rules')
+  const [tab, setTab] = useState<'rules' | 'sources'>(() => (new URLSearchParams(window.location.search).get('tab') === 'sources' ? 'sources' : 'rules'))
   const [epoch, setEpoch] = useState(0)
   const view = useResource<View>('/api/rules', epoch)
   const [rule, setRule] = useState<Rule | 'new' | null>(null)
@@ -57,6 +65,7 @@ export function RulesPage() {
   const v = view.data
   return (
     <div className="stack">
+      <SourcesExplainer />
       <div className="row rl-head">
         <Segmented
           label={t('rl.tab.rules')}
@@ -82,7 +91,7 @@ export function RulesPage() {
       </div>
       <ErrorBanner error={view.error} strings={strings} />
       {v && tab === 'rules' && <RulesTable v={v} editor={editor} onOpen={setRule} onSources={() => setTab('sources')} />}
-      {v && tab === 'sources' && <SourcesTable v={v} editor={editor} onOpen={setSource} />}
+      {v && tab === 'sources' && <SourcesTable v={v} editor={editor} onOpen={setSource} onChanged={reload} />}
       {v && <RuleEditor value={rule} v={v} onClose={() => setRule(null)} onSaved={() => (setRule(null), reload())} />}
       <SourceEditor value={source} onClose={() => setSource(null)} onSaved={() => (setSource(null), reload())} />
     </div>
@@ -144,7 +153,7 @@ function RulesTable({ v, editor, onOpen, onSources }: { v: View; editor: boolean
                   <span className="cn-name">{r.name}</span>
                 )}
                 <div className="muted rl-sub">
-                  <code>{r.signal}</code> · {t(`sev.${r.severity}`)}
+                  <code>{r.signal}</code> · {severityText(t, r.severity)}
                 </div>
               </td>
               <td className="rl-cond">
@@ -166,65 +175,87 @@ function RulesTable({ v, editor, onOpen, onSources }: { v: View; editor: boolean
   )
 }
 
-function SourcesTable({ v, editor, onOpen }: { v: View; editor: boolean; onOpen: (s: Source) => void }) {
+function SourcesTable({ v, editor, onOpen, onChanged }: { v: View; editor: boolean; onOpen: (s: Source) => void; onChanged: () => void }) {
   const t = useT(strings)
+  const { can } = useSession()
+  const merge = useAction()
+  const canMerge = editor && can('monitoring:edit')
+  const doMerge = async (s: Source) =>
+    (await ask({ text: t(s.system_id ? 'ms.merge.confirm' : 'ms.merge.confirm.new', { name: s.name, n: s.rules }) })) &&
+    void merge.run(async () => {
+      await api('POST', `/api/metric-sources/${s.id}/merge`)
+      onChanged()
+    })
   if (v.sources.length === 0) return <p className="muted card rl-empty">{t('rl.empty.sources')}</p>
   return (
-    <div className="card cn-table-card">
-      <table className="cn-table rl-table">
-        <thead>
-          <tr>
-            <th>{t('ms.name')}</th>
-            <th>{t('ms.url')}</th>
-            <th>{t('ms.cred')}</th>
-            <th className="num">{t('ms.rules')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {v.sources.map((s) => (
-            <tr key={s.id}>
-              <td className="rl-name">
-                {editor ? (
-                  <button type="button" className="cn-link cn-name" onClick={() => onOpen(s)}>
-                    {s.name}
-                  </button>
-                ) : (
-                  <span className="cn-name">{s.name}</span>
-                )}
-              </td>
-              <td>
-                <code>{s.url}</code>
-              </td>
-              <td>{s.credential_name ?? <span className="muted">{t('ms.cred.none')}</span>}</td>
-              <td className="num">{s.rules}</td>
+    <>
+      <p className="muted">{t('ms.systems.hint')}</p>
+      <ErrorFlash error={merge.error} strings={strings} />
+      <div className="card cn-table-card">
+        <table className="cn-table rl-table">
+          <thead>
+            <tr>
+              <th>{t('ms.name')}</th>
+              <th>{t('ms.url')}</th>
+              <th>{t('ms.cred')}</th>
+              <th className="num">{t('ms.rules')}</th>
+              <th />
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {v.sources.map((s) => (
+              <tr key={s.id}>
+                <td className="rl-name">
+                  {s.system ? (
+                    <Link to={`/monitoring?system=${encodeURIComponent(s.id)}`} className="cn-name">
+                      {s.name}
+                    </Link>
+                  ) : editor ? (
+                    <button type="button" className="cn-link cn-name" onClick={() => onOpen(s)}>
+                      {s.name}
+                    </button>
+                  ) : (
+                    <span className="cn-name">{s.name}</span>
+                  )}
+                  <div className="rl-sub">
+                    <span className={`pill ${s.system ? 'pill-ok' : 'pill-off'}`}>{t(s.system ? 'ms.kind.system' : 'ms.kind.source')}</span>
+                  </div>
+                </td>
+                <td>
+                  <code>{s.url}</code>
+                </td>
+                <td>{s.credential_name ?? <span className="muted">{t('ms.cred.none')}</span>}</td>
+                <td className="num">{s.rules}</td>
+                <td className="num">
+                  {!s.system && canMerge && (
+                    <Button variant="ghost" busy={merge.busy} title={t('ms.merge.hint')} onClick={() => doMerge(s)}>
+                      {t(s.system_id ? 'ms.merge' : 'ms.merge.new')}
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   )
 }
 
-const EMPTY: Omit<Rule, 'id' | 'series' | 'pending' | 'firing'> = {
-  name: '',
-  method: 'use',
-  signal: '',
-  source_id: '',
-  query: '',
-  ci_label: 'instance',
-  op: '>',
-  threshold: 0,
-  for: '5m',
-  interval: '30s',
-  severity: 'warning',
-  title: '',
-  enabled: true,
+type RuleFields = Omit<Rule, 'id' | 'series' | 'pending' | 'firing'>
+
+// FORM_DEFAULTS is what a new rule starts with when the server does not say (an older server).
+const FORM_DEFAULTS: FormDefaults = { method: 'use', ci_label: 'instance', op: '>', threshold: 0, for: '5m', interval: '30s', severity: 'warning', enabled: true }
+
+// emptyRule is a new rule: the form defaults of the server and empty texts.
+function emptyRule(v: View): RuleFields {
+  return { ...FORM_DEFAULTS, ...v.defaults?.form, name: '', signal: '', source_id: '', query: '', title: '' }
 }
 
-type RuleDraft = typeof EMPTY & { threshold_text: string }
+type RuleDraft = RuleFields & { threshold_text: string }
 
-function ruleDraft(r: Partial<Rule>, sourceID: string): RuleDraft {
-  const d = { ...EMPTY, ...r, source_id: r.source_id || sourceID }
+function ruleDraft(v: View, r: Partial<Rule>, sourceID: string): RuleDraft {
+  const d = { ...emptyRule(v), ...r, source_id: r.source_id || sourceID }
   return { ...d, threshold_text: String(d.threshold) }
 }
 
@@ -251,13 +282,13 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
   const { locale } = useLocale()
   const { timezone } = useSession()
   const editing = value && value !== 'new' ? value : null
-  const [d, setD] = useState<RuleDraft>(() => ruleDraft(editing ?? {}, v.sources[0]?.id ?? ''))
+  const [d, setD] = useState<RuleDraft>(() => ruleDraft(v, editing ?? {}, v.sources[0]?.id ?? ''))
   const [template, setTemplate] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
   const save = useAction()
   const check = useAction()
   useEffect(() => {
-    setD(ruleDraft(editing ?? {}, v.sources[0]?.id ?? ''))
+    setD(ruleDraft(v, editing ?? {}, v.sources[0]?.id ?? ''))
     setTemplate('')
     setPreview(null)
     save.clear()
@@ -269,7 +300,7 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
     setTemplate(i)
     if (i === '') return
     const tpl = v.templates[Number(i)]
-    setD(ruleDraft({ ...tpl, source_id: d.source_id }, d.source_id))
+    setD(ruleDraft(v, { ...tpl, source_id: d.source_id }, d.source_id))
     setPreview(null)
   }
   const submit = () =>
@@ -278,9 +309,9 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
       onSaved()
     })
   const runPreview = () => check.run(async () => setPreview(await api<Preview>('POST', '/api/rules/preview', ruleBody(d))))
-  const remove = () =>
+  const remove = async () =>
     editing &&
-    window.confirm(t('rl.delete.confirm', { name: editing.name })) &&
+    (await ask({ text: t('rl.delete.confirm', { name: editing.name }), danger: true })) &&
     save.run(async () => {
       await api('DELETE', `/api/rules/${editing.id}`)
       onSaved()
@@ -328,8 +359,9 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
           <Field label={t('rl.method')}>
             {(id) => (
               <Select id={id} value={d.method} onChange={(e) => set({ method: e.target.value as Method })}>
-                <option value="red">{`RED · ${t('rl.method.red.hint')}`}</option>
-                <option value="use">{`USE · ${t('rl.method.use.hint')}`}</option>
+                {RULE_METHODS.map((m) => (
+                  <option key={m} value={m}>{`${m.toUpperCase()} · ${t(`rl.method.${m}.hint`)}`}</option>
+                ))}
               </Select>
             )}
           </Field>
@@ -339,7 +371,7 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
             <Select id={id} value={d.source_id} onChange={(e) => set({ source_id: e.target.value })}>
               {v.sources.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.name}
+                  {s.system ? `${s.name} (${t('ms.kind.system')})` : s.name}
                 </option>
               ))}
             </Select>
@@ -372,9 +404,9 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
           <Field label={t('rl.severity')}>
             {(id) => (
               <Select id={id} value={d.severity} onChange={(e) => set({ severity: e.target.value })}>
-                {SEVERITIES.map((s) => (
+                {SEVERITY_OPTIONS.map((s) => (
                   <option key={s} value={s}>
-                    {t(`sev.${s}`)}
+                    {severityText(t, s)}
                   </option>
                 ))}
               </Select>
@@ -394,7 +426,7 @@ function RuleEditor({ value, v, onClose, onSaved }: { value: Rule | 'new' | null
         </div>
         <Switch checked={d.enabled} onChange={(enabled) => set({ enabled })} label={t('rl.enabled')} />
         {editing?.last_eval_at && <p className="hint">{t('rl.lastEval', { at: formatDate(editing.last_eval_at, locale, timezone) })}</p>}
-        <ErrorBanner error={check.error ?? save.error} strings={strings} />
+        <ErrorFlash error={check.error ?? save.error} strings={strings} />
         {preview && <PreviewTable p={preview} />}
       </div>
     </Modal>
@@ -434,13 +466,11 @@ function SourceEditor({ value, onClose, onSaved }: { value: Source | 'new' | nul
   const editing = value && value !== 'new' ? value : null
   const blank: SourceDraft = { name: '', url: '', credential_id: '', skip_verify: false }
   const [d, setD] = useState<SourceDraft>(blank)
-  const [ok, setOk] = useState('')
   const creds = useResource<Credential[]>(value && can('credentials:view') ? '/api/credentials' : '', 0)
   const save = useAction()
   const test = useAction()
   useEffect(() => {
     setD(editing ? { name: editing.name, url: editing.url, credential_id: editing.credential_id ?? '', skip_verify: editing.skip_verify } : blank)
-    setOk('')
     save.clear()
     test.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -453,13 +483,12 @@ function SourceEditor({ value, onClose, onSaved }: { value: Source | 'new' | nul
     })
   const check = () =>
     test.run(async () => {
-      setOk('')
       const r = await api<{ series: number }>('POST', '/api/metric-sources/test', d)
-      setOk(t('ms.test.ok', { n: r.series }))
+      notify({ kind: 'ok', title: t('ms.test.ok', { n: r.series }) })
     })
-  const remove = () =>
+  const remove = async () =>
     editing &&
-    window.confirm(t('ms.delete.confirm', { name: editing.name })) &&
+    (await ask({ text: t('ms.delete.confirm', { name: editing.name }), danger: true })) &&
     save.run(async () => {
       await api('DELETE', `/api/metric-sources/${editing.id}`)
       onSaved()
@@ -507,8 +536,7 @@ function SourceEditor({ value, onClose, onSaved }: { value: Source | 'new' | nul
           )}
         </Field>
         {d.url.startsWith('https') && <Switch checked={d.skip_verify} onChange={(skip_verify) => setD({ ...d, skip_verify })} label={t('ms.skip')} />}
-        {ok && <Banner kind="ok" title={ok} />}
-        <ErrorBanner error={test.error ?? save.error} strings={strings} />
+        <ErrorFlash error={test.error ?? save.error} strings={strings} />
       </div>
     </Modal>
   )

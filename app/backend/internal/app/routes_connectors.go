@@ -62,37 +62,12 @@ func (a *App) registerConnectors(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/connectors/{id}/stats", a.authed(a.can(view, a.connectorStats)))
 
 	mux.HandleFunc("GET /api/credentials", a.authed(a.can("credentials:view", a.listCredentials)))
+	mux.HandleFunc("GET /api/credentials/kinds", a.authed(a.can("credentials:view", a.listCredentialKinds)))
 	mux.HandleFunc("POST /api/credentials", a.authed(a.can("credentials:edit", a.createCredential)))
 	mux.HandleFunc("GET /api/credentials/{id}", a.authed(a.can("credentials:view", a.getCredential)))
 	mux.HandleFunc("PUT /api/credentials/{id}", a.authed(a.can("credentials:edit", a.updateCredential)))
 	mux.HandleFunc("DELETE /api/credentials/{id}", a.authed(a.can("credentials:edit", a.deleteCredential)))
-}
-
-func connectorError(w http.ResponseWriter, err error) {
-	var pe *PublishError
-	var le *LockError
-	switch {
-	case errors.As(err, &pe):
-		httpx.JSON(w, http.StatusBadRequest, map[string]any{"error": "publish_failed", "issues": pe.Issues})
-	case errors.As(err, &le):
-		httpx.JSON(w, http.StatusConflict, map[string]any{"error": "locked", "lock": le.Lock})
-	case errors.Is(err, ErrSlugTaken):
-		httpx.Error(w, http.StatusConflict, "connector_slug_taken", nil)
-	case errors.Is(err, ErrDraftConflict):
-		httpx.Error(w, http.StatusConflict, "draft_conflict", nil)
-	case errors.Is(err, ingest.ErrNotFound):
-		writeError(w, ErrNotFound)
-	default:
-		writeError(w, err)
-	}
-}
-
-func respond(w http.ResponseWriter, status int, out any, err error) {
-	if err != nil {
-		connectorError(w, err)
-		return
-	}
-	httpx.JSON(w, status, out)
+	a.registerSources(mux)
 }
 
 func (a *App) listConnectors(w http.ResponseWriter, r *http.Request) {
@@ -133,12 +108,12 @@ func (a *App) createConnector(w http.ResponseWriter, r *http.Request) {
 		doc = &p.Document
 	}
 	out, err := a.connectors.Create(current(r).user, in.ConnectorInput, doc, in.Credentials)
-	respond(w, http.StatusCreated, out, err)
+	reply(w, http.StatusCreated, out, err)
 }
 
 func (a *App) getConnector(w http.ResponseWriter, r *http.Request) {
 	out, err := a.connectors.Get(r.PathValue("id"), current(r).user.ID)
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) updateConnector(w http.ResponseWriter, r *http.Request) {
@@ -147,13 +122,13 @@ func (a *App) updateConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.connectors.Update(current(r).user, r.PathValue("id"), in)
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) deleteConnector(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := a.connectors.Delete(current(r).user, id); err != nil {
-		connectorError(w, err)
+		writeError(w, err)
 		return
 	}
 	if a.ingestReady() {
@@ -172,17 +147,17 @@ func (a *App) saveDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.connectors.SaveDraft(current(r).user, r.PathValue("id"), in)
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) lockConnector(w http.ResponseWriter, r *http.Request) {
 	out, err := a.connectors.Lock(current(r).user, r.PathValue("id"))
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) unlockConnector(w http.ResponseWriter, r *http.Request) {
 	if err := a.connectors.Unlock(current(r).user, r.PathValue("id")); err != nil {
-		connectorError(w, err)
+		writeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -194,12 +169,12 @@ func (a *App) publishConnector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.connectors.Publish(current(r).user, r.PathValue("id"), in)
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) unpublishConnector(w http.ResponseWriter, r *http.Request) {
 	out, err := a.connectors.Unpublish(current(r).user, r.PathValue("id"))
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func versionParam(r *http.Request) (int, bool) {
@@ -214,7 +189,7 @@ func (a *App) getVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.connectors.Version(r.PathValue("id"), n)
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) restoreVersion(w http.ResponseWriter, r *http.Request) {
@@ -224,7 +199,7 @@ func (a *App) restoreVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.connectors.Restore(current(r).user, r.PathValue("id"), n)
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) nodeTypes(w http.ResponseWriter, r *http.Request) {
@@ -239,13 +214,15 @@ type presetView struct {
 	Tags        []string              `json:"tags"`
 	Credentials []flow.CredentialSlot `json:"credentials"`
 	Samples     int                   `json:"samples"`
+	// Quick is set for the presets quick connect offers.
+	Quick *presets.QuickView `json:"quick,omitempty"`
 }
 
 func (a *App) listPresets(w http.ResponseWriter, r *http.Request) {
 	out := []presetView{}
 	for _, p := range presets.All() {
 		out = append(out, presetView{ID: p.ID, Title: p.Title, Description: p.Description, Name: p.Document.Name, Tags: p.Document.Tags,
-			Credentials: p.Document.Credentials, Samples: len(p.Document.Samples)})
+			Credentials: p.Document.Credentials, Samples: len(p.Document.Samples), Quick: p.Quick.View()})
 	}
 	httpx.JSON(w, http.StatusOK, out)
 }
@@ -434,17 +411,17 @@ func (a *App) importConnector(w http.ResponseWriter, r *http.Request) {
 		name = doc.Name
 	}
 	out, err := a.connectors.Create(current(r).user, ConnectorInput{Name: name, Slug: in.Slug, Description: doc.Description, Tags: doc.Tags}, &doc, in.Credentials)
-	respond(w, http.StatusCreated, out, err)
+	reply(w, http.StatusCreated, out, err)
 }
 
 func (a *App) listSamples(w http.ResponseWriter, r *http.Request) {
 	out, err := a.connectors.Samples(r.PathValue("id"))
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) getSample(w http.ResponseWriter, r *http.Request) {
 	sm, err := a.connectors.Sample(r.PathValue("id"), r.PathValue("sid"))
-	respond(w, http.StatusOK, sampleView(sm, true), err)
+	reply(w, http.StatusOK, sampleView(sm, true), err)
 }
 
 type addSampleInput struct {
@@ -476,7 +453,7 @@ func (a *App) addSample(w http.ResponseWriter, r *http.Request) {
 		}
 		req, err := a.queue.Request(r.Context(), id, rid)
 		if err != nil {
-			connectorError(w, err)
+			writeError(w, err)
 			return
 		}
 		sm = model.Sample{Name: in.Name, Source: SampleSourceRequest, Body: req.Body, Headers: req.Headers, Query: req.Query,
@@ -497,12 +474,12 @@ func (a *App) addSample(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.connectors.AddSample(current(r).user, id, sm)
-	respond(w, http.StatusCreated, out, err)
+	reply(w, http.StatusCreated, out, err)
 }
 
 func (a *App) deleteSample(w http.ResponseWriter, r *http.Request) {
 	if err := a.connectors.DeleteSample(r.PathValue("id"), r.PathValue("sid")); err != nil {
-		connectorError(w, err)
+		writeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -514,12 +491,12 @@ func (a *App) armCapture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.connectors.Arm(current(r).user, r.PathValue("id"), in)
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) disarmCapture(w http.ResponseWriter, r *http.Request) {
 	if err := a.connectors.Disarm(r.PathValue("id")); err != nil {
-		connectorError(w, err)
+		writeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -533,7 +510,7 @@ func (a *App) testRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.connectors.TestRun(r.Context(), r.PathValue("id"), in)
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) testAll(w http.ResponseWriter, r *http.Request) {
@@ -546,13 +523,13 @@ func (a *App) testAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := a.connectors.TestAll(r.Context(), r.PathValue("id"), in.Graph)
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 // withQueue answers 503 when the ingest tables are not available, and 404 for unknown connectors.
 func (a *App) withQueue(w http.ResponseWriter, r *http.Request) bool {
 	if _, err := a.connectors.Get(r.PathValue("id"), ""); err != nil {
-		connectorError(w, err)
+		writeError(w, err)
 		return false
 	}
 	if !a.ingestReady() {
@@ -578,7 +555,7 @@ func (a *App) listRequests(w http.ResponseWriter, r *http.Request) {
 	if out == nil {
 		out = []ingest.Request{}
 	}
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 type requestView struct {
@@ -597,7 +574,7 @@ func (a *App) getRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req, err := a.queue.Request(r.Context(), r.PathValue("id"), rid)
-	respond(w, http.StatusOK, requestView{Request: req, Body: string(req.Body), Format: flow.Sniff(req.Body)}, err)
+	reply(w, http.StatusOK, requestView{Request: req, Body: string(req.Body), Format: flow.Sniff(req.Body)}, err)
 }
 
 func (a *App) listFailures(w http.ResponseWriter, r *http.Request) {
@@ -608,7 +585,7 @@ func (a *App) listFailures(w http.ResponseWriter, r *http.Request) {
 	if out == nil {
 		out = []ingest.Failure{}
 	}
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) reprocessFailures(w http.ResponseWriter, r *http.Request) {
@@ -637,7 +614,7 @@ func (a *App) reprocessFailures(w http.ResponseWriter, r *http.Request) {
 				Detail: fmt.Sprintf("%s: %d requests on version %d", c.Name, out.Requeued, c.Published)})
 		})
 	}
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) listEvents(w http.ResponseWriter, r *http.Request) {
@@ -648,7 +625,7 @@ func (a *App) listEvents(w http.ResponseWriter, r *http.Request) {
 	if out == nil {
 		out = []ingest.EventRow{}
 	}
-	respond(w, http.StatusOK, out, err)
+	reply(w, http.StatusOK, out, err)
 }
 
 func (a *App) connectorStats(w http.ResponseWriter, r *http.Request) {
@@ -664,7 +641,7 @@ func (a *App) connectorStats(w http.ResponseWriter, r *http.Request) {
 	if out == nil {
 		out = []ingest.Bucket{}
 	}
-	respond(w, http.StatusOK, map[string]any{"step_minutes": int(step.Minutes()), "buckets": out}, err)
+	reply(w, http.StatusOK, map[string]any{"step_minutes": int(step.Minutes()), "buckets": out}, err)
 }
 
 func (a *App) listCredentials(w http.ResponseWriter, r *http.Request) {
@@ -674,7 +651,7 @@ func (a *App) listCredentials(w http.ResponseWriter, r *http.Request) {
 func (a *App) getCredential(w http.ResponseWriter, r *http.Request) {
 	out, err := a.creds.Get(r.PathValue("id"))
 	if err != nil {
-		credentialError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -687,7 +664,7 @@ func (a *App) createCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.creds.Create(r.Context(), current(r).user.Username, in)
 	if err != nil {
-		credentialError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, out)
@@ -700,7 +677,7 @@ func (a *App) updateCredential(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.creds.Update(r.Context(), current(r).user.Username, r.PathValue("id"), in)
 	if err != nil {
-		credentialError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -708,7 +685,7 @@ func (a *App) updateCredential(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) deleteCredential(w http.ResponseWriter, r *http.Request) {
 	if err := a.creds.Delete(r.Context(), current(r).user.Username, r.PathValue("id")); err != nil {
-		credentialError(w, err)
+		writeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

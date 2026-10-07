@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/access"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 )
 
@@ -20,11 +21,13 @@ type Data struct {
 	Credentials   map[string]*model.Credential
 	ConfigItems   map[string]*model.ConfigItem
 	Maintenance   map[string]*model.Maintenance
+	Wallboards    map[string]*model.Wallboard
 	MetricSources map[string]*model.MetricSource
 	Rules         map[string]*model.Rule
-	// MonitoringSources are the Zabbix and Prometheus systems hosts are read from.
+	// MonitoringSources are the Zabbix, Prometheus, Grafana and Graylog systems hosts are read from.
 	MonitoringSources map[string]*model.MonitoringSource
-	TVBoards          map[string]*model.TVBoard
+	// LogSources are the log stores the incident card reads the lines of a machine from.
+	LogSources map[string]*model.LogSource
 	// NetBoxContacts maps NetBox contact IDs to the user accounts made or found for them.
 	NetBoxContacts map[int]string
 	NetBoxSync     model.SyncState
@@ -84,6 +87,9 @@ func (d *Data) init() {
 	if d.Maintenance == nil {
 		d.Maintenance = map[string]*model.Maintenance{}
 	}
+	if d.Wallboards == nil {
+		d.Wallboards = map[string]*model.Wallboard{}
+	}
 	if d.MetricSources == nil {
 		d.MetricSources = map[string]*model.MetricSource{}
 	}
@@ -93,8 +99,21 @@ func (d *Data) init() {
 	if d.MonitoringSources == nil {
 		d.MonitoringSources = map[string]*model.MonitoringSource{}
 	}
-	if d.TVBoards == nil {
-		d.TVBoards = map[string]*model.TVBoard{}
+	if d.LogSources == nil {
+		d.LogSources = map[string]*model.LogSource{}
+	}
+	// gob drops empty lists: a snapshot gives back nil where the hosts had [].
+	for _, src := range d.MonitoringSources {
+		if src != nil {
+			src.NormalizeHosts()
+		}
+	}
+	// Older snapshots have one team per user.
+	for _, u := range d.Users {
+		if u != nil {
+			u.MigrateTeams()
+			u.MigrateScope()
+		}
 	}
 	if d.NetBoxContacts == nil {
 		d.NetBoxContacts = map[int]string{}
@@ -160,6 +179,43 @@ func (d *Data) EnsureSystemRoles(now time.Time) bool {
 	return added
 }
 
+// EnsurePresetRoles creates the preset roles once. A preset whose name is already taken by
+// another role is skipped. The role for new users becomes the viewer preset unless it is set.
+func (d *Data) EnsurePresetRoles(locale string, now time.Time) bool {
+	if d.Settings.PresetRolesSeeded {
+		return false
+	}
+	d.Settings.PresetRolesSeeded = true
+	taken := func(name string) bool {
+		for _, r := range d.Roles {
+			if strings.EqualFold(r.Name, name) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, r := range model.PresetRoles(locale, now) {
+		if d.Roles[r.ID] != nil || taken(r.Name) {
+			continue
+		}
+		r.Permissions = access.Normalize(r.Permissions)
+		d.Roles[r.ID] = r
+	}
+	if d.Settings.NewUserRole == "" && d.Roles[model.RoleViewer] != nil {
+		d.Settings.NewUserRole = model.RoleViewer
+	}
+	return true
+}
+
+// NewUserRole is the role given to an account a directory or NetBox creates without a mapped
+// role: the configured one while it exists and is not the administrator role, otherwise "user".
+func (d *Data) NewUserRole() string {
+	if id := d.Settings.NewUserRole; id != "" && id != model.RoleAdmin && d.Roles[id] != nil {
+		return id
+	}
+	return model.RoleUser
+}
+
 func (d *Data) RoleOf(u *model.User) *model.Role {
 	if r := d.Roles[u.Role]; r != nil {
 		return r
@@ -177,6 +233,16 @@ func (d *Data) RoleOf(u *model.User) *model.Role {
 		}
 	}
 	return nil
+}
+
+// IsAdmin reports whether u holds the administrator role, the one role that has every
+// permission and sees everything.
+func (d *Data) IsAdmin(u *model.User) bool {
+	if u == nil {
+		return false
+	}
+	r := d.RoleOf(u)
+	return r != nil && r.ID == model.RoleAdmin
 }
 
 func (d *Data) UserByName(username string) *model.User {

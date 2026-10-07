@@ -1,5 +1,4 @@
 import type { ComponentProps, ReactNode } from 'react'
-import { CheckCircle2, Circle } from 'lucide-react'
 import { motion } from 'motion/react'
 import { spring } from './ui'
 
@@ -21,13 +20,7 @@ export function Choice(props: ComponentProps<typeof motion.button>) {
 }
 
 export function ChoiceMark({ checked }: { checked: boolean }) {
-  return checked ? (
-    <Pop>
-      <CheckCircle2 size={18} color="var(--accent)" />
-    </Pop>
-  ) : (
-    <Circle size={18} color="var(--muted)" />
-  )
+  return <span className={`radio-mark${checked ? ' on' : ''}`} aria-hidden />
 }
 
 export function Choices<T extends string>({

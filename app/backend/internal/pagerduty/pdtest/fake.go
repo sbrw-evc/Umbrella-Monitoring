@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -34,11 +35,79 @@ type Fake struct {
 	Subscriptions  map[string]string
 	integration    bool
 	IncidentAlerts map[string][]string
+	// Incidents of the REST API by ID; Notes and Priorities written to them, with the From
+	// header of each write in From.
+	Incidents  map[string]*Incident
+	Notes      map[string][]string
+	Priorities map[string]string
+	From       []string
+	// OnCall are the people on call for the escalation policy of ServiceID.
+	OnCall []OnCallUser
+	// Extra are services listed after ServiceID (owned by team PT1 «Payments»); created holds
+	// the services an Events API integration was created in.
+	Extra   []Service
+	created map[string]bool
+}
+
+// Service is an extra service of the fake.
+type Service struct {
+	ID, Name, Status, TeamID, Team string
+}
+
+// Incident is an incident of the fake REST API.
+type Incident struct {
+	ID, Key, Status, By string
+	// Service is the service (queue) of the incident; empty is ServiceID.
+	Service string
+}
+
+// OnCallUser is a person on call in the fake.
+type OnCallUser struct {
+	Name, Email string
+	Level       int
+}
+
+// SetIncident adds or changes an incident.
+func (f *Fake) SetIncident(in Incident) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Incidents[in.ID] = &in
+}
+
+// Snapshot returns the notes, priorities and From headers written so far.
+func (f *Fake) Snapshot() (notes map[string][]string, priorities map[string]string, from []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	notes, priorities = map[string][]string{}, map[string]string{}
+	for k, v := range f.Notes {
+		notes[k] = append([]string(nil), v...)
+	}
+	for k, v := range f.Priorities {
+		priorities[k] = v
+	}
+	return notes, priorities, append([]string(nil), f.From...)
+}
+
+func (in *Incident) json() map[string]any {
+	svc := in.Service
+	if svc == "" {
+		svc = ServiceID
+	}
+	out := map[string]any{"id": in.ID, "incident_key": in.Key, "status": in.Status, "html_url": "https://pd/incidents/" + in.ID,
+		"service": map[string]string{"id": svc, "summary": svc}}
+	if in.By != "" {
+		out["last_status_change_by"] = map[string]string{"summary": in.By}
+		if in.Status == "acknowledged" {
+			out["acknowledgements"] = []map[string]any{{"acknowledger": map[string]string{"summary": in.By}}}
+		}
+	}
+	return out
 }
 
 func New(t *testing.T) *Fake {
 	t.Helper()
-	f := &Fake{Subscriptions: map[string]string{}, IncidentAlerts: map[string][]string{}}
+	f := &Fake{Subscriptions: map[string]string{}, IncidentAlerts: map[string][]string{}, Incidents: map[string]*Incident{},
+		Notes: map[string][]string{}, Priorities: map[string]string{}, created: map[string]bool{}}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Server.Close)
 	return f
@@ -109,13 +178,88 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	case path == "/abilities":
 		write(w, http.StatusOK, map[string]any{"abilities": []string{"teams", "urgencies"}})
 	case path == "/services":
-		write(w, http.StatusOK, map[string]any{"services": []map[string]any{{"id": ServiceID, "name": "Payments", "status": "active",
-			"html_url": "https://pd/services/" + ServiceID, "integrations": integrations()}}, "more": false})
+		list := []map[string]any{{"id": ServiceID, "name": "Payments", "status": "active", "html_url": "https://pd/services/" + ServiceID,
+			"integrations": integrations(), "escalation_policy": map[string]string{"id": "PEP1", "summary": "Payments on-call"},
+			"teams": []map[string]string{{"id": "PT1", "summary": "Payments"}}}}
+		for _, x := range f.Extra {
+			list = append(list, map[string]any{"id": x.ID, "name": x.Name, "status": x.Status, "html_url": "https://pd/services/" + x.ID,
+				"integrations": []map[string]string{}, "escalation_policy": map[string]string{"id": "PEP-" + x.ID, "summary": x.Name + " policy"},
+				"teams": []map[string]string{{"id": x.TeamID, "summary": x.Team}}})
+		}
+		write(w, http.StatusOK, map[string]any{"services": list, "more": false})
 	case path == "/services/"+ServiceID && r.Method == http.MethodGet:
-		write(w, http.StatusOK, map[string]any{"service": map[string]any{"id": ServiceID, "name": "Payments", "integrations": integrations()}})
+		write(w, http.StatusOK, map[string]any{"service": map[string]any{"id": ServiceID, "name": "Payments", "integrations": integrations(),
+			"escalation_policy": map[string]string{"id": "PEP1", "summary": "Payments on-call"}}})
+	case path == "/oncalls":
+		var list []map[string]any
+		if r.URL.Query().Get("escalation_policy_ids[]") == "PEP1" {
+			for _, u := range f.OnCall {
+				list = append(list, map[string]any{"escalation_level": u.Level, "escalation_policy": map[string]string{"id": "PEP1", "summary": "Payments on-call"},
+					"user": map[string]string{"name": u.Name, "email": u.Email}})
+			}
+		}
+		write(w, http.StatusOK, map[string]any{"oncalls": list})
+	case path == "/priorities":
+		write(w, http.StatusOK, map[string]any{"priorities": []map[string]string{{"id": "PRI1", "name": "P1"}, {"id": "PRI2", "name": "P2"}, {"id": "PRI3", "name": "P3"}}})
+	case path == "/incidents" && r.Method == http.MethodGet:
+		q := r.URL.Query()
+		var list []map[string]any
+		for _, in := range f.Incidents {
+			if k := q.Get("incident_key"); k != "" && in.Key != k {
+				continue
+			}
+			if st := q["statuses[]"]; len(st) > 0 && !slices.Contains(st, in.Status) {
+				continue
+			}
+			list = append(list, in.json())
+		}
+		write(w, http.StatusOK, map[string]any{"incidents": list, "more": false})
+	case strings.HasPrefix(path, "/incidents/") && strings.HasSuffix(path, "/notes") && r.Method == http.MethodPost:
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/incidents/"), "/notes")
+		var body struct {
+			Note struct {
+				Content string `json:"content"`
+			} `json:"note"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.From = append(f.From, r.Header.Get("From"))
+		f.Notes[id] = append(f.Notes[id], body.Note.Content)
+		write(w, http.StatusCreated, map[string]any{"note": map[string]string{"id": "PN1"}})
+	case strings.HasPrefix(path, "/incidents/") && strings.Count(path, "/") == 2 && r.Method == http.MethodPut:
+		id := strings.TrimPrefix(path, "/incidents/")
+		var body struct {
+			Incident struct {
+				Priority struct {
+					ID string `json:"id"`
+				} `json:"priority"`
+			} `json:"incident"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		f.From = append(f.From, r.Header.Get("From"))
+		f.Priorities[id] = body.Incident.Priority.ID
+		write(w, http.StatusOK, map[string]any{"incident": map[string]string{"id": id}})
+	case strings.HasPrefix(path, "/incidents/") && strings.Count(path, "/") == 2 && r.Method == http.MethodGet:
+		in := f.Incidents[strings.TrimPrefix(path, "/incidents/")]
+		if in == nil {
+			write(w, http.StatusNotFound, map[string]any{"error": map[string]any{"message": "Not Found"}})
+			return
+		}
+		write(w, http.StatusOK, map[string]any{"incident": in.json()})
 	case path == "/services/"+ServiceID+"/integrations" && r.Method == http.MethodPost:
 		f.integration = true
 		write(w, http.StatusCreated, map[string]any{"integration": integrations()[0]})
+	case strings.HasPrefix(path, "/services/") && f.extra(strings.Split(path, "/")[2]) != nil:
+		x := f.extra(strings.Split(path, "/")[2])
+		ints := []map[string]string{}
+		if f.created[x.ID] {
+			ints = append(ints, map[string]string{"id": "PINT-" + x.ID, "type": "events_api_v2_inbound_integration", "integration_key": "key-" + x.ID})
+		}
+		if strings.HasSuffix(path, "/integrations") && r.Method == http.MethodPost {
+			f.created[x.ID] = true
+			write(w, http.StatusCreated, map[string]any{"integration": map[string]string{"id": "PINT-" + x.ID, "type": "events_api_v2_inbound_integration", "integration_key": "key-" + x.ID}})
+			return
+		}
+		write(w, http.StatusOK, map[string]any{"service": map[string]any{"id": x.ID, "name": x.Name, "integrations": ints}})
 	case path == "/webhook_subscriptions" && r.Method == http.MethodPost:
 		var body struct {
 			Sub struct {
@@ -141,4 +285,20 @@ func (f *Fake) serve(w http.ResponseWriter, r *http.Request) {
 	default:
 		write(w, http.StatusNotFound, map[string]any{"error": map[string]any{"message": "Not Found"}})
 	}
+}
+
+func (f *Fake) extra(id string) *Service {
+	for i := range f.Extra {
+		if f.Extra[i].ID == id {
+			return &f.Extra[i]
+		}
+	}
+	return nil
+}
+
+// Created tells whether an Events API integration was created in an extra service.
+func (f *Fake) Created(id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.created[id]
 }

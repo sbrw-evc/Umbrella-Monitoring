@@ -90,6 +90,10 @@ type ConfigItem struct {
 	UpdatedAt   time.Time    `json:"updated_at"`
 	UpdatedBy   string       `json:"updated_by"`
 	SyncedAt    *time.Time   `json:"synced_at,omitempty"`
+
+	// Aliases are other names events call the item by (a host name in a monitoring system, a
+	// Prometheus instance). They are kept in Umbrella, also for items imported from NetBox.
+	Aliases []string `json:"aliases,omitempty"`
 }
 
 // Imported items mirror NetBox and change only there.
@@ -97,15 +101,17 @@ func (c *ConfigItem) Imported() bool { return c.Source == SourceNetBox }
 
 // SyncStats counts what one NetBox synchronization changed.
 type SyncStats struct {
-	Objects          int    `json:"objects"`
-	Created          int    `json:"created"`
-	Updated          int    `json:"updated"`
-	Deleted          int    `json:"deleted"`
-	Unlinked         int    `json:"unlinked"`
-	Contacts         int    `json:"contacts"`
-	UsersCreated     int    `json:"users_created"`
-	UsersUpdated     int    `json:"users_updated"`
-	UsersLinked      int    `json:"users_linked"`
+	Objects      int `json:"objects"`
+	Created      int `json:"created"`
+	Updated      int `json:"updated"`
+	Deleted      int `json:"deleted"`
+	Unlinked     int `json:"unlinked"`
+	Contacts     int `json:"contacts"`
+	UsersCreated int `json:"users_created"`
+	UsersUpdated int `json:"users_updated"`
+	UsersLinked  int `json:"users_linked"`
+	// UsersSkipped: contacts without an account that were not created (CreateUsers is off).
+	UsersSkipped     int    `json:"users_skipped"`
 	DirectoryChecked bool   `json:"directory_checked"`
 	DirectoryMatched int    `json:"directory_matched"`
 	DirectoryMissing int    `json:"directory_missing"`
@@ -113,6 +119,11 @@ type SyncStats struct {
 	ServiceBound     int    `json:"service_bound"`
 	ServiceUnbound   int    `json:"service_unbound"`
 	ServiceUnlinked  int    `json:"service_unlinked"`
+	// Held counts the linked items missing from an answer that looks incomplete; they were kept
+	// instead of being deleted or unlinked. HeldReason: empty (no objects at all) or share (most
+	// of the linked items are missing).
+	Held       int    `json:"held,omitempty"`
+	HeldReason string `json:"held_reason,omitempty"`
 }
 
 // SyncState is the last NetBox synchronization.

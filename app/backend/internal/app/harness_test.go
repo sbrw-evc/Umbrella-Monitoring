@@ -35,8 +35,12 @@ type harness struct {
 }
 
 func newHarness(t *testing.T) *harness {
+	return newHarnessWith(t, store.New())
+}
+
+// newHarnessWith serves the app over a given store, e.g. one loaded from a snapshot.
+func newHarnessWith(t *testing.T, st *store.Store) *harness {
 	bao, vault := secretstest.New(t)
-	st := store.New()
 	st.Write(func(d *store.Data) { d.Settings.Password = model.DefaultPasswordPolicy() })
 	a := app.New(app.Options{Version: "test"}, app.Deps{Vault: vault, Store: st, Sessions: auth.NewSessions()})
 	srv := httptest.NewServer(a.Handler())

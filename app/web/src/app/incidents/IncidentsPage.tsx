@@ -1,22 +1,31 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { RefreshCw, Search } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Search } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
+import { useLiveReload } from './live'
 import { useT } from '../../i18n'
 import { Banner, Button, Input, Select } from '../../ui'
 import { useSession } from '../session'
+import { BulkConfirm } from './CatalogForms'
+import { OnboardingChecklist } from '../onboarding/OnboardingChecklist'
 import { IncidentDetail, PDPill, SeverityPill, StatusPill } from './IncidentDetail'
 import { ago } from './format'
 import { strings } from './strings'
-import { filtersFromURL, METHODS, NO_FILTERS, queryOf, SEVERITIES, STATUSES, urlOf, type Filters, type Flag, type Incident, type Page, type Ref } from './types'
+import { filtersFromURL, METHODS, NO_FILTERS, queryOf, SEVERITIES, SEVERITY_TONE, severityText, STATUSES, urlOf, type Filters, type Flag, type Incident, type Page, type Ref } from './types'
 import '../services/services.css'
 import '../connectors/connectors.css'
 import '../cis/cis.css'
 import './incidents.css'
+import { useRouter } from '../../router'
+import { notify } from '../../notify'
 
-const REFRESH_MS = 10_000
+// The stream brings changes at once; the list is also reloaded now and then, in case the stream
+// is down or a change does not touch an incident (a maintenance window that starts).
+const SAFETY_MS = 30_000
+const OFFLINE_MS = 10_000
+const CLOCK_MS = 10_000
 
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value)
@@ -31,29 +40,41 @@ type TeamRef = { id: string; name: string }
 
 export function IncidentsPage() {
   const t = useT(strings)
-  const { can } = useSession()
+  const { can, user } = useSession()
   const actor = can('incidents:ack')
+  const scoped = user.role !== 'admin' && (user.scope_mode === 'teams' || user.scope_mode === 'services' || (!user.scope_mode && (user.service_ids?.length ?? 0) > 0))
   const [filters, setFilters] = useState<Filters>(() => filtersFromURL(window.location.search))
   const [openID, setOpenID] = useState<string | null>(() => new URLSearchParams(window.location.search).get('id'))
   const [epoch, setEpoch] = useState(0)
   const [now, setNow] = useState(() => Date.now())
   const [checked, setChecked] = useState<Set<string>>(new Set())
-  const [bulkNote, setBulkNote] = useState('')
+  const [confirming, setConfirming] = useState<'ack' | 'resolve' | null>(null)
   const q = useDebounced(filters.q, 250)
   const list = useResource<Page>(`/api/incidents${queryOf({ ...filters, q })}`, epoch)
   const refs = useResource<{ teams: TeamRef[] }>('/api/refs', 0)
   const bulk = useAction()
   const reload = useCallback(() => setEpoch((e) => e + 1), [])
 
+  const live = useLiveReload(reload)
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        setEpoch((e) => e + 1)
-        setNow(Date.now())
-      }
-    }, REFRESH_MS)
+      if (document.visibilityState === 'visible') reload()
+    }, live ? SAFETY_MS : OFFLINE_MS)
+    return () => window.clearInterval(id)
+  }, [live, reload])
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), CLOCK_MS)
     return () => window.clearInterval(id)
   }, [])
+  // A link to the list (a light of the top bar, a notification) while it is open.
+  const { search, visit } = useRouter()
+  const arrived = useRef(visit)
+  useEffect(() => {
+    if (visit === arrived.current) return
+    arrived.current = visit
+    setFilters(filtersFromURL(search))
+    setOpenID(new URLSearchParams(search).get('id'))
+  }, [search, visit])
   useEffect(() => {
     window.history.replaceState(null, '', urlOf(filters, openID))
   }, [filters, openID])
@@ -75,19 +96,22 @@ export function IncidentsPage() {
     return <p className="muted">{t('loading')}</p>
   }
   const { alerts, counts, more } = list.data
+  const pdOn = counts.pd_enabled !== false
   const actionable = alerts.filter((a) => a.status !== 'resolved')
   const allChecked = actionable.length > 0 && actionable.every((a) => checked.has(a.id))
 
   const runBulk = (action: 'ack' | 'resolve') =>
     void bulk.run(async () => {
       const out = await api<{ done: string[]; failed: Record<string, string> }>('POST', '/api/incidents/bulk', { ids: [...checked], action })
-      setBulkNote(t('inc.bulk.done', { done: out.done.length, failed: Object.keys(out.failed).length }))
+      const failed = Object.keys(out.failed).length
+      notify({ kind: failed ? 'warn' : 'ok', title: t('inc.bulk.done', { done: out.done.length, failed }) })
       setChecked(new Set())
       reload()
     })
 
   return (
     <div className="ci-page inc-page">
+      {scoped && <Banner kind="info" title={t('inc.scoped')} />}
       <Tiles counts={counts} filters={filters} set={set} />
       <div className="card svc-toolbar">
         <div className="svc-toolbar-row">
@@ -95,10 +119,10 @@ export function IncidentsPage() {
             <Search size={16} aria-hidden />
             <Input type="search" value={filters.q} placeholder={t('inc.search')} aria-label={t('inc.search')} onChange={(e) => set({ q: e.target.value })} />
           </label>
-          <Button variant="ghost" onClick={reload} busy={list.busy} title={t('inc.auto')}>
-            {!list.busy && <RefreshCw size={16} />}
-            {t('inc.refresh')}
-          </Button>
+          <span className={`inc-live${live ? ' on' : ''}`} role="status" title={live ? t('inc.live.hint') : t('inc.offline.hint')}>
+            <span className="inc-live-dot" aria-hidden />
+            {live ? t('inc.live') : t('inc.offline')}
+          </span>
         </div>
         <div className="svc-filters">
           <label>
@@ -111,7 +135,7 @@ export function IncidentsPage() {
               ))}
             </Select>
           </label>
-          <Choose label={t('inc.filter.severity')} value={filters.severity} onChange={(severity) => set({ severity })} options={SEVERITIES.map((s) => [s, t(`inc.sev.${s}`)])} />
+          <Choose label={t('inc.filter.severity')} value={filters.severity} onChange={(severity) => set({ severity })} options={SEVERITIES.map((s) => [s, severityText(t, s)])} />
           <Choose label={t('inc.filter.method')} value={filters.method} onChange={(method) => set({ method })} options={METHODS.map((m) => [m, t(`inc.method.${m}`)])} />
           <Choose label={t('inc.filter.team')} value={filters.team} onChange={(team) => set({ team })} options={(refs.data?.teams ?? []).map((x) => [x.id, x.name])} />
           <Choose label={t('inc.filter.service')} value={filters.service} onChange={(service) => set({ service })} options={services.map((x) => [x.id, x.name])} />
@@ -121,15 +145,14 @@ export function IncidentsPage() {
             {actor && checked.size > 0 && (
               <>
                 <span className="muted">{t('inc.selected', { n: checked.size })}</span>
-                <Button busy={bulk.busy} onClick={() => runBulk('ack')}>
+                <Button busy={bulk.busy} onClick={() => setConfirming('ack')}>
                   {t('inc.ack')}
                 </Button>
-                <Button busy={bulk.busy} onClick={() => runBulk('resolve')}>
+                <Button busy={bulk.busy} onClick={() => setConfirming('resolve')}>
                   {t('inc.resolve')}
                 </Button>
               </>
             )}
-            {bulkNote && checked.size === 0 && <span className="muted">{bulkNote}</span>}
           </div>
           <div className="row">
             {filtered && (
@@ -141,14 +164,29 @@ export function IncidentsPage() {
           </div>
         </div>
       </div>
-      <ErrorBanner error={bulk.error} strings={strings} />
+      <ErrorFlash error={bulk.error} strings={strings} />
       {list.error ? <ErrorBanner error={list.error} strings={strings} /> : null}
       {more && <Banner kind="info" title={t('inc.more', { n: alerts.length })} />}
 
       <AnimatePresence mode="wait" initial={false}>
         {alerts.length === 0 ? (
-          <motion.div key="empty" className="card svc-empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <p>{t(!filtered ? 'inc.empty.active' : 'inc.empty')}</p>
+          <motion.div key="empty" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            {filtered ? (
+              <div className="card svc-empty">
+                <p>{t('inc.empty')}</p>
+              </div>
+            ) : (
+              // Nothing at all: until the installation can deliver an incident, show what is left to do.
+              <OnboardingChecklist
+                epoch={epoch}
+                incidentsNote
+                fallback={
+                  <div className="card svc-empty">
+                    <p>{t('inc.empty.active')}</p>
+                  </div>
+                }
+              />
+            )}
           </motion.div>
         ) : (
           <motion.div key="list" className="card cn-table-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
@@ -169,7 +207,7 @@ export function IncidentsPage() {
                   <th>{t('inc.col.incident')}</th>
                   <th>{t('inc.col.owner')}</th>
                   <th>{t('inc.col.status')}</th>
-                  <th>{t('inc.col.pd')}</th>
+                  {pdOn && <th>{t('inc.col.pd')}</th>}
                   <th>{t('inc.col.seen')}</th>
                   <th className="num">{t('inc.col.count')}</th>
                 </tr>
@@ -181,6 +219,7 @@ export function IncidentsPage() {
                     a={a}
                     now={now}
                     actor={actor}
+                    pd={pdOn}
                     checked={checked.has(a.id)}
                     onCheck={(v) =>
                       setChecked((s) => {
@@ -199,6 +238,17 @@ export function IncidentsPage() {
         )}
       </AnimatePresence>
 
+      <BulkConfirm
+        action={confirming}
+        selected={alerts.filter((a) => checked.has(a.id))}
+        busy={bulk.busy}
+        onCancel={() => setConfirming(null)}
+        onConfirm={() => {
+          if (!confirming) return
+          setConfirming(null)
+          runBulk(confirming)
+        }}
+      />
       <IncidentDetail id={openID} actor={actor} onClose={() => setOpenID(null)} onChanged={reload} onOpen={setOpenID} />
     </div>
   )
@@ -235,18 +285,21 @@ function Tiles({ counts, filters, set }: { counts: Page['counts']; filters: Filt
         <button
           key={s}
           type="button"
-          className={`card ci-tile inc-tile-sev inc-sev-${s} ${filters.severity === s ? 'active' : ''}`}
+          className={`card ci-tile inc-tile-sev inc-sev-${SEVERITY_TONE[s]} ${filters.severity === s ? 'active' : ''}`}
           aria-pressed={filters.severity === s}
           onClick={() => set({ severity: filters.severity === s ? '' : s, status: 'active' })}
         >
           <span className="ci-tile-value">{counts.by_severity[s] ?? 0}</span>
-          <span className="muted">{t(`inc.sev.${s}`)}</span>
+          <span className="muted">{severityText(t, s)}</span>
         </button>
       ))}
-      <button type="button" className={`card ci-tile ci-tile-flag ${counts.pd_not_taken > 0 ? 'warn' : ''} ${filters.flag === 'pd' ? 'active' : ''}`} onClick={() => flag('pd')}>
-        <span className="ci-tile-value">{counts.pd_not_taken}</span>
-        <span className="muted">{t('inc.tile.pd')}</span>
-      </button>
+      {/* Without PagerDuty nothing is "not taken by PagerDuty": the tile is hidden. */}
+      {counts.pd_enabled !== false && (
+        <button type="button" className={`card ci-tile ci-tile-flag ${counts.pd_not_taken > 0 ? 'warn' : ''} ${filters.flag === 'pd' ? 'active' : ''}`} onClick={() => flag('pd')}>
+          <span className="ci-tile-value">{counts.pd_not_taken}</span>
+          <span className="muted">{t('inc.tile.pd')}</span>
+        </button>
+      )}
       <button type="button" className={`card ci-tile ci-tile-flag ${counts.fallback > 0 ? 'warn' : ''} ${filters.flag === 'fallback' ? 'active' : ''}`} onClick={() => flag('fallback')}>
         <span className="ci-tile-value">{counts.fallback}</span>
         <span className="muted">{t('inc.tile.fallback')}</span>
@@ -260,7 +313,23 @@ function Tiles({ counts, filters, set }: { counts: Page['counts']; filters: Filt
   )
 }
 
-function Row({ a, now, actor, checked, onCheck, onOpen }: { a: Incident; now: number; actor: boolean; checked: boolean; onCheck: (v: boolean) => void; onOpen: () => void }) {
+function Row({
+  a,
+  now,
+  actor,
+  pd,
+  checked,
+  onCheck,
+  onOpen,
+}: {
+  a: Incident
+  now: number
+  actor: boolean
+  pd: boolean
+  checked: boolean
+  onCheck: (v: boolean) => void
+  onOpen: () => void
+}) {
   const t = useT(strings)
   const owner = [a.route.services[0]?.name, a.route.team?.name].filter(Boolean).join(' · ')
   return (
@@ -286,12 +355,15 @@ function Row({ a, now, actor, checked, onCheck, onOpen }: { a: Incident; now: nu
       <td>{owner || <span className="muted">{t('inc.noroute')}</span>}</td>
       <td>
         <StatusPill status={a.status} />
-        {a.suppressed && <span className="pill pill-off inc-badge">{t('inc.badge.suppressed')}</span>}
+        {a.suppressed && <span className="pill pill-off inc-badge">{t(a.excluded ? 'inc.badge.excluded' : 'inc.badge.suppressed')}</span>}
+        {a.labels?.umbrella_test === 'true' && <span className="pill pill-off inc-badge">{t('inc.badge.test')}</span>}
         {a.fallback && a.status !== 'resolved' && <span className="pill pill-warn inc-badge">{t('inc.badge.fallback')}</span>}
       </td>
-      <td>
-        <PDPill state={a.pd.state} />
-      </td>
+      {pd && (
+        <td>
+          <PDPill state={a.pd.state} />
+        </td>
+      )}
       <td title={a.last_seen}>{ago(t, a.last_seen, now)}</td>
       <td className="num">{a.count}</td>
     </tr>

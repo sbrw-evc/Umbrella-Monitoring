@@ -12,6 +12,7 @@ import { UserDialog } from './UserDialog'
 import { UsersList } from './UsersList'
 import { UsersToolbar } from './UsersToolbar'
 import './users.css'
+import { notify } from '../../notify'
 
 export function UsersPage() {
   const t = useT(strings)
@@ -23,7 +24,6 @@ export function UsersPage() {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS)
   const [selected, setSelected] = useState<ManagedUser | null>(null)
   const [creating, setCreating] = useState(0)
-  const [notice, setNotice] = useState('')
   const request = useRef(0)
 
   const { run } = loader
@@ -35,7 +35,7 @@ export function UsersPage() {
         if (n !== request.current) return
         setUsers(list)
         setTotal(r.users.length)
-        setRefs({ roles: r.roles, teams: r.teams })
+        setRefs({ roles: r.roles, teams: r.teams, services: r.services ?? [] })
       }),
     [run],
   )
@@ -46,14 +46,13 @@ export function UsersPage() {
 
   const changed = (u: ManagedUser) => {
     setSelected(u)
-    setNotice('')
     void load(filters)
     if (u.id === me.id) void refresh()
   }
 
   const deleted = (u: ManagedUser) => {
     setSelected(null)
-    setNotice(t('usr.deleted', { name: u.display_name }))
+    notify({ kind: 'ok', title: t('usr.deleted', { name: u.display_name }) })
     void load(filters)
   }
 
@@ -61,7 +60,7 @@ export function UsersPage() {
 
   const created = (u: ManagedUser) => {
     closeCreate()
-    setNotice(t('usr.created', { name: u.display_name }))
+    notify({ kind: 'ok', title: t('usr.created', { name: u.display_name }) })
     void load(filters)
   }
 
@@ -79,15 +78,11 @@ export function UsersPage() {
     <div className="stack usr-page">
       <UsersToolbar refs={refs} filters={filters} onChange={setFilters} onCreate={() => setCreating((k) => Math.abs(k) + 1)} />
       <AnimatePresence initial={false}>
-        {(notice || loader.error) && (
+        {loader.error && (
           <motion.div key="notice" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
-            {loader.error ? (
-              <Banner kind="error" title={loader.error.message}>
-                {loader.error.detail}
-              </Banner>
-            ) : (
-              <Banner kind="ok" title={notice} />
-            )}
+            <Banner kind="error" title={loader.error.message}>
+              {loader.error.detail}
+            </Banner>
           </motion.div>
         )}
       </AnimatePresence>

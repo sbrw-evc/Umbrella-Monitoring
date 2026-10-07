@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/textx"
 )
 
 const (
@@ -95,8 +97,8 @@ func (h *Handler) Handle(ctx context.Context, r slog.Record) error {
 				e.Attrs = map[string]string{}
 			}
 			s := v.Resolve().String()
-			if len(s) > maxValue {
-				s = s[:maxValue] + "…"
+			if c := textx.Runes(s, maxValue); c != s {
+				s = c + "…"
 			}
 			e.Attrs[key] = s
 		}

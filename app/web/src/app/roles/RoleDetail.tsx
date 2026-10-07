@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Copy, Trash2 } from 'lucide-react'
+import { Copy, Trash2, UserPlus } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api'
 import { useLocale, useT } from '../../i18n'
@@ -11,6 +11,7 @@ import { PermissionMatrix } from './PermissionMatrix'
 import { ADMIN, changes, Permissions, type Catalog, type Draft, type Role } from './permissions'
 import { RoleMembers } from './RoleMembers'
 import { strings } from './strings'
+import { Flash } from '../../notify'
 
 type Tab = 'permissions' | 'members'
 
@@ -26,6 +27,7 @@ export function RoleDetail({
   onMoved,
   onDuplicate,
   onDelete,
+  onNewUsers,
 }: {
   role: Role
   roles: Role[]
@@ -38,10 +40,12 @@ export function RoleDetail({
   onMoved: (target: string, ids: string[]) => Promise<void>
   onDuplicate: () => void
   onDelete: () => void
+  onNewUsers: () => Promise<void>
 }) {
   const t = useT(strings)
   const { locale } = useLocale()
   const saver = useAction(strings)
+  const defaulter = useAction(strings)
   const [tab, setTab] = useState<Tab>('permissions')
   const admin = role.id === ADMIN
   const perms = Permissions.of(catalog, draft.permissions)
@@ -80,6 +84,37 @@ export function RoleDetail({
           </div>
         )}
       </div>
+      {role.new_users ? (
+        <Banner kind="info" title={t('roles.newUsers.on')}>
+          {t('roles.newUsers.hint')}
+        </Banner>
+      ) : (
+        editable &&
+        !admin && (
+          <div className="roles-newusers">
+            <Button
+              variant="ghost"
+              busy={defaulter.busy}
+              onClick={() =>
+                defaulter.run(async () => {
+                  await api<Role>('PUT', `/api/roles/${encodeURIComponent(role.id)}/new-users`)
+                  await onNewUsers()
+                  return t('roles.newUsers.done')
+                })
+              }
+            >
+              <UserPlus size={16} aria-hidden />
+              {t('roles.newUsers.set')}
+            </Button>
+            <span className="muted">{t('roles.newUsers.hint')}</span>
+          </div>
+        )
+      )}
+      {defaulter.error && (
+        <Flash kind="error" title={defaulter.error.message}>
+          {defaulter.error.detail}
+        </Flash>
+      )}
       <div className="grid-2 roles-fields">
         <Field label={t('roles.name')} hint={role.system ? t('roles.name.system') : undefined}>
           {(id) => (
@@ -167,11 +202,11 @@ export function RoleDetail({
                 </ul>
               </div>
             )}
-            {saver.notice && !diff.dirty && <Banner kind="ok" title={saver.notice} />}
+            {saver.notice && <Flash kind="ok" title={saver.notice} />}
             {saver.error && (
-              <Banner kind="error" title={saver.error.message}>
+              <Flash kind="error" title={saver.error.message}>
                 {saver.error.detail}
-              </Banner>
+              </Flash>
             )}
             {diff.dirty && (
               <div className="roles-savebar-actions">

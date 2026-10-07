@@ -41,10 +41,11 @@ type summary struct {
 
 type WebhookEvent struct {
 	Event struct {
-		ID           string   `json:"id"`
-		EventType    string   `json:"event_type"`
-		ResourceType string   `json:"resource_type"`
-		Agent        *summary `json:"agent"`
+		ID           string    `json:"id"`
+		EventType    string    `json:"event_type"`
+		ResourceType string    `json:"resource_type"`
+		OccurredAt   time.Time `json:"occurred_at"`
+		Agent        *summary  `json:"agent"`
 		Data         struct {
 			ID          string    `json:"id"`
 			Type        string    `json:"type"`
@@ -54,7 +55,9 @@ type WebhookEvent struct {
 			Content     string    `json:"content"`
 			Assignees   []summary `json:"assignees"`
 			Priority    *summary  `json:"priority"`
-			Incident    *struct {
+			// Service is the queue the incident is in.
+			Service  *summary `json:"service"`
+			Incident *struct {
 				ID      string `json:"id"`
 				HTMLURL string `json:"html_url"`
 			} `json:"incident"`
@@ -117,17 +120,34 @@ func (g *Gateway) HandleWebhook(ctx context.Context, body []byte, signature stri
 	if ev.Event.EventType == "pagey.ping" || g.results == nil {
 		return 0, nil
 	}
+	if ev.Event.EventType == "incident.annotated" && isOwnNote(ev.Event.Data.Content) {
+		// A note Umbrella wrote itself: the comment is already on the timeline.
+		return 0, nil
+	}
 	incID, incURL := ev.incident()
 	actor := ""
 	if ev.Event.Agent != nil {
 		actor = ev.Event.Agent.Summary
 	}
+	keys, err := g.keysFor(ctx, ev.Event.Data.IncidentKey, incID)
+	if err != nil {
+		return 0, err
+	}
 	applied := 0
-	for _, k := range g.keysFor(ctx, ev.Event.Data.IncidentKey, incID) {
-		err := g.results.PDInbound(ctx, alert.PDUpdate{DedupKey: k, EventType: ev.Event.EventType, Actor: actor,
-			IncidentID: incID, IncidentURL: incURL, Detail: ev.detail()})
-		if err == nil {
+	for _, k := range keys {
+		u := alert.PDUpdate{DedupKey: k, EventType: ev.Event.EventType, Actor: actor,
+			IncidentID: incID, IncidentURL: incURL, Detail: ev.detail(), OccurredAt: ev.Event.OccurredAt}
+		if sv := ev.Event.Data.Service; sv != nil && ev.Event.Data.Incident == nil {
+			// The service of the incident itself (an event about a note names the incident apart).
+			u.Queue, u.QueueName = sv.ID, sv.Summary
+		}
+		err := g.results.PDInbound(ctx, u)
+		switch {
+		case err == nil:
 			applied++
+		case !errors.Is(err, alert.ErrNotFound):
+			// PagerDuty delivers the webhook again when it is not taken.
+			return applied, err
 		}
 	}
 	return applied, nil
@@ -135,24 +155,24 @@ func (g *Gateway) HandleWebhook(ctx context.Context, body []byte, signature stri
 
 // keysFor finds the alerts of an incident: by its incident_key (the dedup_key Umbrella sent),
 // by the incident ID seen before, or by asking PagerDuty which alerts the incident groups.
-func (g *Gateway) keysFor(ctx context.Context, incidentKey, incidentID string) []string {
-	keys, _ := g.results.PDKeys(ctx, incidentKey, incidentID)
-	if len(keys) > 0 || incidentID == "" {
-		return keys
+func (g *Gateway) keysFor(ctx context.Context, incidentKey, incidentID string) ([]string, error) {
+	keys, err := g.results.PDKeys(ctx, incidentKey, incidentID)
+	if err != nil || len(keys) > 0 || incidentID == "" {
+		return keys, err
 	}
 	if strings.HasPrefix(incidentKey, "umb-") {
-		return []string{incidentKey}
+		return []string{incidentKey}, nil
 	}
-	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, DefaultLookupTimeout)
 	defer cancel()
 	found, err := g.IncidentAlertKeys(cctx, incidentID)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	for _, k := range found {
 		if strings.HasPrefix(k, "umb-") {
 			keys = append(keys, k)
 		}
 	}
-	return keys
+	return keys, nil
 }

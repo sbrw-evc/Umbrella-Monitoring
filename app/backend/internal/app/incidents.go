@@ -13,6 +13,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/flow"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/rules"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
@@ -24,16 +25,20 @@ func (a *App) alertSink(ctx context.Context, tx pgx.Tx, connectorID string, even
 	in := make([]alert.Incoming, 0, len(events))
 	for _, e := range events {
 		in = append(in, alert.Incoming{ConnectorID: connectorID, Key: e.Key, Title: e.Title, CI: e.CI, Signal: e.Signal, Method: e.Method,
-			Severity: e.Severity, Status: e.Status, Value: e.Value, Labels: e.Labels})
+			Severity: e.Severity, Status: e.Status, Value: e.Value, Description: e.Description, Fields: e.Fields, Labels: e.Labels})
 	}
 	return a.alerts.Apply(ctx, tx, in)
 }
 
 func (a *App) registerIncidents(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/incidents", a.authed(a.can("incidents:view", a.listIncidents)))
+	mux.HandleFunc("GET /api/incidents/stream", a.authed(a.can("incidents:view", a.incidentStream)))
 	mux.HandleFunc("GET /api/incidents/{id}", a.authed(a.can("incidents:view", a.getIncident)))
 	mux.HandleFunc("POST /api/incidents/{id}/{action}", a.authed(a.can("incidents:ack", a.actIncident)))
 	mux.HandleFunc("POST /api/incidents/bulk", a.authed(a.can("incidents:ack", a.bulkIncidents)))
+	mux.HandleFunc("POST /api/incidents/{id}/create-ci", a.authed(a.can("incidents:view", a.can("cis:edit", a.createIncidentCI))))
+	mux.HandleFunc("POST /api/incidents/{id}/bind-ci", a.authed(a.can("incidents:view", a.can("cis:edit", a.bindIncidentCI))))
+	a.registerAlertPolicy(mux)
 }
 
 func (a *App) alertsReady(w http.ResponseWriter) bool {
@@ -43,6 +48,11 @@ func (a *App) alertsReady(w http.ResponseWriter) bool {
 		return false
 	}
 	return true
+}
+
+// incidentScope is the business services whose incidents the user sees; nil means all of them.
+func (a *App) incidentScope(u model.User) []string {
+	return a.userScope(u).ids()
 }
 
 func incidentFilter(r *http.Request) alert.Filter {
@@ -67,10 +77,15 @@ func (a *App) listIncidents(w http.ResponseWriter, r *http.Request) {
 	if !a.alertsReady(w) {
 		return
 	}
-	page, err := a.alerts.List(r.Context(), incidentFilter(r))
+	f := incidentFilter(r)
+	f.ScopeServiceIDs = a.incidentScope(current(r).user)
+	page, err := a.alerts.List(r.Context(), f)
 	if err != nil {
 		writeError(w, err)
 		return
+	}
+	for i := range page.Alerts {
+		page.Alerts[i] = page.Alerts[i].Redacted()
 	}
 	httpx.JSON(w, http.StatusOK, page)
 }
@@ -81,6 +96,11 @@ type incidentView struct {
 	Grafana  string        `json:"grafana_url,omitempty"`
 	// Connectors names the connectors of the sources.
 	Connectors map[string]string `json:"connectors"`
+	// CI, Services and Maintenance: what the catalog has on the item, the services (with their
+	// links) and the maintenance window of the incident.
+	CI          *incidentCI          `json:"ci,omitempty"`
+	Services    []incidentService    `json:"services"`
+	Maintenance *incidentMaintenance `json:"maintenance,omitempty"`
 }
 
 func (a *App) getIncident(w http.ResponseWriter, r *http.Request) {
@@ -88,12 +108,17 @@ func (a *App) getIncident(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	al, entries, err := a.alerts.Get(r.Context(), r.PathValue("id"))
+	if err == nil && !al.InScope(a.incidentScope(current(r).user)) {
+		err = alert.ErrNotFound
+	}
 	if err != nil {
-		alertError(w, err)
+		writeError(w, err)
 		return
 	}
 	names := map[string]string{}
+	view := incidentView{Alert: al.Redacted(), Timeline: entries, Grafana: a.grafanaLink(al), Connectors: names}
 	a.deps.Store.Read(func(d *store.Data) {
+		incidentContext(d, al, &view)
 		for _, src := range al.Sources {
 			if c := d.Connectors[src.ConnectorID]; c != nil {
 				names[src.ConnectorID] = c.Name
@@ -102,7 +127,7 @@ func (a *App) getIncident(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	})
-	httpx.JSON(w, http.StatusOK, incidentView{Alert: al, Timeline: entries, Grafana: a.grafanaLink(al), Connectors: names})
+	httpx.JSON(w, http.StatusOK, view)
 }
 
 type actInput struct {
@@ -117,12 +142,13 @@ func (a *App) actIncident(w http.ResponseWriter, r *http.Request) {
 	if r.ContentLength != 0 && !httpx.Decode(w, r, &in) {
 		return
 	}
-	out, err := a.alerts.Act(r.Context(), r.PathValue("id"), r.PathValue("action"), current(r).user.Username, in.Text)
+	u := current(r).user
+	out, err := a.alerts.ActIn(r.Context(), r.PathValue("id"), r.PathValue("action"), u.Username, in.Text, a.incidentScope(u))
 	if err != nil {
-		alertError(w, err)
+		writeError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, out)
+	httpx.JSON(w, http.StatusOK, out.Redacted())
 }
 
 type bulkInput struct {
@@ -151,42 +177,15 @@ func (a *App) bulkIncidents(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "too_many", nil)
 		return
 	}
+	u := current(r).user
+	scope := a.incidentScope(u)
 	out := bulkResult{Done: []string{}, Failed: map[string]string{}}
 	for _, id := range in.IDs {
-		if _, err := a.alerts.Act(r.Context(), id, in.Action, current(r).user.Username, ""); err != nil {
+		if _, err := a.alerts.ActIn(r.Context(), id, in.Action, u.Username, "", scope); err != nil {
 			out.Failed[id] = alertCode(err)
 			continue
 		}
 		out.Done = append(out.Done, id)
 	}
 	httpx.JSON(w, http.StatusOK, out)
-}
-
-func alertCode(err error) string {
-	switch {
-	case errors.Is(err, alert.ErrNotFound):
-		return "not_found"
-	case errors.Is(err, alert.ErrNotOpen):
-		return "not_open"
-	case errors.Is(err, alert.ErrNotActive):
-		return "not_active"
-	case errors.Is(err, alert.ErrEmptyComment):
-		return "empty_comment"
-	case errors.Is(err, alert.ErrBadAction):
-		return "bad_action"
-	}
-	return "internal"
-}
-
-func alertError(w http.ResponseWriter, err error) {
-	switch code := alertCode(err); code {
-	case "not_found":
-		httpx.Error(w, http.StatusNotFound, code, nil)
-	case "not_open", "not_active":
-		httpx.Error(w, http.StatusConflict, code, nil)
-	case "empty_comment", "bad_action":
-		httpx.Error(w, http.StatusBadRequest, code, nil)
-	default:
-		writeError(w, err)
-	}
 }

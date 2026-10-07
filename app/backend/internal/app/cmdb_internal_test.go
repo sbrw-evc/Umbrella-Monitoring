@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/alert"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
@@ -18,8 +19,8 @@ func TestEventKeys(t *testing.T) {
 		"10.0.0.1:9100":             {"10.0.0.1:9100", "10.0.0.1"},
 		"SRV-APP-01":                {"srv-app-01"},
 	} {
-		if got := eventKeys(in); !slices.Equal(got, want) {
-			t.Errorf("eventKeys(%q) = %v, want %v", in, got, want)
+		if got := alert.EventKeys(in); !slices.Equal(got, want) {
+			t.Errorf("alert.EventKeys(%q) = %v, want %v", in, got, want)
 		}
 	}
 }
@@ -78,6 +79,17 @@ func TestCMDBEvents(t *testing.T) {
 	}
 	if h := svc["SVC-4"]; h.Level != HealthUnknown || h.Reasons[0].Code != "cis_unknown" {
 		t.Fatalf("SVC-4 = %+v", h)
+	}
+
+	// A viewer limited to some business services gets events only for the items of those.
+	scoped := s.Map(context.Background(), "SVC-2")
+	for _, c := range scoped.CIs {
+		if n := c.Events.Critical + c.Events.Warning + c.Events.Info; (n > 0) != (c.ID == "CI-2") {
+			t.Fatalf("scoped %s = %+v", c.ID, c.Events)
+		}
+	}
+	if !scoped.Events.Scoped || m.Events.Scoped {
+		t.Fatalf("scoped flag = %v / %v", scoped.Events.Scoped, m.Events.Scoped)
 	}
 
 	// Without the event tables the map still comes, and says why events are missing.

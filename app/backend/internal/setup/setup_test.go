@@ -24,6 +24,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/config"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory/directorytest"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets/secretstest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/setup"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
@@ -288,6 +289,11 @@ func TestWizardEndToEnd(t *testing.T) {
 		t.Fatalf("unknown timezone = %d %v", code, res)
 	}
 	complete["timezone"] = "Europe/Moscow"
+	complete["public_url"] = "ftp://umbrella.example.org"
+	if code := e.setup("complete", complete, &res); code != 400 || res["error"] != "public_url_invalid" {
+		t.Fatalf("bad public address = %d %v", code, res)
+	}
+	complete["public_url"] = " https://umbrella.example.org/ "
 	if code := e.setup("complete", complete, &res); code != 400 || res["error"] != "invalid_password_policy" {
 		t.Fatalf("inconsistent policy = %d %v", code, res)
 	}
@@ -313,6 +319,14 @@ func TestWizardEndToEnd(t *testing.T) {
 	e.result.Store.Read(func(d *store.Data) {
 		if u := d.Users["USR-1"]; u == nil || u.PasswordRef != "openbao://umbrella/users/USR-1#password_hash" || u.Name != "Main Admin" || u.Title != "CTO" {
 			t.Fatalf("admin record = %+v", u)
+		}
+		if got := d.Settings.Alerting.PagerDuty.MinSeverity; got != "error" {
+			t.Errorf("a new install sends errors and critical alerts to PagerDuty, not everything: %q", got)
+		}
+	})
+	e.result.Store.Read(func(d *store.Data) {
+		if got := d.Settings.Alerting.PublicURL; got != "https://umbrella.example.org" {
+			t.Fatalf("public address saved by the wizard = %q", got)
 		}
 	})
 	if v := bao.Get("umbrella/postgres"); v["password"] != pg.password {
@@ -465,7 +479,8 @@ func TestWizardEndToEnd(t *testing.T) {
 	}
 	e.newClient()
 	code, boris := e.login("boris", "boris-pass-1")
-	if code != 200 || boris["role"] != "user" {
+	// A new directory user gets the role for new users: the viewer preset made by the wizard.
+	if code != 200 || boris["role"] != model.RoleViewer || boris["role_name"] != "Наблюдатель" {
 		t.Fatalf("ldap user = %d %v", code, boris)
 	}
 	if code := e.call(http.MethodGet, "/api/system", nil, nil, nil); code != 403 {
@@ -493,9 +508,15 @@ func TestWizardEndToEnd(t *testing.T) {
 	reuse["reuse_existing"] = true
 	complete["postgres"] = reuse
 	complete["admin"] = map[string]any{"username": "admin", "password": "Second-pass-2026!"}
+	complete["public_url"] = ""
 	if code := again.setup("complete", complete, nil); code != 200 {
 		t.Fatalf("reinstall with reuse = %d", code)
 	}
+	again.result.Store.Read(func(d *store.Data) {
+		if got := d.Settings.Alerting.PublicURL; got != "https://umbrella.example.org" {
+			t.Fatalf("an empty public address must keep the stored one, got %q", got)
+		}
+	})
 	if code, _ := again.login("admin", "Second-pass-2026!"); code != 200 {
 		t.Fatal("admin password must be reset by the reinstall")
 	}

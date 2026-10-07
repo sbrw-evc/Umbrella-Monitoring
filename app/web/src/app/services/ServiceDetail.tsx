@@ -1,6 +1,7 @@
 import { ExternalLink } from 'lucide-react'
 import { useLocale, useT } from '../../i18n'
 import { Button, formatDate, Modal, Rows } from '../../ui'
+import { RoutePreview } from '../routing/RoutePreview'
 import { useSession } from '../session'
 import { Chips, CriticalityBadge, StatusBadge, TeamName } from './Badges'
 import { CIBindings, DependencyBindings, NetBoxLink } from './Bindings'
@@ -31,7 +32,7 @@ export function ServiceDetail({
   const footer =
     service && editable ? (
       <>
-        <Button variant="ghost" className="svc-danger" onClick={() => onDelete(service)}>
+        <Button variant="danger-soft" className="svc-danger" onClick={() => onDelete(service)}>
           {t('svc.delete')}
         </Button>
         <Button variant="primary" onClick={() => onEdit(service)}>
@@ -88,6 +89,7 @@ export function ServiceDetail({
               [t('svc.field.updated'), formatDate(service.updated_at, locale, timezone)],
             ]}
           />
+          <RoutePreview kind="services" id={service.id} version={`${service.updated_at}|${service.cis.length}`} />
           <CIBindings service={service} editable={editable} onChanged={onChanged} />
           <DependencyBindings service={service} editable={editable} onChanged={onChanged} />
           <NetBoxLink service={service} editable={editable} onChanged={onChanged} />

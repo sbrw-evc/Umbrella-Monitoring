@@ -2,13 +2,11 @@ package app
 
 import (
 	"errors"
-	"net/http"
 	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
@@ -27,33 +25,29 @@ var (
 	errOrgUnknownUser = errors.New("unknown user")
 )
 
-type orgStatus = struct {
-	err    error
-	status int
-	code   string
-}
+type orgStatus = errStatus
 
 type OrgMember struct {
-	ID            string `json:"id"`
-	Username      string `json:"username"`
-	Name          string `json:"name"`
-	FirstName     string `json:"first_name,omitempty"`
-	LastName      string `json:"last_name,omitempty"`
-	Title         string `json:"title,omitempty"`
-	Source        string `json:"source"`
-	Disabled      bool   `json:"disabled"`
-	RoleID        string `json:"role_id"`
-	TeamID        string `json:"team_id"`
-	HasAvatar     bool   `json:"has_avatar"`
-	AvatarVersion string `json:"avatar_version,omitempty"`
-	Gravatar      string `json:"gravatar,omitempty"`
+	ID            string   `json:"id"`
+	Username      string   `json:"username"`
+	Name          string   `json:"name"`
+	FirstName     string   `json:"first_name,omitempty"`
+	LastName      string   `json:"last_name,omitempty"`
+	Title         string   `json:"title,omitempty"`
+	Source        string   `json:"source"`
+	Disabled      bool     `json:"disabled"`
+	RoleID        string   `json:"role_id"`
+	TeamIDs       []string `json:"team_ids"`
+	HasAvatar     bool     `json:"has_avatar"`
+	AvatarVersion string   `json:"avatar_version,omitempty"`
+	Gravatar      string   `json:"gravatar,omitempty"`
 }
 
 func orgMemberOf(d *store.Data, u *model.User) OrgMember {
 	v := newUserView(*u, "")
 	return OrgMember{
 		ID: u.ID, Username: u.Username, Name: u.Profile.DisplayName(u.Username), FirstName: u.FirstName, LastName: u.LastName, Title: u.Title,
-		Source: u.Source, Disabled: u.Disabled, RoleID: d.RoleOf(u).ID, TeamID: u.TeamID,
+		Source: u.Source, Disabled: u.Disabled, RoleID: d.RoleOf(u).ID, TeamIDs: teamList(u.TeamIDs),
 		HasAvatar: v.HasAvatar, AvatarVersion: v.AvatarVersion, Gravatar: v.Gravatar,
 	}
 }
@@ -109,10 +103,33 @@ func usernames(us []*model.User) string {
 	return strings.Join(names, ", ")
 }
 
-func orgRespond[T any](w http.ResponseWriter, status int, v T, err error) {
-	if err != nil {
-		writeError(w, err)
-		return
+// teamList is a user's teams for JSON: never null.
+func teamList(ids []string) []string {
+	if ids == nil {
+		return []string{}
 	}
-	httpx.JSON(w, status, v)
+	return slices.Clone(ids)
+}
+
+const maxUserTeams = 50
+
+// userTeams checks and normalizes the teams of a user: every one must exist; duplicates and
+// blanks are dropped; the list is sorted.
+func userTeams(d *store.Data, ids []string) ([]string, error) {
+	var out []string
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || slices.Contains(out, id) {
+			continue
+		}
+		if d.Teams[id] == nil {
+			return nil, invalid("unknown_team", nil)
+		}
+		out = append(out, id)
+	}
+	if len(out) > maxUserTeams {
+		return nil, invalid("too_many_teams", nil)
+	}
+	slices.Sort(out)
+	return out, nil
 }

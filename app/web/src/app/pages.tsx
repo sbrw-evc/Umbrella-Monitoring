@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import { Activity, BellRing, Boxes, CalendarClock, Briefcase, Cable, Database, Gauge, KeyRound, LockKeyhole, Network, Radar, Server, ShieldCheck, Siren, Tv, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
+import { Activity, BellRing, Boxes, CalendarClock, Briefcase, Cable, Database, Gauge, KeyRound, LockKeyhole, Megaphone, Network, Radar, Server, ShieldCheck, Siren, Tv, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
 import { CIsPage } from './cis/CIsPage'
 import { IncidentsPage } from './incidents/IncidentsPage'
 import { CMDBMapPage } from './cmdb/CMDBMapPage'
@@ -8,6 +8,7 @@ import { CredentialsPage } from './connectors/CredentialsPage'
 import { MaintenancePage } from './maintenance/MaintenancePage'
 import { MonitoringPage } from './monitoring/MonitoringPage'
 import { NetBoxPage } from './netbox/NetBoxPage'
+import { ResponsePage } from './response/ResponsePage'
 import { RulesPage } from './rules/RulesPage'
 import { RolesPage } from './roles/RolesPage'
 import { ServicesPage } from './services/ServicesPage'
@@ -18,15 +19,14 @@ import { PolicySettings } from './settings/policy/PolicySettings'
 import { PostgresSettings } from './settings/postgres/PostgresSettings'
 import { SystemStatus } from './SystemStatus'
 import { TeamsPage } from './teams/TeamsPage'
-import { TvBoardsPage } from './tv/TvBoardsPage'
 import { UsersPage } from './users/UsersPage'
+import { WallboardsPage } from './wallboards/WallboardsPage'
 
-export type Group = 'overview' | 'automation' | 'org' | 'settings'
-
+// PageDef is what the web app adds to a page of the access catalog (GET /api/access/catalog):
+// its address, icon and component. The catalog has the group of the page and its place in the menu.
 export type PageDef = {
   id: string
   path: string
-  group: Group
   icon: LucideIcon
   Component: ComponentType
   subtitle?: string
@@ -41,36 +41,35 @@ export const SETTINGS_PATH = '/settings'
 const MOVED: Record<string, string> = { '/status': '/settings/status' }
 
 export const PAGES: PageDef[] = [
-  { id: 'incidents', path: '/incidents', group: 'overview', icon: BellRing, Component: IncidentsPage, subtitle: 'page.incidents.subtitle' },
-  { id: 'cmdb', path: '/cmdb', group: 'overview', icon: Waypoints, Component: CMDBMapPage, subtitle: 'page.cmdb.subtitle' },
-  { id: 'cis', path: '/cis', group: 'overview', icon: Boxes, Component: CIsPage, subtitle: 'page.cis.subtitle' },
-  { id: 'services', path: '/services', group: 'overview', icon: Briefcase, Component: ServicesPage, subtitle: 'page.services.subtitle' },
-  { id: 'maintenance', path: '/maintenance', group: 'overview', icon: CalendarClock, Component: MaintenancePage, subtitle: 'page.maintenance.subtitle' },
-  { id: 'tv', path: '/tv-boards', group: 'overview', icon: Tv, Component: TvBoardsPage, subtitle: 'page.tv.subtitle' },
-  { id: 'connectors', path: '/connectors', group: 'automation', icon: Cable, Component: ConnectorsPage, nested: true },
-  { id: 'rules', path: '/rules', group: 'automation', icon: Gauge, Component: RulesPage, subtitle: 'page.rules.subtitle' },
-  { id: 'netbox', path: '/netbox', group: 'automation', icon: Server, Component: NetBoxPage, subtitle: 'page.netbox.subtitle' },
-  { id: 'monitoring', path: '/monitoring', group: 'automation', icon: Radar, Component: MonitoringPage, subtitle: 'page.monitoring.subtitle' },
-  { id: 'credentials', path: '/credentials', group: 'automation', icon: LockKeyhole, Component: CredentialsPage, subtitle: 'page.credentials.subtitle' },
-  { id: 'users', path: '/users', group: 'org', icon: Users, Component: UsersPage, subtitle: 'page.users.subtitle' },
-  { id: 'teams', path: '/teams', group: 'org', icon: UsersRound, Component: TeamsPage, subtitle: 'page.teams.subtitle' },
-  { id: 'roles', path: '/roles', group: 'org', icon: UserCog, Component: RolesPage, subtitle: 'page.roles.subtitle' },
-  { id: 'settings.alerting', path: '/settings/alerting', group: 'settings', icon: Siren, Component: AlertingSettings, subtitle: 'page.settings.alerting.subtitle' },
-  { id: 'status', path: '/settings/status', group: 'settings', icon: Activity, Component: SystemStatus },
-  { id: 'settings.ldap', path: '/settings/ldap', group: 'settings', icon: Network, Component: DirectorySettings, subtitle: 'page.settings.subtitle' },
-  { id: 'settings.postgres', path: '/settings/postgresql', group: 'settings', icon: Database, Component: PostgresSettings, subtitle: 'page.settings.subtitle' },
-  { id: 'settings.openbao', path: '/settings/openbao', group: 'settings', icon: KeyRound, Component: OpenBaoSettings, subtitle: 'page.settings.subtitle' },
+  { id: 'incidents', path: '/incidents', icon: BellRing, Component: IncidentsPage, subtitle: 'page.incidents.subtitle' },
+  { id: 'cmdb', path: '/cmdb', icon: Waypoints, Component: CMDBMapPage, subtitle: 'page.cmdb.subtitle' },
+  { id: 'cis', path: '/cis', icon: Boxes, Component: CIsPage, subtitle: 'page.cis.subtitle' },
+  { id: 'services', path: '/services', icon: Briefcase, Component: ServicesPage, subtitle: 'page.services.subtitle' },
+  { id: 'maintenance', path: '/maintenance', icon: CalendarClock, Component: MaintenancePage, subtitle: 'page.maintenance.subtitle' },
+  { id: 'wallboards', path: '/wallboards', icon: Tv, Component: WallboardsPage, subtitle: 'page.wallboards.subtitle' },
+  { id: 'connectors', path: '/connectors', icon: Cable, Component: ConnectorsPage, nested: true },
+  { id: 'response', path: '/response', icon: Megaphone, Component: ResponsePage, subtitle: 'page.response.subtitle' },
+  { id: 'rules', path: '/rules', icon: Gauge, Component: RulesPage, subtitle: 'page.rules.subtitle' },
+  { id: 'netbox', path: '/netbox', icon: Server, Component: NetBoxPage, subtitle: 'page.netbox.subtitle' },
+  { id: 'monitoring', path: '/monitoring', icon: Radar, Component: MonitoringPage, subtitle: 'page.monitoring.subtitle' },
+  { id: 'credentials', path: '/credentials', icon: LockKeyhole, Component: CredentialsPage, subtitle: 'page.credentials.subtitle' },
+  { id: 'users', path: '/users', icon: Users, Component: UsersPage, subtitle: 'page.users.subtitle' },
+  { id: 'teams', path: '/teams', icon: UsersRound, Component: TeamsPage, subtitle: 'page.teams.subtitle' },
+  { id: 'roles', path: '/roles', icon: UserCog, Component: RolesPage, subtitle: 'page.roles.subtitle' },
+  { id: 'settings.alerting', path: '/settings/alerting', icon: Siren, Component: AlertingSettings, subtitle: 'page.settings.alerting.subtitle' },
+  { id: 'status', path: '/settings/status', icon: Activity, Component: SystemStatus },
+  { id: 'settings.ldap', path: '/settings/ldap', icon: Network, Component: DirectorySettings, subtitle: 'page.settings.subtitle' },
+  { id: 'settings.postgres', path: '/settings/postgresql', icon: Database, Component: PostgresSettings, subtitle: 'page.settings.subtitle' },
+  { id: 'settings.openbao', path: '/settings/openbao', icon: KeyRound, Component: OpenBaoSettings, subtitle: 'page.settings.subtitle' },
   {
     id: 'settings.policy',
     path: '/settings/password-policy',
-    group: 'settings',
+   
     icon: ShieldCheck,
     Component: PolicySettings,
     subtitle: 'page.settings.subtitle',
   },
 ]
-
-export const GROUPS: Group[] = ['overview', 'automation', 'org', 'settings']
 
 export type Can = (perm: string) => boolean
 
@@ -93,7 +92,7 @@ export function resolve(path: string, can: Can): Resolved {
   const page = visible.find((p) => owns(p, path))
   if (page) return { kind: 'page', page }
   if (path === SETTINGS_PATH || path.startsWith(SETTINGS_PATH + '/')) {
-    const first = visible.find((p) => p.group === 'settings')
+    const first = visible.find((p) => p.path.startsWith(SETTINGS_PATH + '/'))
     if (first) return { kind: 'redirect', to: first.path }
   }
   return { kind: 'redirect', to: visible[0]?.path ?? PROFILE_PATH }

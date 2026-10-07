@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"os"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,18 +17,23 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/notify"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/pagerduty"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/response"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/rules"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/tgbot"
 )
 
 const (
 	CookieName = "umbrella_session"
 	CSRFHeader = "X-CSRF-Token"
 
-	maxFailures = 10
-	failWindow  = 15 * time.Minute
-	lockout     = 5 * time.Minute
+	// maxFailures wrong passwords for one account from one address lock that pair;
+	// maxLooseFailures lock the address (any accounts) or the account (any addresses).
+	maxFailures      = 10
+	maxLooseFailures = 50
+	failWindow       = 15 * time.Minute
+	lockout          = 5 * time.Minute
 )
 
 type Options struct {
@@ -35,6 +42,12 @@ type Options struct {
 	BuiltAt       string
 	SecureCookies bool
 	Web           http.Handler
+	// TrustedProxies are the reverse proxies whose forwarding headers are believed for the
+	// client address (sign-in limits, audit, connector and TV wallboard networks); nil reads
+	// UMBRELLA_TRUSTED_PROXIES.
+	TrustedProxies TrustedProxies
+	// Ingest tunes the intake queue and workers; zero fields are the defaults.
+	Ingest ingest.Config
 }
 
 type Deps struct {
@@ -54,7 +67,8 @@ type App struct {
 	accounts   *UsersService
 	settings   *SettingsService
 	status     *StatusService
-	limiter    *Limiter
+	limiter    *loginGuard
+	entraRate  *Limiter // Microsoft sign-in starts per client address
 	policy     *PolicyService
 	access     *AccessService
 	directory  *DirectoryService
@@ -69,27 +83,38 @@ type App struct {
 	cmdb       *CMDBService
 	groups     *GroupsService
 	monitoring *MonitoringService
-	tv         *TVBoardsService
+	alertPoll  *alertPoller
+	// hostContext shows the machine of an incident: graphs, logs and events around it.
+	hostContext *HostContextService
 
 	creds         *CredentialsService
 	connectors    *ConnectorsService
 	queue         *ingest.Queue
 	alerts        *alert.Engine
+	feed          feed
 	pdGateway     *pagerduty.Gateway
 	pagerduty     *PagerDutyService
 	notifier      *notify.Service
 	notifications *NotificationsService
-	maintenance   *MaintenanceService
-	rules         *RulesService
-	ruleEngine    *rules.Engine
-	ready         atomic.Bool
-	rates         rates
+	response      *response.Service
+	// responseSettings keeps the settings of incident response; response runs it (PostgreSQL only).
+	responseSettings *ResponseService
+	maintenance      *MaintenanceService
+	wallboards       *WallboardService
+	proxies          TrustedProxies
+	rules            *RulesService
+	ruleEngine       *rules.Engine
+	// tgBot is the Telegram bot built into Umbrella (PostgreSQL only: it needs the link key).
+	tgBot *tgbot.Bot
+	ready atomic.Bool
+	rates rates
 }
 
 func New(opt Options, deps Deps) *App {
 	if opt.Web == nil {
 		opt.Web = http.NotFoundHandler()
 	}
+	opt.Ingest = opt.Ingest.WithDefaults()
 	passwords := credentials.NewPasswords(deps.Vault)
 	dir := ldapDirectory{}
 	users := NewUserService(deps.Store, passwords)
@@ -102,7 +127,7 @@ func New(opt Options, deps Deps) *App {
 	var queue *ingest.Queue
 	var db Database
 	if deps.Backend != nil {
-		queue = ingest.New(deps.Backend.Pool())
+		queue = ingest.NewWithConfig(deps.Backend.Pool(), opt.Ingest)
 		db = deps.Backend
 	}
 	var sessions SessionCounter
@@ -119,7 +144,8 @@ func New(opt Options, deps Deps) *App {
 		accounts:    NewUsersService(deps.Store, passwords, deps.Vault, deps.Sessions),
 		auth:        NewAuthService(deps.Store, passwords, deps.Vault, dir, users),
 		settings:    NewSettingsService(deps.Store),
-		limiter:     NewLimiter(maxFailures, failWindow, lockout),
+		limiter:     newLoginGuard(),
+		entraRate:   NewLimiter(entraStartsPerMinute, time.Minute, time.Minute),
 		policy:      NewPolicyService(deps.Store),
 		access:      NewAccessService(deps.Store),
 		directory:   NewDirectoryService(deps.Store, deps.Vault, dir, deps.Sessions),
@@ -133,7 +159,11 @@ func New(opt Options, deps Deps) *App {
 		cis:         NewCIService(deps.Store, nb),
 		groups:      NewGroupsService(deps.Store, vault, dir),
 		maintenance: NewMaintenanceService(deps.Store),
-		tv:          NewTVBoardsService(deps.Store),
+		wallboards:  NewWallboardService(deps.Store),
+		proxies:     opt.TrustedProxies,
+	}
+	if a.proxies == nil {
+		a.proxies = ParseTrustedProxies(os.Getenv("UMBRELLA_TRUSTED_PROXIES"))
 	}
 	var firing firingSource
 	if queue != nil {
@@ -150,8 +180,12 @@ func New(opt Options, deps Deps) *App {
 	}
 	a.pdGateway = pagerduty.New(deps.Store, resolver)
 	a.pagerduty = NewPagerDutyService(deps.Store, vault, a.pdGateway)
+	a.pdGateway.SetUsers(usersByEmail(deps.Store))
+	a.pdGateway.SetQueueHook(a.pagerduty.autoLinkQueues)
 	a.notifier = notify.New(deps.Store, resolver)
+	a.notifier.SetOnCall(a.pdGateway)
 	a.notifications = NewNotificationsService(deps.Store, vault, a.notifier)
+	a.responseSettings = NewResponseService(deps.Store, vault, a.notifier)
 	if queue != nil {
 		a.alerts = alert.New(deps.Backend.Pool(), deps.Store)
 		a.alerts.SetSender(a.pdGateway)
@@ -159,6 +193,13 @@ func New(opt Options, deps Deps) *App {
 		a.pdGateway.SetResults(a.alerts)
 		a.notifier.SetResults(a.alerts)
 		queue.SetSink(a.alertSink)
+		var sec response.Secrets
+		if vault != nil {
+			sec = vault
+		}
+		a.response = response.New(deps.Backend.Pool(), deps.Store, a.alerts, a.notifier, sec)
+		a.response.SetPagerDuty(pdResponse{alerts: a.alerts, gw: a.pdGateway})
+		a.tgBot = tgbot.New(botBackend{a}, a.botLock)
 	}
 	a.ruleEngine = rules.New(deps.Store, ruleCredentials(creds))
 	a.rules = NewRulesService(deps.Store, a.ruleEngine, creds)
@@ -167,6 +208,9 @@ func New(opt Options, deps Deps) *App {
 	}
 	a.cmdb = NewCMDBService(deps.Store, firing)
 	a.monitoring = NewMonitoringService(deps.Store, creds, a.cis)
+	a.alertPoll = newAlertPoller(a)
+	a.monitoring.polls = a.alertPoll.status
+	a.hostContext = NewHostContextService(deps.Store, creds)
 	a.status = NewStatusService(deps.Store, vault, db, dir, sessions, queue, a.ingestReady, opt)
 	return a
 }
@@ -188,9 +232,10 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerRules, a.registerGrafana, a.registerTVBoards} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerWallboards, a.registerRules, a.registerGrafana, a.registerOnboarding, a.registerResponse, a.registerTelegram, a.registerHostContext} {
 		register(mux)
 	}
+	a.registerRoutePreview(mux)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { writeError(w, ErrNotFound) })
 	mux.Handle("/", a.opt.Web)
 	return httpx.Secure(mux)
@@ -198,11 +243,15 @@ func (a *App) Handler() http.Handler {
 
 // Run synchronizes NetBox, directory groups and monitoring hosts on their schedules, prepares the ingest and alert
 // tables, processes received requests and runs the alert engine until ctx ends. Without PostgreSQL
-// (tests) the intake answers 503.
+// (tests) the intake answers 503. Run returns only after every worker it started has stopped, so
+// a runtime switch of the database copies data nobody writes any more.
 func (a *App) Run(ctx context.Context) {
-	go a.netbox.Run(ctx)
-	go a.groups.Run(ctx)
-	go a.monitoring.Run(ctx)
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() { a.netbox.Run(ctx) })
+	wg.Go(func() { a.groups.Run(ctx) })
+	wg.Go(func() { a.monitoring.Run(ctx) })
+	wg.Go(func() { a.alertPoll.Run(ctx) })
 	if a.queue == nil {
 		return
 	}
@@ -210,6 +259,9 @@ func (a *App) Run(ctx context.Context) {
 		err := ingest.EnsureSchema(ctx, a.deps.Backend.Pool())
 		if err == nil {
 			err = alert.EnsureSchema(ctx, a.deps.Backend.Pool())
+		}
+		if err == nil {
+			err = response.EnsureSchema(ctx, a.deps.Backend.Pool())
 		}
 		if err == nil {
 			break
@@ -225,13 +277,17 @@ func (a *App) Run(ctx context.Context) {
 		slog.Error("acknowledgement links are off: no signing key", "err", err)
 	} else {
 		a.notifier.SetLinks(notify.NewLinks(key))
+		wg.Go(func() { a.tgBot.Run(ctx) })
 	}
 	a.ready.Store(true)
-	go a.alerts.Run(ctx)
-	go a.pdGateway.Run(ctx)
-	go a.notifier.Run(ctx)
-	go a.ruleEngine.Run(ctx)
-	a.queue.Run(ctx, 2, a.process)
+	wg.Go(func() { a.alerts.Run(ctx) })
+	wg.Go(func() { alert.Watch(ctx, a.deps.Backend.Pool, a.feed.publish) })
+	wg.Go(func() { a.pdGateway.Run(ctx) })
+	wg.Go(func() { a.pdGateway.RunSync(ctx) })
+	wg.Go(func() { a.notifier.Run(ctx) })
+	wg.Go(func() { a.ruleEngine.Run(ctx) })
+	wg.Go(func() { a.response.Run(ctx) })
+	a.queue.Run(ctx, a.opt.Ingest.Workers, a.process)
 }
 
 func (a *App) ingestReady() bool { return a.queue != nil && a.ready.Load() }

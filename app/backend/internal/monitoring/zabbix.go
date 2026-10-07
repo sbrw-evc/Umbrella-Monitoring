@@ -16,7 +16,9 @@ import (
 )
 
 // zabbix talks to the JSON-RPC API. An API token or a session goes in the Authorization header
-// from Zabbix 6.4 on and in the auth field before (Zabbix 7.2 no longer accepts the field).
+// from Zabbix 6.4 on and in the auth field before (Zabbix 7.2 and 8.0 no longer accept the field).
+// The calls below are the same on 6.0 to 8.0; the version only picks the login field, the auth
+// place and the host group selector.
 type zabbix struct {
 	endpoint string
 	web      string
@@ -174,23 +176,34 @@ type zabbixHost struct {
 	} `json:"groups"`
 }
 
-func fetchZabbix(ctx context.Context, src model.MonitoringSource, auth *Auth) (Result, error) {
+// openZabbix learns the version and signs in; close ends the session it opened.
+func openZabbix(ctx context.Context, src model.MonitoringSource, auth *Auth) (z *zabbix, ver string, closeFn func(), err error) {
 	endpoint, web, err := zabbixEndpoint(src.URL)
 	if err != nil {
-		return Result{}, err
+		return nil, "", nil, err
 	}
-	z := &zabbix{endpoint: endpoint, web: web, http: clients[src.SkipVerify]}
-	ver, err := z.version(ctx)
-	if err != nil {
-		return Result{}, err
+	z = &zabbix{endpoint: endpoint, web: web, http: clients[src.SkipVerify]}
+	if ver, err = z.version(ctx); err != nil {
+		return nil, "", nil, err
 	}
 	session, err := z.login(ctx, auth)
 	if err != nil {
+		return nil, "", nil, err
+	}
+	closeFn = func() {}
+	if session {
+		closeFn = func() { _ = z.call(context.WithoutCancel(ctx), "user.logout", []any{}, nil) }
+	}
+	return z, ver, closeFn, nil
+}
+
+func fetchZabbix(ctx context.Context, src model.MonitoringSource, auth *Auth) (Result, error) {
+	z, ver, closeFn, err := openZabbix(ctx, src, auth)
+	if err != nil {
 		return Result{}, err
 	}
-	if session {
-		defer func() { _ = z.call(context.WithoutCancel(ctx), "user.logout", []any{}, nil) }()
-	}
+	defer closeFn()
+	web := z.web
 	params := map[string]any{
 		"output":           []string{"hostid", "host", "name", "status"},
 		"selectInterfaces": []string{"ip", "dns", "available"},

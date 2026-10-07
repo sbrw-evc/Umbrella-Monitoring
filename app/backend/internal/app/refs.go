@@ -23,13 +23,13 @@ type TeamRef struct {
 }
 
 type UserRef struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Name     string `json:"name"`
-	Source   string `json:"source"`
-	Disabled bool   `json:"disabled"`
-	RoleID   string `json:"role_id"`
-	TeamID   string `json:"team_id"`
+	ID       string   `json:"id"`
+	Username string   `json:"username"`
+	Name     string   `json:"name"`
+	Source   string   `json:"source"`
+	Disabled bool     `json:"disabled"`
+	RoleID   string   `json:"role_id"`
+	TeamIDs  []string `json:"team_ids"`
 }
 
 type Refs struct {
@@ -37,6 +37,8 @@ type Refs struct {
 	Teams    []TeamRef    `json:"teams"`
 	Users    []UserRef    `json:"users"`
 	Services []ServiceRef `json:"services"`
+	// NewUserRole is the role accounts created by a directory or NetBox get without a mapped role.
+	NewUserRole string `json:"new_user_role"`
 }
 
 type CatalogView struct {
@@ -49,8 +51,42 @@ func (a *App) registerRefs(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/access/catalog", a.authed(a.catalog))
 }
 
+// refsAudience lists, per section of GET /api/refs, the permissions whose
+// pages read that section. A caller gets a section when holding any of them;
+// other sections come back as empty arrays so pages degrade instead of failing.
+//
+//	users    — Users (count), Teams and Roles (member pickers), CI editor (owners)
+//	roles    — Users (role filter/editor), LDAP/Entra group mapping
+//	teams    — Users, Teams, Services (owner tree), Incidents (team filter),
+//	           Alerting (PagerDuty routing), LDAP/Entra group mapping
+//	services — Alerting (PagerDuty routing)
+var refsAudience = struct{ users, roles, teams, services []string }{
+	users:    []string{"users:view", "teams:view", "roles:view", "cis:edit"},
+	roles:    []string{"users:view", "roles:view", "settings.ldap:view"},
+	teams:    []string{"users:view", "teams:view", "services:view", "incidents:view", "settings.alerting:view", "settings.ldap:view"},
+	services: []string{"settings.alerting:view"},
+}
+
+func hasAny(perms access.Set, want []string) bool {
+	return slices.ContainsFunc(want, perms.Has)
+}
+
 func (a *App) refs(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, a.collectRefs())
+	perms := a.access.Permissions(current(r).user)
+	out := a.collectRefs()
+	if !hasAny(perms, refsAudience.users) {
+		out.Users = []UserRef{}
+	}
+	if !hasAny(perms, refsAudience.roles) {
+		out.Roles = []RoleRef{}
+	}
+	if !hasAny(perms, refsAudience.teams) {
+		out.Teams = []TeamRef{}
+	}
+	if !hasAny(perms, refsAudience.services) {
+		out.Services = []ServiceRef{}
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 func (a *App) catalog(w http.ResponseWriter, r *http.Request) {
@@ -62,6 +98,7 @@ func byName(a, b string) int { return strings.Compare(strings.ToLower(a), string
 func (a *App) collectRefs() Refs {
 	out := Refs{Roles: []RoleRef{}, Teams: []TeamRef{}, Users: []UserRef{}, Services: []ServiceRef{}}
 	a.deps.Store.Read(func(d *store.Data) {
+		out.NewUserRole = d.NewUserRole()
 		for _, r := range d.Roles {
 			out.Roles = append(out.Roles, RoleRef{ID: r.ID, Name: r.Name, System: r.System})
 		}
@@ -70,7 +107,7 @@ func (a *App) collectRefs() Refs {
 		}
 		for _, u := range d.Users {
 			out.Users = append(out.Users, UserRef{ID: u.ID, Username: u.Username, Name: u.Profile.DisplayName(u.Username), Source: u.Source,
-				Disabled: u.Disabled, RoleID: d.RoleOf(u).ID, TeamID: u.TeamID})
+				Disabled: u.Disabled, RoleID: d.RoleOf(u).ID, TeamIDs: teamList(u.TeamIDs)})
 		}
 		for _, s := range d.Services {
 			out.Services = append(out.Services, ServiceRef{ID: s.ID, Name: s.Name})

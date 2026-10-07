@@ -86,8 +86,8 @@ func memberIDs(ms []orgMemberReply) []string {
 }
 
 type orgMemberReply struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	RoleID   string `json:"role_id"`
-	TeamID   string `json:"team_id"`
+	ID       string   `json:"id"`
+	Username string   `json:"username"`
+	RoleID   string   `json:"role_id"`
+	TeamIDs  []string `json:"team_ids"`
 }

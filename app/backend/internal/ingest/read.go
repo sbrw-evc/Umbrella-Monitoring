@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/flow"
 )
 
 const requestColumns = `id, received_at, connector_id, version, status, attempts, remote_ip, method, headers, query,
@@ -82,6 +84,11 @@ type Reprocessed struct {
 // Reprocess puts the requests behind the given failures (all open ones when ids is empty) back
 // into the queue for the given version and closes the failures. Requests whose partition has
 // expired cannot be processed again and are counted as missing.
+//
+// A requeued request is processed again in full, but only what is still news reaches the
+// alerts (see handle): an event of a source that has sent something newer since is skipped,
+// and an event the same request already folded is not folded again. What remains is the
+// newest known state of its source and is applied as its current state.
 func (q *Queue) Reprocess(ctx context.Context, connectorID string, ids []int64, version int) (Reprocessed, error) {
 	var out Reprocessed
 	err := pgx.BeginFunc(ctx, q.pool, func(tx pgx.Tx) error {
@@ -129,28 +136,30 @@ func (q *Queue) Reprocess(ctx context.Context, connectorID string, ids []int64, 
 }
 
 type EventRow struct {
-	ID         int64             `json:"id"`
-	Version    int               `json:"version"`
-	Key        string            `json:"key"`
-	Title      string            `json:"title"`
-	CI         string            `json:"ci"`
-	Signal     string            `json:"signal"`
-	Method     string            `json:"method"`
-	Severity   string            `json:"severity"`
-	Status     string            `json:"status"`
-	ExternalID string            `json:"external_id"`
-	Value      string            `json:"value"`
-	Labels     map[string]string `json:"labels"`
-	RequestID  int64             `json:"request_id"`
-	Item       int               `json:"item"`
-	FirstSeen  time.Time         `json:"first_seen"`
-	LastSeen   time.Time         `json:"last_seen"`
-	Seen       int               `json:"seen"`
+	ID          int64             `json:"id"`
+	Version     int               `json:"version"`
+	Key         string            `json:"key"`
+	Title       string            `json:"title"`
+	CI          string            `json:"ci"`
+	Signal      string            `json:"signal"`
+	Method      string            `json:"method"`
+	Severity    string            `json:"severity"`
+	Status      string            `json:"status"`
+	ExternalID  string            `json:"external_id"`
+	Value       string            `json:"value"`
+	Description string            `json:"description,omitempty"`
+	Fields      []flow.Field      `json:"fields,omitempty"`
+	Labels      map[string]string `json:"labels"`
+	RequestID   int64             `json:"request_id"`
+	Item        int               `json:"item"`
+	FirstSeen   time.Time         `json:"first_seen"`
+	LastSeen    time.Time         `json:"last_seen"`
+	Seen        int               `json:"seen"`
 }
 
 func (q *Queue) Events(ctx context.Context, connectorID string, limit int) ([]EventRow, error) {
 	rows, err := q.pool.Query(ctx, `SELECT id, version, key, title, ci, signal, method, severity, status, external_id, value, labels,
-			request_id, item, first_seen, last_seen, seen
+			request_id, item, first_seen, last_seen, seen, description, fields
 		FROM connector_events WHERE connector_id = $1 ORDER BY last_seen DESC, id DESC LIMIT $2`, connectorID, limit)
 	if err != nil {
 		return nil, err
@@ -158,7 +167,7 @@ func (q *Queue) Events(ctx context.Context, connectorID string, limit int) ([]Ev
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (EventRow, error) {
 		var e EventRow
 		err := row.Scan(&e.ID, &e.Version, &e.Key, &e.Title, &e.CI, &e.Signal, &e.Method, &e.Severity, &e.Status, &e.ExternalID,
-			&e.Value, &e.Labels, &e.RequestID, &e.Item, &e.FirstSeen, &e.LastSeen, &e.Seen)
+			&e.Value, &e.Labels, &e.RequestID, &e.Item, &e.FirstSeen, &e.LastSeen, &e.Seen, &e.Description, &e.Fields)
 		return e, err
 	})
 }

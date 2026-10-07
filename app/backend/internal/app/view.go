@@ -3,11 +3,13 @@ package app
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/store"
 )
 
 type userView struct {
@@ -18,7 +20,14 @@ type userView struct {
 	AvatarVersion string   `json:"avatar_version,omitempty"`
 	RoleName      string   `json:"role_name,omitempty"`
 	Permissions   []string `json:"permissions,omitempty"`
+	// Admins are whom a user without any permission asks for access.
+	Admins []AdminContact `json:"admins,omitempty"`
 	passwordView
+}
+
+type AdminContact struct {
+	Name  string `json:"name"`
+	Email string `json:"email,omitempty"`
 }
 
 type passwordView struct {
@@ -31,6 +40,9 @@ func (a *App) view(u model.User, csrf string) userView {
 	v := newUserView(u, csrf)
 	g := a.access.Grant(u)
 	v.Role, v.RoleName, v.Permissions = g.RoleID, g.RoleName, g.Perms.List()
+	if len(v.Permissions) == 0 {
+		v.Admins = a.adminContacts()
+	}
 	if age := a.policy.Age(u); !age.ExpiresAt.IsZero() {
 		v.passwordView = passwordView{Expired: age.Expired, Warning: age.Warning, ExpiresAt: &age.ExpiresAt}
 	}
@@ -47,4 +59,26 @@ func newUserView(u model.User, csrf string) userView {
 		v.AvatarVersion = strconv.FormatInt(u.AvatarAt.UnixNano(), 10)
 	}
 	return v
+}
+
+// adminContacts lists the active administrators, those with an e-mail address first.
+func (a *App) adminContacts() []AdminContact {
+	out := []AdminContact{}
+	a.deps.Store.Read(func(d *store.Data) {
+		for _, u := range d.Users {
+			if !u.Disabled && d.IsAdmin(u) {
+				out = append(out, AdminContact{Name: u.Profile.DisplayName(u.Username), Email: u.Email})
+			}
+		}
+	})
+	slices.SortFunc(out, func(x, y AdminContact) int {
+		if (x.Email == "") != (y.Email == "") {
+			if x.Email == "" {
+				return 1
+			}
+			return -1
+		}
+		return byName(x.Name, y.Name)
+	})
+	return out
 }

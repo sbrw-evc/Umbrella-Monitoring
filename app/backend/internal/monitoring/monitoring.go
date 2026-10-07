@@ -1,5 +1,6 @@
 // Package monitoring reads the host lists of monitoring systems: Zabbix through its JSON-RPC
-// API and Prometheus-compatible servers through an instant query over their targets.
+// API, Prometheus-compatible servers through an instant query over their targets, Grafana
+// through the instances of its alert rules and Graylog through the sources of its messages.
 package monitoring
 
 import (
@@ -54,6 +55,10 @@ func Fetch(ctx context.Context, src model.MonitoringSource, auth *Auth) (Result,
 		out, err = fetchZabbix(ctx, src, auth)
 	case model.MonitoringPrometheus:
 		out, err = fetchPrometheus(ctx, src, auth)
+	case model.MonitoringGrafana:
+		out, err = fetchGrafana(ctx, src, auth)
+	case model.MonitoringGraylog:
+		out, err = fetchGraylog(ctx, src, auth)
 	default:
 		return Result{}, fmt.Errorf("unknown monitoring system %q", src.Kind)
 	}

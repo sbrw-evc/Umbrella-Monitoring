@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,6 +23,7 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/config"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/logbuf"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/secrets"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/setup"
@@ -42,17 +44,96 @@ func env(key, def string) string {
 	return def
 }
 
+// ingestConfig reads the intake settings; an unset or invalid value keeps the default.
+func ingestConfig() ingest.Config {
+	c := ingest.DefaultConfig()
+	num := func(key string, v *int) {
+		if s := env(key, ""); s != "" {
+			if n, err := strconv.Atoi(s); err == nil && n > 0 {
+				*v = n
+			} else {
+				slog.Warn("ignored: not a positive number", "env", key, "value", s)
+			}
+		}
+	}
+	dur := func(key string, v *time.Duration) {
+		if s := env(key, ""); s != "" {
+			if d, err := time.ParseDuration(s); err == nil && d > 0 {
+				*v = d
+			} else {
+				slog.Warn("ignored: not a positive duration", "env", key, "value", s)
+			}
+		}
+	}
+	num("UMBRELLA_INGEST_WORKERS", &c.Workers)
+	num("UMBRELLA_INGEST_BATCH_SIZE", &c.BatchSize)
+	num("UMBRELLA_INGEST_MAX_ATTEMPTS", &c.MaxAttempts)
+	dur("UMBRELLA_INGEST_PROCESS_TIMEOUT", &c.ProcessTimeout)
+	dur("UMBRELLA_INGEST_TEST_WAIT", &c.TestEventWait)
+	dur("UMBRELLA_INGEST_KEEP_REQUESTS", &c.Retention.Requests)
+	dur("UMBRELLA_INGEST_KEEP_FAILURES", &c.Retention.Failures)
+	dur("UMBRELLA_INGEST_KEEP_STATS", &c.Retention.Stats)
+	dur("UMBRELLA_INGEST_KEEP_IDEMPOTENCY", &c.Retention.Dedup)
+	return c
+}
+
 func fail(msg string, err error) {
 	slog.Error(msg, "err", err)
 	os.Exit(1)
 }
 
-type switchHandler struct{ h atomic.Value }
+// switchHandler serves the current handler and counts the requests each handler still serves,
+// so a switch can wait for requests of the old application before it copies its data.
+type switchHandler struct{ cur atomic.Pointer[served] }
 
-func (s *switchHandler) Set(h http.Handler) { s.h.Store(&h) }
+type served struct {
+	h        http.Handler
+	inflight atomic.Int64
+}
+
+func (s *switchHandler) Set(h http.Handler) { s.swap(h) }
+
+func (s *switchHandler) swap(h http.Handler) *served {
+	return s.cur.Swap(&served{h: h})
+}
 
 func (s *switchHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	(*s.h.Load().(*http.Handler)).ServeHTTP(w, r)
+	for {
+		cur := s.cur.Load()
+		cur.inflight.Add(1)
+		// A request that raced with a swap goes to the new handler: the one waiting for the
+		// old handler to drain must never miss it.
+		if s.cur.Load() != cur {
+			cur.inflight.Add(-1)
+			continue
+		}
+		defer cur.inflight.Add(-1)
+		cur.h.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), servedKey{}, cur)))
+		return
+	}
+}
+
+type servedKey struct{}
+
+// Drain puts h in place and waits up to timeout for requests of the previous handler to end,
+// except the request of ctx itself (the one asking for the switch).
+func (s *switchHandler) Drain(ctx context.Context, h http.Handler, timeout time.Duration) bool {
+	old := s.swap(h)
+	if old == nil {
+		return true
+	}
+	var self int64
+	if ctx.Value(servedKey{}) == old {
+		self = 1
+	}
+	deadline := time.Now().Add(timeout)
+	for old.inflight.Load() > self {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return true
 }
 
 type runtime struct {
@@ -92,7 +173,9 @@ func (rt *runtime) stop() {
 func (rt *runtime) Switch(ctx context.Context, transfer func(ctx context.Context) (config.File, error)) error {
 	rt.switchMu.Lock()
 	defer rt.switchMu.Unlock()
-	rt.handler.Set(maintenance{})
+	if !rt.handler.Drain(ctx, maintenance{}, 15*time.Second) {
+		slog.Warn("requests still running when switching connections")
+	}
 	oldCfg, oldVault, oldBackend, oldSt, ok := rt.halt()
 	if !ok {
 		return errors.New("umbrella is not running")
@@ -157,7 +240,8 @@ func main() {
 		webDir = ""
 	}
 	webHandler := httpx.Web(webDir)
-	opts := app.Options{Version: version, Commit: commit, BuiltAt: builtAt, SecureCookies: env("UMBRELLA_SECURE_COOKIES", "false") == "true", Web: webHandler}
+	opts := app.Options{Version: version, Commit: commit, BuiltAt: builtAt, SecureCookies: env("UMBRELLA_SECURE_COOKIES", "false") == "true", Web: webHandler,
+		Ingest: ingestConfig()}
 	sessions := auth.NewSessions()
 	if err := sessions.Load(*dataDir); err != nil {
 		slog.Warn("sessions not restored", "err", err)

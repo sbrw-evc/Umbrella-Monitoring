@@ -23,14 +23,17 @@ type adminInput struct {
 }
 
 type completeInput struct {
-	Locale   string                `json:"locale"`
-	Theme    string                `json:"theme"`
-	Timezone string                `json:"timezone"`
-	Policy   model.PasswordPolicy  `json:"password_policy"`
-	OpenBao  config.OpenBao        `json:"openbao"`
-	Postgres pgInput               `json:"postgres"`
-	LDAP     directory.TestRequest `json:"ldap"`
-	Admin    adminInput            `json:"admin"`
+	Locale   string `json:"locale"`
+	Theme    string `json:"theme"`
+	Timezone string `json:"timezone"`
+	// PublicURL is the address people reach Umbrella at (links in notifications, PagerDuty
+	// webhooks); the wizard fills it from the browser address. Empty keeps what is stored.
+	PublicURL string                `json:"public_url"`
+	Policy    model.PasswordPolicy  `json:"password_policy"`
+	OpenBao   config.OpenBao        `json:"openbao"`
+	Postgres  pgInput               `json:"postgres"`
+	LDAP      directory.TestRequest `json:"ldap"`
+	Admin     adminInput            `json:"admin"`
 }
 
 type stepError struct {
@@ -61,6 +64,10 @@ func (m *Module) apply(ctx context.Context, in completeInput) (Result, error) {
 	}
 	if !model.ValidTimezone(in.Timezone) {
 		return res, fail(http.StatusBadRequest, "invalid_timezone", nil)
+	}
+	publicURL, err := model.NormalizePublicURL(in.PublicURL)
+	if err != nil {
+		return res, fail(http.StatusBadRequest, "public_url_invalid", err)
 	}
 	policy, err := in.Policy.Normalize()
 	if err != nil {
@@ -141,10 +148,19 @@ func (m *Module) apply(ctx context.Context, in completeInput) (Result, error) {
 		d.Settings.DefaultLocale = in.Locale
 		d.Settings.DefaultTZ = in.Timezone
 		d.Settings.Password = policy
+		if publicURL != "" {
+			d.Settings.Alerting.PublicURL = publicURL
+		}
 		d.Settings.LDAP = ldapCfg
 		d.Settings.SetupAt = now
 		d.Settings.SetupBy = admin.Username
+		// A new install wakes the on-call person in PagerDuty for errors and critical alerts only,
+		// the same threshold backup notification has; settings saved before stay as they are.
+		if pd := &d.Settings.Alerting.PagerDuty; pd.UpdatedAt == nil && pd.MinSeverity == "" {
+			pd.MinSeverity = "error"
+		}
 		d.EnsureSystemRoles(now)
+		d.EnsurePresetRoles(in.Locale, now)
 		u := d.UserByName(admin.Username)
 		if u == nil {
 			u = &model.User{ID: d.NextID("USR"), CreatedAt: now}

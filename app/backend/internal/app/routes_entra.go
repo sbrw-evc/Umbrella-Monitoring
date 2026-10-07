@@ -10,56 +10,35 @@ import (
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/auth"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/entra"
-	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 )
 
 const entraCookie = "umbrella_entra"
 
 func (a *App) registerEntra(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/settings/entra", a.authed(a.can("settings.ldap:view", a.entraSettings)))
-	mux.HandleFunc("PUT /api/settings/entra", a.authed(a.can("settings.ldap:edit", a.saveEntra)))
-	mux.HandleFunc("POST /api/settings/entra/test", a.authed(a.can("settings.ldap:test", a.testEntra)))
+	a.route(mux, "GET /api/settings/entra", "settings.ldap:view", show(a.entra.View))
+	a.route(mux, "PUT /api/settings/entra", "settings.ldap:edit", submit(http.StatusOK, func(r *http.Request, in entra.TestRequest) (EntraView, error) {
+		ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
+		defer cancel()
+		return a.entra.Save(ctx, actorName(r), in)
+	}))
+	a.route(mux, "POST /api/settings/entra/test", "settings.ldap:test", submit(http.StatusOK, func(r *http.Request, in entra.TestRequest) (entra.TestReport, error) {
+		ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
+		defer cancel()
+		return a.entra.Test(ctx, in)
+	}))
 	mux.HandleFunc("GET /api/auth/entra/start", a.entraStart)
 	mux.HandleFunc("GET "+entra.CallbackPath, a.entraCallback)
-}
-
-func (a *App) entraSettings(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, a.entra.View())
-}
-
-func (a *App) testEntra(w http.ResponseWriter, r *http.Request) {
-	var in entra.TestRequest
-	if !httpx.Decode(w, r, &in) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
-	defer cancel()
-	rep, err := a.entra.Test(ctx, in)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, rep)
-}
-
-func (a *App) saveEntra(w http.ResponseWriter, r *http.Request) {
-	var in entra.TestRequest
-	if !httpx.Decode(w, r, &in) {
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
-	defer cancel()
-	out, err := a.entra.Save(ctx, current(r).user.Username, in)
-	if err != nil {
-		writeError(w, err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, out)
 }
 
 // entraStart sends the browser to the Microsoft sign-in page. The state also goes into a
 // cookie, so only the browser that started the sign-in can finish it.
 func (a *App) entraStart(w http.ResponseWriter, r *http.Request) {
+	ip := a.clientIP(r)
+	if a.entraRate.Locked(ip) {
+		a.signInFailed(w, r, "too_many_attempts")
+		return
+	}
+	a.entraRate.Fail(ip)
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 	target, state, err := a.entra.Start(ctx)
@@ -100,11 +79,11 @@ func (a *App) entraCallback(w http.ResponseWriter, r *http.Request) {
 		a.signInFailed(w, r, "entra_state")
 		return
 	case errors.Is(err, errEntraNotAllowed):
-		a.auth.Failed("entra", clientIP(r))
+		a.auth.Failed("entra", a.clientIP(r))
 		a.signInFailed(w, r, "entra_not_allowed")
 		return
 	case errors.Is(err, ErrInvalidCredentials):
-		a.auth.Failed("entra", clientIP(r))
+		a.auth.Failed("entra", a.clientIP(r))
 		a.signInFailed(w, r, "entra_account")
 		return
 	case err != nil:
@@ -114,7 +93,7 @@ func (a *App) entraCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	a.setEntraCookie(w, "", -1)
 	ss := a.deps.Sessions.Create(u.ID)
-	a.auth.Signed(u.ID, clientIP(r))
+	a.auth.Signed(u.ID, a.clientIP(r))
 	a.setCookie(w, ss.ID, int(auth.MaxLifetime/time.Second))
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

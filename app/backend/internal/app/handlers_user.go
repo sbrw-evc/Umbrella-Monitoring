@@ -22,6 +22,7 @@ func (a *App) respondUser(w http.ResponseWriter, r *http.Request, u model.User, 
 type preferencesInput struct {
 	Timezone *string `json:"timezone"`
 	Telegram *string `json:"telegram"`
+	Locale   *string `json:"locale"`
 }
 
 func (a *App) preferences(w http.ResponseWriter, r *http.Request) {
@@ -33,6 +34,9 @@ func (a *App) preferences(w http.ResponseWriter, r *http.Request) {
 	u, err := a.users.Get(id)
 	if err == nil && in.Telegram != nil {
 		u, err = a.users.SetTelegram(id, *in.Telegram)
+	}
+	if err == nil && in.Locale != nil {
+		u, err = a.users.SetLocale(id, *in.Locale)
 	}
 	if err == nil && in.Timezone != nil {
 		u, err = a.users.SetTimezone(id, *in.Timezone)
@@ -60,20 +64,20 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s := current(r)
-	keys := a.attemptKeys(s.user.Username, r)
-	if a.limiter.Locked(keys...) {
+	ip := a.clientIP(r)
+	if a.limiter.Locked(s.user.Username, ip) {
 		writeError(w, ErrTooManyAttempts)
 		return
 	}
 	err := a.users.ChangePassword(r.Context(), s.user.ID, in.Current, in.New)
 	if errors.Is(err, ErrWrongPassword) {
-		a.limiter.Fail(keys...)
+		a.limiter.Fail(s.user.Username, ip)
 	}
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	a.limiter.Reset(keys[0])
+	a.limiter.Reset(s.user.Username, ip)
 	a.deps.Sessions.DeleteUser(s.user.ID, s.ss.ID)
 	w.WriteHeader(http.StatusNoContent)
 }

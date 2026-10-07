@@ -6,12 +6,10 @@ import { installScrollbars } from './scrollbars'
 import { applyTheme, savedTheme, ThemeProvider } from './theme'
 import { Button } from './ui'
 import './styles.css'
+import './controls.css'
 
 const SetupApp = lazy(() => import('./setup/SetupApp'))
 const MainApp = lazy(() => import('./app/MainApp'))
-// TV boards open without signing in, so they skip the sign-in shell entirely.
-const TvApp = lazy(() => import('./tv/TvApp'))
-const tvScreen = document.location.pathname.startsWith('/tv/')
 
 function systemTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
@@ -67,17 +65,11 @@ function BootScreen({ failed, retry }: { failed: boolean; retry: () => void }) {
   )
 }
 
-applyTheme(tvScreen ? 'dark' : (savedTheme() ?? systemTheme()))
-if (!tvScreen) installScrollbars()
+applyTheme(savedTheme() ?? systemTheme())
+installScrollbars()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {tvScreen ? (
-      <Suspense fallback={null}>
-        <TvApp />
-      </Suspense>
-    ) : (
-      <Boot />
-    )}
+    <Boot />
   </StrictMode>,
 )

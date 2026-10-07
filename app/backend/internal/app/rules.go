@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
@@ -39,6 +40,11 @@ type SourceView struct {
 	model.MetricSource
 	CredentialName string `json:"credential_name,omitempty"`
 	Rules          int    `json:"rules"`
+	// System: a Prometheus monitoring system, edited on the monitoring systems page.
+	System bool `json:"system"`
+	// SystemID: a metric source with the address of a Prometheus monitoring system; it can be
+	// merged into that system.
+	SystemID string `json:"system_id,omitempty"`
 }
 
 type RulesView struct {
@@ -46,16 +52,22 @@ type RulesView struct {
 	Sources   []SourceView `json:"sources"`
 	Templates []model.Rule `json:"templates"`
 	Ops       []string     `json:"ops"`
+	// Defaults, Limits, Severities and Methods describe the form of a rule.
+	Defaults   rules.Defaults   `json:"defaults"`
+	Limits     rules.Limits     `json:"limits"`
+	Severities []model.Severity `json:"severities"`
+	Methods    []string         `json:"methods"`
 }
 
 func (s *RulesService) View() RulesView {
-	out := RulesView{Rules: []RuleView{}, Sources: []SourceView{}, Templates: rules.Templates(), Ops: rules.Ops}
+	out := RulesView{Rules: []RuleView{}, Sources: []SourceView{}, Templates: rules.Templates(), Ops: rules.Ops,
+		Defaults: rules.RuleDefaults, Limits: rules.RuleLimits, Severities: model.Severities, Methods: model.RuleMethods}
 	s.st.Read(func(d *store.Data) {
 		count := map[string]int{}
 		for _, r := range d.Rules {
 			v := RuleView{Rule: *r, LastEvalAt: s.engine.LastEval(r.ID)}
 			v.State = nil
-			if src := d.MetricSources[r.SourceID]; src != nil {
+			if src := d.MetricSource(r.SourceID); src != nil {
 				v.SourceName = src.Name
 			}
 			count[r.SourceID]++
@@ -64,6 +76,19 @@ func (s *RulesService) View() RulesView {
 		for _, src := range d.MetricSources {
 			v := SourceView{MetricSource: *src, Rules: count[src.ID]}
 			if c := d.Credentials[src.CredentialID]; c != nil {
+				v.CredentialName = c.Name
+			}
+			if sys := prometheusSystemAt(d, src.URL); sys != nil {
+				v.SystemID = sys.ID
+			}
+			out.Sources = append(out.Sources, v)
+		}
+		for _, m := range d.MonitoringSources {
+			if m.Kind != model.MonitoringPrometheus {
+				continue
+			}
+			v := SourceView{MetricSource: *d.MetricSource(m.ID), Rules: count[m.ID], System: true}
+			if c := d.Credentials[m.CredentialID]; c != nil {
 				v.CredentialName = c.Name
 			}
 			out.Sources = append(out.Sources, v)
@@ -96,7 +121,7 @@ func (s *RulesService) Create(actor string, in model.Rule) (model.Rule, error) {
 	now := time.Now().UTC()
 	s.st.Write(func(d *store.Data) {
 		switch {
-		case d.MetricSources[r.SourceID] == nil:
+		case d.MetricSource(r.SourceID) == nil:
 			err = invalid("source_not_found", nil)
 		case len(d.Rules) >= maxRules:
 			err = invalid("too_many_rules", nil)
@@ -125,7 +150,7 @@ func (s *RulesService) Update(ctx context.Context, actor, id string, in model.Ru
 		if p == nil {
 			return
 		}
-		if d.MetricSources[r.SourceID] == nil {
+		if d.MetricSource(r.SourceID) == nil {
 			err = invalid("source_not_found", nil)
 			return
 		}
@@ -252,6 +277,68 @@ func (s *RulesService) DeleteSource(actor, id string) error {
 	return err
 }
 
+// prometheusSystemAt is the Prometheus monitoring system at the address, if any.
+func prometheusSystemAt(d *store.Data, url string) *model.MonitoringSource {
+	url = strings.TrimRight(strings.ToLower(strings.TrimSpace(url)), "/")
+	var out *model.MonitoringSource
+	for _, m := range sortedSources(d) {
+		if m.Kind == model.MonitoringPrometheus && strings.TrimRight(strings.ToLower(m.URL), "/") == url {
+			if out == nil {
+				out = m
+			}
+		}
+	}
+	return out
+}
+
+// MergeResult is what merging a metric source into a monitoring system did.
+type MergeResult struct {
+	SystemID string `json:"system_id"`
+	Created  bool   `json:"created"`
+	Rules    int    `json:"rules"`
+}
+
+// MergeSource makes a metric source part of a Prometheus monitoring system: the system at the
+// same address, or a new one made of the source (address, credential, certificate check). Its
+// rules move to the system with their state, and the metric source is deleted. The rules keep
+// querying the same server.
+func (s *RulesService) MergeSource(actor, id string) (MergeResult, error) {
+	var out MergeResult
+	err := ErrNotFound
+	s.st.Write(func(d *store.Data) {
+		p := d.MetricSources[id]
+		if p == nil {
+			return
+		}
+		err = nil
+		sys := prometheusSystemAt(d, p.URL)
+		now := time.Now().UTC()
+		if sys == nil {
+			if len(d.MonitoringSources) >= maxMonitoringSources {
+				err = invalid("too_many_sources", nil)
+				return
+			}
+			sys = &model.MonitoringSource{ID: d.NextID("MON"), Name: p.Name, Kind: model.MonitoringPrometheus, URL: p.URL,
+				CredentialID: p.CredentialID, SkipVerify: p.SkipVerify, Enabled: true, Links: map[string]string{},
+				CreatedBy: actor, CreatedAt: now, UpdatedBy: actor, UpdatedAt: now}
+			d.MonitoringSources[sys.ID] = sys
+			d.AddAudit(store.AuditEntry{Actor: actor, Action: "monitoring.create", Object: sys.ID, Detail: sys.Name + " (prometheus) " + sys.URL + ", from metric source " + p.ID})
+			out.Created = true
+		}
+		out.SystemID = sys.ID
+		for _, r := range d.Rules {
+			if r.SourceID == id {
+				r.SourceID = sys.ID
+				out.Rules++
+			}
+		}
+		delete(d.MetricSources, id)
+		d.AddAudit(store.AuditEntry{Actor: actor, Action: "metric_source.merge", Object: id,
+			Detail: fmt.Sprintf("%s merged into %s %s; %d rules moved", p.Name, sys.ID, sys.Name, out.Rules)})
+	})
+	return out, err
+}
+
 func (s *RulesService) TestSource(ctx context.Context, in SourceInput) (int, error) {
 	var err error
 	s.st.Read(func(d *store.Data) { err = s.checkSource(d, &in) })
@@ -283,19 +370,11 @@ func (a *App) registerRules(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/metric-sources/test", a.authed(a.can("rules:edit", a.testSource)))
 	mux.HandleFunc("PUT /api/metric-sources/{id}", a.authed(a.can("rules:edit", a.updateSource)))
 	mux.HandleFunc("DELETE /api/metric-sources/{id}", a.authed(a.can("rules:edit", a.deleteSource)))
+	mux.HandleFunc("POST /api/metric-sources/{id}/merge", a.authed(a.can("rules:edit", a.can("monitoring:edit", a.mergeSource))))
 }
 
 func (a *App) listRules(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, a.rules.View())
-}
-
-func rulesError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, ErrSourceInUse):
-		httpx.Error(w, http.StatusConflict, "source_in_use", nil)
-	default:
-		writeError(w, err)
-	}
 }
 
 func (a *App) createRule(w http.ResponseWriter, r *http.Request) {
@@ -305,7 +384,7 @@ func (a *App) createRule(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.rules.Create(current(r).user.Username, in)
 	if err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, out)
@@ -318,7 +397,7 @@ func (a *App) updateRule(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.rules.Update(r.Context(), current(r).user.Username, r.PathValue("id"), in)
 	if err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -326,7 +405,7 @@ func (a *App) updateRule(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) deleteRule(w http.ResponseWriter, r *http.Request) {
 	if err := a.rules.Delete(r.Context(), current(r).user.Username, r.PathValue("id")); err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -339,7 +418,7 @@ func (a *App) previewRule(w http.ResponseWriter, r *http.Request) {
 	}
 	rule, err := ruleInput(in)
 	if err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, a.ruleEngine.Preview(r.Context(), rule))
@@ -365,7 +444,7 @@ func (a *App) createSource(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.rules.CreateSource(current(r).user.Username, in)
 	if err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, out)
@@ -378,7 +457,7 @@ func (a *App) updateSource(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.rules.UpdateSource(current(r).user.Username, r.PathValue("id"), in)
 	if err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -386,10 +465,19 @@ func (a *App) updateSource(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) deleteSource(w http.ResponseWriter, r *http.Request) {
 	if err := a.rules.DeleteSource(current(r).user.Username, r.PathValue("id")); err != nil {
-		rulesError(w, err)
+		writeError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *App) mergeSource(w http.ResponseWriter, r *http.Request) {
+	out, err := a.rules.MergeSource(current(r).user.Username, r.PathValue("id"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
 }
 
 func (a *App) testSource(w http.ResponseWriter, r *http.Request) {

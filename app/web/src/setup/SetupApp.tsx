@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
-import { Check, CheckCircle2, Circle } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { AnimatePresence, motion, MotionConfig, type Variants } from 'motion/react'
 import { api, ApiError, type Locale, type Meta, type Theme } from '../api'
 import { errorText, useLocale, useT } from '../i18n'
@@ -10,7 +10,7 @@ import { PolicyChecklist } from '../PolicyChecklist'
 import { checkPassword, defaultPolicy, policyError, policyRows, type PasswordPolicy } from '../policy'
 import { policyEditorStrings } from '../policyEditorStrings'
 import { PolicyEditor } from '../PolicyEditor'
-import { Choice, Pop } from '../Choice'
+import { Choice, ChoiceMark, Pop } from '../Choice'
 import type { Check as Probe } from '../connections/CheckResult'
 import { LdapCheckResult, LdapForm } from '../connections/LdapForm'
 import { ldapCheckKey, ldapComplete, ldapConfig, ldapDraft, ldapTestBody, type LdapDraft, type LdapReport } from '../connections/ldap'
@@ -30,11 +30,14 @@ import {
 import { PostgresCheckResult, PostgresForm } from '../connections/PostgresForm'
 import { postgresStrings } from '../connections/postgresStrings'
 import { originOf } from '../fx'
+import { Toaster } from '../notify'
 
 const TOKEN_HEADER = 'X-Setup-Token'
 
-type StepId = 'code' | 'prefs' | 'openbao' | 'postgres' | 'ldap' | 'policy' | 'admin' | 'review'
-const STEPS: StepId[] = ['code', 'prefs', 'openbao', 'postgres', 'ldap', 'policy', 'admin', 'review']
+// The password policy is part of the administrator step: the default fits most installations,
+// so it is collapsed there instead of being a step of its own.
+type StepId = 'code' | 'prefs' | 'openbao' | 'postgres' | 'ldap' | 'admin' | 'review'
+const STEPS: StepId[] = ['code', 'prefs', 'openbao', 'postgres', 'ldap', 'admin', 'review']
 
 type Postgres = PostgresDraft & { reuse_existing: boolean }
 
@@ -64,13 +67,28 @@ const stepVariants: Variants = {
 
 const USERNAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{1,63}$/
 
+// publicURLOk mirrors the server check: http or https, a host, no query, fragment or user.
+export function publicURLOk(v: string) {
+  const s = v.trim()
+  if (s === '') return true
+  try {
+    const u = new URL(s)
+    return (u.protocol === 'http:' || u.protocol === 'https:') && u.host !== '' && !u.username && !u.password && !u.search && !u.hash && !/[?#]/.test(s)
+  } catch {
+    return false
+  }
+}
+
+const samePolicy = (a: PasswordPolicy, b: PasswordPolicy) => JSON.stringify(a) === JSON.stringify(b)
+
 function stepOf(code: string): StepId | null {
   if (code === 'invalid_setup_token') return 'code'
   if (code.startsWith('openbao_')) return 'openbao'
   if (code.startsWith('postgres_')) return 'postgres'
   if (code.startsWith('ldap_')) return 'ldap'
   if (['weak_password', 'invalid_username', 'invalid_email', 'invalid_name'].includes(code)) return 'admin'
-  if (code === 'invalid_password_policy') return 'policy'
+  if (code === 'invalid_password_policy') return 'admin'
+  if (code === 'public_url_invalid') return 'prefs'
   if (code === 'invalid_locale' || code === 'invalid_theme' || code === 'invalid_timezone') return 'prefs'
   return null
 }
@@ -113,6 +131,9 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
     confirm: '',
   })
   const [policy, setPolicy] = useState<PasswordPolicy>(defaultPolicy)
+  const [policyOpen, setPolicyOpen] = useState(false)
+  // The address people reach Umbrella at: the wizard is opened at it in most installations.
+  const [publicURL, setPublicURL] = useState(() => window.location.origin)
   const [obCheck, setObCheck] = useState<Probe<OpenBaoReport>>(null)
   const [pgCheck, setPgCheck] = useState<Probe<PostgresReport>>(null)
   const [ldCheck, setLdCheck] = useState<Probe<LdapReport>>(null)
@@ -135,14 +156,14 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
   const passwordsMatch = admin.password !== '' && admin.password === admin.confirm
   const emailOk = admin.email.trim() === '' || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(admin.email.trim())
   const adminValid = USERNAME.test(admin.username.trim()) && violations.length === 0 && passwordsMatch && emailOk
+  const publicValid = publicURLOk(publicURL)
 
   const canNext: Record<StepId, boolean> = {
     code: codeOk,
-    prefs: true,
+    prefs: publicValid,
     openbao: obValid,
     postgres: pgValid && (!pgNeedsReuse || pg.reuse_existing),
     ldap: ldValid,
-    policy: policyProblem === null,
     admin: adminValid && policyProblem === null,
     review: false,
   }
@@ -224,6 +245,7 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
           locale: defaults.locale,
           theme: defaults.theme,
           timezone: defaults.timezone,
+          public_url: publicURL.trim().replace(/\/+$/, ''),
           password_policy: policy,
           openbao: openBaoBody(ob),
           postgres: pgBody(pg),
@@ -394,13 +416,7 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
                                 setLocale(l, false)
                               }}
                             >
-                              {defaults.locale === l ? (
-                                <Pop>
-                                  <CheckCircle2 size={18} color="var(--accent)" />
-                                </Pop>
-                              ) : (
-                                <Circle size={18} color="var(--muted)" />
-                              )}
+                              <ChoiceMark checked={defaults.locale === l} />
                               <span className="choice-title">{t(`lang.${l}`)}</span>
                             </Choice>
                           ))}
@@ -433,7 +449,20 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
                     <Field label={t('prefs.timezone')} hint={t('prefs.timezone.hint')}>
                       {(id) => <TimezoneSelect id={id} value={defaults.timezone} onChange={(v) => setDefaults((d) => ({ ...d, timezone: v }))} />}
                     </Field>
-                    <Foot back={back} next={next} canNext t={t} />
+                    <Field label={t('prefs.public')} hint={publicValid ? t('prefs.public.hint') : t('prefs.public.bad')}>
+                      {(id) => (
+                        <Input
+                          id={id}
+                          value={publicURL}
+                          placeholder="https://umbrella.example.com"
+                          spellCheck={false}
+                          aria-invalid={!publicValid || undefined}
+                          onChange={(e) => setPublicURL(e.target.value)}
+                        />
+                      )}
+                    </Field>
+                    {errorBanner}
+                    <Foot back={back} next={next} canNext={canNext.prefs} t={t} />
                   </div>
                 )}
 
@@ -504,14 +533,6 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
                       busy={busy}
                       checkDisabled={!ldapComplete(ld)}
                     />
-                  </div>
-                )}
-
-                {step === 'policy' && (
-                  <div className="stack">
-                    <Head refEl={heading} title={t('pol.title')} text={t('pol.text')} />
-                    <PolicyEditor value={policy} onChange={setPolicy} />
-                    <Foot back={back} next={next} canNext={canNext.policy} t={t} />
                   </div>
                 )}
 
@@ -616,6 +637,40 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
                       </Field>
                     </div>
                     <PolicyChecklist policy={policy} password={admin.password} username={admin.username.trim()} confirm={admin.confirm} t={t} />
+                    <section className="section">
+                      <header>
+                        <h3>{t(samePolicy(policy, defaultPolicy) ? 'pol.default' : 'pol.custom')}</h3>
+                        <Button variant="ghost" aria-expanded={policyOpen} onClick={() => setPolicyOpen((o) => !o)}>
+                          {t(policyOpen ? 'pol.collapse' : 'pol.change')}
+                        </Button>
+                      </header>
+                      <p className="hint">{t('pol.later')}</p>
+                      <AnimatePresence initial={false}>
+                        {policyOpen && (
+                          <motion.div
+                            key="policy"
+                            className="reveal-box"
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+                          >
+                            <div className="stack">
+                              <p className="muted">{t('pol.text')}</p>
+                              <PolicyEditor value={policy} onChange={setPolicy} />
+                              {!samePolicy(policy, defaultPolicy) && (
+                                <div>
+                                  <Button variant="ghost" onClick={() => setPolicy(defaultPolicy)} style={{ paddingLeft: 0 }}>
+                                    {t('pol.reset')}
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </section>
+                    {errorBanner}
                     <Foot back={back} next={next} canNext={canNext.admin} t={t} submit />
                   </form>
                 )}
@@ -632,6 +687,7 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
                           [t('rv.locale'), t(`lang.${defaults.locale}`)],
                           [t('rv.theme'), t(`theme.${defaults.theme}`)],
                           [t('rv.timezone'), zoneLabel(defaults.timezone)],
+                          [t('rv.public'), publicURL.trim() ? <code key="p">{publicURL.trim().replace(/\/+$/, '')}</code> : t('rv.public.none')],
                         ]}
                       />
                       <Summary
@@ -668,7 +724,15 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
                             : [[t('rv.ldap'), t('rv.ldap.off')]]
                         }
                       />
-                      <Summary title={t('step.policy')} edit={() => setStep('policy')} t={t} rows={policyRows(t, policy)} />
+                      <Summary
+                        title={t('step.policy')}
+                        edit={() => {
+                          setPolicyOpen(true)
+                          setStep('admin')
+                        }}
+                        t={t}
+                        rows={policyRows(t, policy)}
+                      />
                       <Summary
                         title={t('step.admin')}
                         edit={() => setStep('admin')}
@@ -707,7 +771,7 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
                         variant="primary"
                         onClick={finish}
                         busy={busy}
-                        disabled={!(obValid && pgValid && (!pgNeedsReuse || pg.reuse_existing) && ldValid && adminValid)}
+                        disabled={!(publicValid && obValid && pgValid && (!pgNeedsReuse || pg.reuse_existing) && ldValid && adminValid && policyProblem === null)}
                       >
                         {busy ? t('rv.finishing') : t('rv.finish')}
                       </Button>
@@ -719,6 +783,7 @@ export default function SetupApp({ meta, onReady }: { meta: Meta; onReady: () =>
           </main>
         </div>
       </div>
+      <Toaster />
     </MotionConfig>
   )
 }

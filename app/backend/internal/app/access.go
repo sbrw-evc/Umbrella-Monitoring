@@ -28,7 +28,7 @@ func (s *AccessService) Grant(u model.User) Grant {
 			return
 		}
 		g.RoleID, g.RoleName = r.ID, r.Name
-		if r.ID == model.RoleAdmin {
+		if d.IsAdmin(&u) {
 			g.Perms = access.NewSet(access.All())
 			return
 		}

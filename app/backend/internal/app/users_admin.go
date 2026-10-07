@@ -58,18 +58,27 @@ type UserFilter struct {
 
 type NewUser struct {
 	model.Profile
-	Username           string `json:"username"`
-	Password           string `json:"password"`
-	RoleID             string `json:"role_id"`
-	TeamID             string `json:"team_id"`
-	MustChangePassword *bool  `json:"must_change_password"`
+	Username           string   `json:"username"`
+	Password           string   `json:"password"`
+	RoleID             string   `json:"role_id"`
+	TeamIDs            []string `json:"team_ids"`
+	ScopeMode          string   `json:"scope_mode"`
+	MustChangePassword *bool    `json:"must_change_password"`
 }
 
 type UserChanges struct {
 	Profile *model.Profile `json:"profile"`
 	RoleID  *string        `json:"role_id"`
-	TeamID  *string        `json:"team_id"`
+	// TeamIDs replaces the teams of the user.
+	TeamIDs *[]string `json:"team_ids"`
+	// ScopeMode: all, teams (services of the user's teams) or services (ServiceIDs).
+	ScopeMode *string `json:"scope_mode"`
+	// ServiceIDs replaces the chosen services. Given without ScopeMode, a non-empty list means
+	// the services mode and an empty one all services, as before scope modes existed.
+	ServiceIDs *[]string `json:"service_ids"`
 }
+
+const maxUserServices = 200
 
 type PasswordReset struct {
 	Password           string `json:"password"`
@@ -102,7 +111,7 @@ func (s *UsersService) List(f UserFilter) []model.User {
 		for _, u := range d.Users {
 			if f.Source != "" && u.Source != f.Source ||
 				f.Role != "" && d.RoleOf(u).ID != f.Role ||
-				f.Team != "" && !teams[u.TeamID] ||
+				f.Team != "" && !slices.ContainsFunc(u.TeamIDs, func(t string) bool { return teams[t] }) ||
 				f.Status == userStatusActive && u.Disabled ||
 				f.Status == userStatusLocked && !u.Disabled ||
 				q != "" && !userMatches(u, q) {
@@ -163,14 +172,26 @@ func (s *UsersService) Create(ctx context.Context, actor Actor, in NewUser) (mod
 	if err != nil {
 		return model.User{}, err
 	}
-	role := userOr(in.RoleID, model.RoleUser)
+	role := in.RoleID
+	if role == "" {
+		s.st.Read(func(d *store.Data) { role = d.NewUserRole() })
+	}
+	scope := userOr(in.ScopeMode, model.ScopeAll)
+	if scope != model.ScopeAll && scope != model.ScopeTeams {
+		return model.User{}, invalid("invalid_scope", nil)
+	}
 	draft := model.User{Username: username, Name: profile.DisplayName(username), Profile: profile, Source: model.SourceLocal,
-		Role: role, TeamID: in.TeamID, MustChangePassword: in.MustChangePassword == nil || *in.MustChangePassword}
+		Role: role, TeamIDs: in.TeamIDs, ScopeMode: scope, MustChangePassword: in.MustChangePassword == nil || *in.MustChangePassword}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var policy model.PasswordPolicy
-	s.st.Read(func(d *store.Data) { policy, err = d.Settings.Password, checkNewUser(d, actor, draft) })
+	s.st.Read(func(d *store.Data) {
+		policy, err = d.Settings.Password, checkNewUser(d, actor, draft)
+		if err == nil {
+			draft.TeamIDs, err = userTeams(d, draft.TeamIDs)
+		}
+	})
 	if err != nil {
 		return model.User{}, err
 	}
@@ -203,20 +224,10 @@ func checkNewUser(d *store.Data, actor Actor, u model.User) error {
 	if d.UserByName(u.Username) != nil {
 		return ErrUsernameTaken
 	}
-	if err := checkUserRefs(d, u.Role, u.TeamID); err != nil {
-		return err
-	}
-	return guardUserChange(d, actor, nil, &u)
-}
-
-func checkUserRefs(d *store.Data, role, team string) error {
-	if d.Roles[role] == nil {
+	if d.Roles[u.Role] == nil {
 		return invalid("unknown_role", nil)
 	}
-	if team != "" && d.Teams[team] == nil {
-		return invalid("unknown_team", nil)
-	}
-	return nil
+	return guardUserChange(d, actor, nil, &u)
 }
 
 func normalUserProfile(in model.Profile) (model.Profile, error) {
@@ -248,15 +259,18 @@ func (s *UsersService) Update(actor Actor, id string, in UserChanges) (model.Use
 			u.Profile, u.Name = profile, profile.DisplayName(u.Username)
 			changes = append(changes, "profile")
 		}
-		role, team := d.RoleOf(u).ID, u.TeamID
+		role, teams := d.RoleOf(u).ID, u.TeamIDs
 		if in.RoleID != nil {
 			role = *in.RoleID
 		}
-		if in.TeamID != nil {
-			team = *in.TeamID
+		if d.Roles[role] == nil {
+			return "", invalid("unknown_role", nil)
 		}
-		if err := checkUserRefs(d, role, team); err != nil {
-			return "", err
+		if in.TeamIDs != nil {
+			var err error
+			if teams, err = userTeams(d, *in.TeamIDs); err != nil {
+				return "", err
+			}
 		}
 		if role != d.RoleOf(u).ID {
 			if u.ID == actor.User.ID {
@@ -265,12 +279,69 @@ func (s *UsersService) Update(actor Actor, id string, in UserChanges) (model.Use
 			u.Role = role
 			changes = append(changes, "role "+role)
 		}
-		if team != u.TeamID {
-			u.TeamID = team
-			changes = append(changes, "team "+userOr(team, "none"))
+		if !slices.Equal(teams, u.TeamIDs) {
+			u.TeamIDs = teams
+			changes = append(changes, "teams "+userOr(strings.Join(teams, " "), "none"))
+		}
+		mode := u.ScopeMode
+		if mode == "" {
+			mode = model.ScopeAll
+			if len(u.ServiceIDs) > 0 {
+				mode = model.ScopeServices
+			}
+		}
+		if in.ServiceIDs != nil {
+			scope, err := userServiceScope(d, *in.ServiceIDs)
+			if err != nil {
+				return "", err
+			}
+			if !slices.Equal(scope, u.ServiceIDs) {
+				u.ServiceIDs = scope
+				changes = append(changes, "services "+userOr(strings.Join(scope, " "), "none"))
+			}
+			if in.ScopeMode == nil {
+				mode = model.ScopeAll
+				if len(scope) > 0 {
+					mode = model.ScopeServices
+				}
+			}
+		}
+		if in.ScopeMode != nil {
+			if !model.ValidScope(*in.ScopeMode) {
+				return "", invalid("invalid_scope", nil)
+			}
+			mode = *in.ScopeMode
+		}
+		if mode == model.ScopeServices && len(u.ServiceIDs) == 0 {
+			return "", invalid("scope_services_required", nil)
+		}
+		if mode != u.ScopeMode {
+			u.ScopeMode = mode
+			changes = append(changes, "scope "+mode)
 		}
 		return strings.Join(changes, ", "), nil
 	})
+}
+
+// userServiceScope checks and normalizes the business services of a user's incident scope:
+// every one must exist; duplicates and blanks are dropped; nil means no limit.
+func userServiceScope(d *store.Data, ids []string) ([]string, error) {
+	var out []string
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || slices.Contains(out, id) {
+			continue
+		}
+		if d.Services[id] == nil {
+			return nil, invalid("service_not_found", nil)
+		}
+		out = append(out, id)
+	}
+	if len(out) > maxUserServices {
+		return nil, invalid("too_many_services", nil)
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 func (s *UsersService) SetLocked(actor Actor, id string, locked bool) (model.User, error) {
@@ -421,8 +492,7 @@ func (s *UsersService) mutate(actor Actor, id, action string, fn func(d *store.D
 }
 
 func guardUserChange(d *store.Data, actor Actor, before, after *model.User) error {
-	isAdmin := func(u *model.User) bool { return u != nil && d.RoleOf(u).ID == model.RoleAdmin }
-	if (isAdmin(before) || isAdmin(after)) && !isAdmin(&actor.User) {
+	if (d.IsAdmin(before) || d.IsAdmin(after)) && !d.IsAdmin(&actor.User) {
 		return ErrAdminOnly
 	}
 	if before == nil {
@@ -430,7 +500,7 @@ func guardUserChange(d *store.Data, actor Actor, before, after *model.User) erro
 	}
 	active, local := adminCounts(d, map[string]bool{before.ID: true}, after)
 	switch {
-	case active == 0 && isAdmin(before) && !before.Disabled:
+	case active == 0 && d.IsAdmin(before) && !before.Disabled:
 		return ErrLastAdmin
 	case local == 0 && localAdmins(d) > 0:
 		return ErrNoLocalAdmin
@@ -440,7 +510,7 @@ func guardUserChange(d *store.Data, actor Actor, before, after *model.User) erro
 
 func adminCounts(d *store.Data, skip map[string]bool, extra ...*model.User) (active, local int) {
 	count := func(u *model.User) {
-		if u == nil || u.Disabled || d.RoleOf(u).ID != model.RoleAdmin {
+		if u == nil || u.Disabled || !d.IsAdmin(u) {
 			return
 		}
 		active++
@@ -461,8 +531,8 @@ func adminCounts(d *store.Data, skip map[string]bool, extra ...*model.User) (act
 
 func describeUser(d *store.Data, u *model.User) string {
 	out := u.Username + ", role " + d.RoleOf(u).ID
-	if u.TeamID != "" {
-		out += ", team " + u.TeamID
+	if len(u.TeamIDs) > 0 {
+		out += ", teams " + strings.Join(u.TeamIDs, " ")
 	}
 	return out
 }

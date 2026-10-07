@@ -122,7 +122,7 @@ func (m *Module) guard(next http.HandlerFunc) http.HandlerFunc {
 				m.failures, m.until = 0, time.Now().Add(lockout)
 			}
 			m.lmu.Unlock()
-			slog.Warn("setup: wrong setup code", "remote", r.RemoteAddr)
+			slog.Warn("setup: wrong setup code", "remote", r.RemoteAddr, "forwarded_for", r.Header.Get("X-Forwarded-For"))
 			httpx.Error(w, http.StatusUnauthorized, "invalid_setup_token", nil)
 			return
 		}

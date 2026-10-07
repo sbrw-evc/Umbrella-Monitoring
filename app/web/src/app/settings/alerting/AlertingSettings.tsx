@@ -2,17 +2,21 @@ import { useState } from 'react'
 import { GrafanaCard } from './GrafanaCard'
 import { NotifyCard } from './NotifyCard'
 import { PagerDutyCard } from './PagerDutyCard'
+import { PolicyCard } from './PolicyCard'
+import { PublicURLCard } from './PublicURLCard'
 import './alerting.css'
 
 export function AlertingSettings() {
-  // The notification card shows whether links work, which depends on the public address saved
-  // with PagerDuty.
+  // Whether links work in backup notification and the PagerDuty webhook address depend on the
+  // Umbrella address; the cards read it again when it is saved.
   const [epoch, setEpoch] = useState(0)
   return (
     <>
-      <PagerDutyCard onSaved={() => setEpoch((e) => e + 1)} />
+      <PublicURLCard onSaved={() => setEpoch((e) => e + 1)} />
+      <PagerDutyCard reloadKey={epoch} />
       <NotifyCard key={epoch} />
       <GrafanaCard />
+      <PolicyCard />
     </>
   )
 }

@@ -8,18 +8,28 @@ export type ProfileFields = {
   email: string
 }
 
+export type ScopeMode = 'all' | 'teams' | 'services'
+
 export type User = ProfileFields & {
   id: string
   username: string
   name: string
-  source: 'local' | 'ldap' | 'entra'
+  source: 'local' | 'ldap' | 'entra' | 'netbox'
   role: string
   role_name?: string
   permissions?: string[]
-  team_id?: string
+  /** Active administrators; sent only to a user without any permission. */
+  admins?: { name: string; email?: string }[]
+  team_ids?: string[]
+  /** What the user sees: all services, the services of their teams, or the chosen services. Ignored for administrators. */
+  scope_mode?: ScopeMode
+  /** The chosen services of the services mode. */
+  service_ids?: string[]
   must_change_password?: boolean
   timezone: string
   telegram?: string
+  /** The interface language the server keeps (voice calls speak it). */
+  locale?: string
   last_login_at?: string
   csrf?: string
   gravatar?: string

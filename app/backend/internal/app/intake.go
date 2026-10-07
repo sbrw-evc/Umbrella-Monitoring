@@ -21,11 +21,11 @@ import (
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/httpx"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/ingest"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/textx"
 )
 
 const (
 	maxHeaderValue = 2000
-	processTimeout = 30 * time.Second
 	IdempotencyHdr = "Idempotency-Key"
 	maxIdempotency = 200
 	tokenHeader    = "X-Umbrella-Token"
@@ -82,9 +82,7 @@ func flatten(h map[string][]string, drop map[string]bool) map[string]string {
 			continue
 		}
 		v := strings.Join(vs, ", ")
-		if len(v) > maxHeaderValue {
-			v = v[:maxHeaderValue]
-		}
+		v = textx.Bytes(v, maxHeaderValue)
 		out[lk] = v
 	}
 	return out
@@ -120,7 +118,7 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	hook := t.Webhook
-	ip := clientIP(r)
+	ip := a.clientIP(r)
 	if !hook.Allowed(ip) {
 		a.rejectIngest(w, t.ConnectorID, http.StatusForbidden, "network_not_allowed")
 		return
@@ -181,9 +179,7 @@ func (a *App) ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := strings.TrimSpace(r.Header.Get(IdempotencyHdr))
-	if len(key) > maxIdempotency {
-		key = key[:maxIdempotency]
-	}
+	key = textx.Bytes(key, maxIdempotency)
 	id, dup, err := a.queue.Enqueue(r.Context(), ingest.Request{ConnectorID: t.ConnectorID, Version: t.Version, RemoteIP: ip,
 		Method: r.Method, Headers: headers, Query: query, Body: body}, key)
 	if err != nil {
@@ -277,7 +273,8 @@ func (a *App) process(ctx context.Context, r ingest.Request) (out ingest.Outcome
 	if err != nil {
 		return out, err
 	}
-	cctx, cancel := context.WithTimeout(ctx, processTimeout)
+	timeout := a.opt.Ingest.ProcessTimeout
+	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	res, err := p.Run(cctx, flow.Input{RequestID: strconv.FormatInt(r.ID, 10), Body: r.Body, Headers: r.Headers, Query: r.Query,
 		RemoteIP: r.RemoteIP, Method: r.Method, Connector: a.connectors.connectorScope(r.ConnectorID)}, flow.RunOptions{})
@@ -285,8 +282,9 @@ func (a *App) process(ctx context.Context, r ingest.Request) (out ingest.Outcome
 		if ctx.Err() != nil {
 			return out, ctx.Err()
 		}
-		return out, fmt.Errorf("processing took longer than %s", processTimeout)
+		return out, fmt.Errorf("processing took longer than %s", timeout)
 	}
+	markTestEvents(r, res)
 	out.Result = res
 	return out, nil
 }

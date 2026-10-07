@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Search, X } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Button, Field, formatDate, Input, Modal, Textarea } from '../../ui'
@@ -10,11 +10,14 @@ import { strings } from './strings'
 import '../connectors/connectors.css'
 import '../cis/cis.css'
 import './maintenance.css'
+import { ask } from '../../confirm'
 
 type Ref = { id: string; name: string; missing?: boolean }
 type State = 'active' | 'planned' | 'finished'
 type Window = {
   id: string
+  /** The viewer may change the window: its targets are within their visibility scope. */
+  in_scope?: boolean
   title: string
   comment: string
   ci_ids: string[]
@@ -35,13 +38,38 @@ const fromLocal = (v: string) => (v ? new Date(v).toISOString() : '')
 
 const TONE: Record<State, string> = { active: 'warn', planned: 'planned', finished: 'off' }
 
+// Prefill is a new window started from elsewhere (the incident card):
+// /maintenance?new=1&ci=<id>&ci_name=<name>&service=<id>&service_name=<name>&title=<title>&hours=<n>
+type Prefill = { prefill: true; title: string; cis: Ref[]; services: Ref[]; hours: number }
+type Editing = Window | 'new' | Prefill | null
+
+function refsOf(p: URLSearchParams, kind: 'ci' | 'service'): Ref[] {
+  const names = p.getAll(`${kind}_name`)
+  return p.getAll(kind).map((id, i) => ({ id, name: names[i] || id }))
+}
+
+// fromAddress reads the window to start and the window to show from the address once, then
+// drops the parameters so a reload does not repeat them.
+function fromAddress(): { prefill: Prefill | null; show: string } {
+  const p = new URLSearchParams(window.location.search)
+  const show = p.get('id') ?? ''
+  let prefill: Prefill | null = null
+  if (p.get('new') === '1') {
+    const hours = Number(p.get('hours') ?? '1')
+    prefill = { prefill: true, title: p.get('title') ?? '', cis: refsOf(p, 'ci'), services: refsOf(p, 'service'), hours: hours > 0 && hours <= 24 * 30 ? hours : 1 }
+  }
+  if (p.toString()) window.history.replaceState(null, '', window.location.pathname)
+  return { prefill, show }
+}
+
 export function MaintenancePage() {
   const t = useT(strings)
   const { can } = useSession()
   const editor = can('maintenance:edit')
   const [epoch, setEpoch] = useState(0)
   const list = useResource<Window[]>('/api/maintenance', epoch)
-  const [editing, setEditing] = useState<Window | 'new' | null>(null)
+  const [linked] = useState(fromAddress)
+  const [editing, setEditing] = useState<Editing>(() => (editor ? linked.prefill : null))
   const [filter, setFilter] = useState<State | ''>('')
   const act = useAction()
   const reload = () => setEpoch((e) => e + 1)
@@ -49,6 +77,10 @@ export function MaintenancePage() {
     const id = window.setInterval(() => document.visibilityState === 'visible' && setEpoch((e) => e + 1), 30_000)
     return () => window.clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    if (linked.show && list.data) document.getElementById(`mw-${linked.show}`)?.scrollIntoView({ block: 'center' })
+  }, [linked.show, list.data])
 
   const all = list.data ?? []
   const count = (s: State) => all.filter((w) => w.state === s).length
@@ -78,7 +110,8 @@ export function MaintenancePage() {
           </Button>
         </div>
       )}
-      <ErrorBanner error={list.error ?? act.error} strings={strings} />
+      <ErrorBanner error={list.error} strings={strings} />
+      <ErrorFlash error={act.error} strings={strings} />
       {list.data && shown.length === 0 && <p className="muted card mw-empty">{t('mw.empty')}</p>}
       {shown.length > 0 && (
         <div className="card cn-table-card">
@@ -95,7 +128,7 @@ export function MaintenancePage() {
             </thead>
             <tbody>
               {shown.map((w) => (
-                <Row key={w.id} w={w} editor={editor} busy={act.busy} onEdit={() => setEditing(w)} run={run} />
+                <Row key={w.id} w={w} shown={w.id === linked.show} editor={editor && w.in_scope !== false} busy={act.busy} onEdit={() => setEditing(w)} run={run} />
               ))}
             </tbody>
           </table>
@@ -130,13 +163,27 @@ function Targets({ w }: { w: Window }) {
   )
 }
 
-function Row({ w, editor, busy, onEdit, run }: { w: Window; editor: boolean; busy: boolean; onEdit: () => void; run: (fn: () => Promise<unknown>) => void }) {
+function Row({
+  w,
+  shown,
+  editor,
+  busy,
+  onEdit,
+  run,
+}: {
+  w: Window
+  shown: boolean
+  editor: boolean
+  busy: boolean
+  onEdit: () => void
+  run: (fn: () => Promise<unknown>) => void
+}) {
   const t = useT(strings)
   const { locale } = useLocale()
   const { timezone } = useSession()
   const at = (v: string) => formatDate(v, locale, timezone)
   return (
-    <tr className={w.state === 'finished' ? 'mw-finished' : undefined}>
+    <tr id={`mw-${w.id}`} className={[w.state === 'finished' ? 'mw-finished' : '', shown ? 'mw-shown' : ''].join(' ').trim() || undefined}>
       <td>
         <span className={`pill pill-${TONE[w.state]}`}>{t(`mw.state.${w.state}`)}</span>
       </td>
@@ -168,7 +215,7 @@ function Row({ w, editor, busy, onEdit, run }: { w: Window; editor: boolean; bus
           <Button
             variant="ghost"
             busy={busy}
-            onClick={() => window.confirm(t('mw.delete.confirm', { title: w.title })) && run(() => api('DELETE', `/api/maintenance/${w.id}`))}
+            onClick={async () => (await ask({ text: t('mw.delete.confirm', { title: w.title }), danger: true })) && run(() => api('DELETE', `/api/maintenance/${w.id}`))}
           >
             {t('mw.delete')}
           </Button>
@@ -182,14 +229,19 @@ type Draft = { title: string; comment: string; start: string; end: string; servi
 
 const HOURS = [1, 2, 4, 8, 24]
 
-function draftOf(v: Window | 'new' | null): Draft {
+function draftOf(v: Editing): Draft {
+  if (v && v !== 'new' && 'prefill' in v) {
+    const start = new Date()
+    start.setSeconds(0, 0)
+    return { title: v.title, comment: '', start: toLocal(start), end: toLocal(new Date(start.getTime() + v.hours * 3600_000)), services: v.services, cis: v.cis }
+  }
   if (v && v !== 'new') return { title: v.title, comment: v.comment, start: toLocal(new Date(v.start)), end: toLocal(new Date(v.end)), services: v.services, cis: v.cis }
   const start = new Date()
   start.setSeconds(0, 0)
   return { title: '', comment: '', start: toLocal(start), end: toLocal(new Date(start.getTime() + 2 * 3600_000)), services: [], cis: [] }
 }
 
-function Editor({ value, onClose, onSaved }: { value: Window | 'new' | null; onClose: () => void; onSaved: () => void }) {
+function Editor({ value, onClose, onSaved }: { value: Editing; onClose: () => void; onSaved: () => void }) {
   const t = useT(strings)
   const [d, setD] = useState<Draft>(() => draftOf(value))
   const [q, setQ] = useState('')
@@ -202,7 +254,7 @@ function Editor({ value, onClose, onSaved }: { value: Window | 'new' | null; onC
   }, [value])
   const found = useResource<{ cis: Ref[]; services: Ref[] }>(value && q.trim() ? `/api/maintenance/targets?q=${encodeURIComponent(q.trim())}` : '', 0)
   const zone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone, [])
-  const editing = value && value !== 'new' ? value : null
+  const editing = value && value !== 'new' && !('prefill' in value) ? value : null
   const hours = d.start && d.end ? Math.round((new Date(d.end).getTime() - new Date(d.start).getTime()) / 3600_000) : 0
 
   const submit = () =>
@@ -239,11 +291,11 @@ function Editor({ value, onClose, onSaved }: { value: Window | 'new' | null; onC
         <div className="mw-quick">
           <span className="hint">{t('mw.tz', { zone })}</span>
           <span className="mw-chips">
-            <button type="button" className="mw-chip" onClick={() => setD({ ...d, start: toLocal(new Date()), end: toLocal(new Date(Date.now() + Math.max(hours, 1) * 3600_000)) })}>
+            <button type="button" className="chip mw-chip" onClick={() => setD({ ...d, start: toLocal(new Date()), end: toLocal(new Date(Date.now() + Math.max(hours, 1) * 3600_000)) })}>
               {t('mw.now')}
             </button>
             {HOURS.map((h) => (
-              <button key={h} type="button" className={`mw-chip ${hours === h ? 'on' : ''}`} onClick={() => setLength(h)}>
+              <button key={h} type="button" className={`chip mw-chip${hours === h ? ' on' : ''}`} onClick={() => setLength(h)}>
                 {t('mw.hours', { n: h })}
               </button>
             ))}
@@ -290,7 +342,7 @@ function Editor({ value, onClose, onSaved }: { value: Window | 'new' | null; onC
           </div>
         )}
         <Field label={t('mw.comment')}>{(id) => <Textarea id={id} rows={2} value={d.comment} onChange={(e) => setD({ ...d, comment: e.target.value })} />}</Field>
-        <ErrorBanner error={save.error} strings={strings} />
+        <ErrorFlash error={save.error} strings={strings} />
       </div>
     </Modal>
   )

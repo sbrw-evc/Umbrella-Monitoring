@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react'
 import { KeyRound, Plus, Trash2 } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Link } from '../../router'
 import { Button, Field, formatDate, Input, Modal, Password, Select, Textarea } from '../../ui'
 import { useSession } from '../session'
 import { strings } from './strings'
-import { CREDENTIAL_KINDS, type Credential, type CredentialType } from './types'
+import { credentialUseLink, type Credential, type CredentialKind, type CredentialType, type CredentialUse } from './types'
 import './connectors.css'
 
 type Editing = { credential: Credential | null } | null
@@ -60,14 +60,7 @@ export function CredentialsPage() {
                   </td>
                   <td>{t(`cred.type.${c.type}`)}</td>
                   <td>
-                    {c.used_by.length === 0
-                      ? '—'
-                      : c.used_by.map((u, i) => (
-                          <span key={u.id}>
-                            {i > 0 && ', '}
-                            <Link to={`/connectors/${encodeURIComponent(u.id)}`}>{u.name}</Link>
-                          </span>
-                        ))}
+                    {c.used_by.length === 0 ? '—' : <UsedBy uses={c.used_by} />}
                   </td>
                   <td className="muted">
                     {formatDate(c.updated_at, locale, timezone)} · {c.updated_by}
@@ -91,6 +84,20 @@ export function CredentialsPage() {
   )
 }
 
+function UsedBy({ uses }: { uses: CredentialUse[] }) {
+  const t = useT(strings)
+  return (
+    <>
+      {uses.map((u, i) => (
+        <span key={u.kind + u.id}>
+          {i > 0 && ', '}
+          <span className="muted">{t(`cred.use.${u.kind}`)}</span> <Link to={credentialUseLink(u)}>{u.name}</Link>
+        </span>
+      ))}
+    </>
+  )
+}
+
 function CredentialDialog({ editing, editable, onClose, onSaved }: { editing: Editing; editable: boolean; onClose: () => void; onSaved: () => void }) {
   const t = useT(strings)
   const existing = editing?.credential ?? null
@@ -100,6 +107,7 @@ function CredentialDialog({ editing, editable, onClose, onSaved }: { editing: Ed
   const [fields, setFields] = useState<Record<string, string>>({})
   const [secrets, setSecrets] = useState<Record<string, string>>({})
   const action = useAction()
+  const kinds = useResource<CredentialKind[]>(editing !== null ? '/api/credentials/kinds' : '', 0)
 
   useEffect(() => {
     if (!editing) return
@@ -111,7 +119,7 @@ function CredentialDialog({ editing, editable, onClose, onSaved }: { editing: Ed
     action.clear()
   }, [editing])
 
-  const kind = CREDENTIAL_KINDS[type]
+  const kind = kinds.data?.find((k) => k.type === type) ?? { type, fields: [], secrets: [] }
   const submit = async () => {
     const body = { name, type, description, fields, secrets: Object.fromEntries(Object.entries(secrets).filter(([, v]) => v !== '')) }
     const ok = await action.run(() => (existing ? api('PUT', `/api/credentials/${existing.id}`, body) : api('POST', '/api/credentials', body)))
@@ -156,9 +164,9 @@ function CredentialDialog({ editing, editable, onClose, onSaved }: { editing: Ed
       <Field label={t('cred.type')} hint={t(`cred.type.${type}.hint`)}>
         {(id) => (
           <Select id={id} value={type} disabled={!!existing || !editable} onChange={(e) => setType(e.target.value as CredentialType)}>
-            {(Object.keys(CREDENTIAL_KINDS) as CredentialType[]).map((k) => (
-              <option key={k} value={k}>
-                {t(`cred.type.${k}`)}
+            {(kinds.data ?? [kind]).map((k) => (
+              <option key={k.type} value={k.type}>
+                {t(`cred.type.${k.type}`)}
               </option>
             ))}
           </Select>
@@ -193,8 +201,13 @@ function CredentialDialog({ editing, editable, onClose, onSaved }: { editing: Ed
           )}
         </Field>
       ))}
-      {existing && existing.used_by.length > 0 && <p className="hint">{t('cred.inUse')}</p>}
-      <ErrorBanner error={action.error} strings={strings} />
+      {existing && existing.used_by.length > 0 && (
+        <p className="hint">
+          {t('cred.inUse')} <UsedBy uses={existing.used_by} />
+        </p>
+      )}
+      <ErrorBanner error={kinds.error} strings={strings} />
+      <ErrorFlash error={action.error} strings={strings} />
     </Modal>
   )
 }

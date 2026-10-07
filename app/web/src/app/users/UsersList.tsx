@@ -6,7 +6,7 @@ import { formatDate } from '../../ui'
 import { useSession } from '../session'
 import { roleLabel } from '../types'
 import { SourcePill, StatusPill } from './Badges'
-import { teamOptions, type ManagedUser, type Refs } from './model'
+import { scopedOf, scopeModeOf, teamOptions, type ManagedUser, type Refs } from './model'
 import { strings } from './strings'
 
 export function UsersList({ users, refs, onOpen }: { users: ManagedUser[]; refs: Refs; onOpen: (u: ManagedUser) => void }) {
@@ -43,11 +43,18 @@ export function UsersList({ users, refs, onOpen }: { users: ManagedUser[]; refs:
                   {u.id === me.id && <span className="muted"> ({t('usr.you')})</span>}
                 </strong>
                 <small className="muted">{u.username}</small>
+                {scopedOf(u) && (
+                  <small className="usr-scope" title={t('usr.field.scope')}>
+                    {scopeModeOf(u) === 'teams' ? t('usr.scope.teams.short') : t('usr.scope.short', { names: (u.services ?? []).map((s) => s.name).join(', ') })}
+                  </small>
+                )}
               </span>
             </span>
             <span data-label={t('usr.col.role')}>{roleLabel(t, u.role, u.role_name)}</span>
-            <span data-label={t('usr.col.team')} className={u.team_id ? '' : 'muted'}>
-              {u.team_id ? (paths.get(u.team_id) ?? u.team_name ?? u.team_id) : t('usr.noTeam')}
+            <span data-label={t('usr.col.team')} className={u.team_ids?.length ? '' : 'muted'}>
+              {u.team_ids?.length
+                ? u.team_ids.map((id) => paths.get(id) ?? u.teams?.find((x) => x.id === id)?.name ?? id).join(', ')
+                : t('usr.noTeam')}
             </span>
             <span data-label={t('usr.col.source')}>
               <SourcePill user={u} />

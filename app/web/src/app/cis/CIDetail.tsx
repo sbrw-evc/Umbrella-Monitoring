@@ -1,12 +1,14 @@
 import type { ReactNode } from 'react'
 import { ExternalLink } from 'lucide-react'
 import { api } from '../../api'
-import { ErrorBanner } from '../../connections/ConnectionCard'
+import { ErrorFlash } from '../../connections/ConnectionCard'
 import { useAction } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
 import { Banner, Button, formatDate, Modal, Rows } from '../../ui'
+import { RoutePreview } from '../routing/RoutePreview'
 import { Chips } from '../services/Badges'
 import { useSession } from '../session'
+import { Aliases } from './Aliases'
 import { MonitorState, SourcePill, StatusPill } from './Badges'
 import { strings } from './strings'
 import type { Attrs, CI } from './types'
@@ -32,7 +34,7 @@ export function CIDetail({ ci, editable, onClose, onEdit, onDelete, onChanged }:
   const footer =
     ci && editable ? (
       <>
-        <Button variant="ghost" className="svc-danger" onClick={() => onDelete(ci)}>
+        <Button variant="danger-soft" className="svc-danger" onClick={() => onDelete(ci)}>
           {t('ci.delete')}
         </Button>
         {ci.registrable && (
@@ -58,13 +60,13 @@ export function CIDetail({ ci, editable, onClose, onEdit, onDelete, onChanged }:
     )
   return (
     <Modal open={ci !== null} title={ci?.name ?? ''} onClose={close} footer={footer}>
-      {ci && <Body ci={ci} />}
-      <ErrorBanner error={register.error} strings={strings} />
+      {ci && <Body ci={ci} editable={editable} onChanged={onChanged} />}
+      <ErrorFlash error={register.error} strings={strings} />
     </Modal>
   )
 }
 
-function Body({ ci }: { ci: CI }) {
+function Body({ ci, editable, onChanged }: { ci: CI; editable: boolean; onChanged: (ci: CI) => void }) {
   const t = useT(strings)
   const { locale } = useLocale()
   const { timezone } = useSession()
@@ -94,6 +96,7 @@ function Body({ ci }: { ci: CI }) {
     ],
     [t('ci.field.services'), ci.services.length ? <Chips key="s" items={ci.services.map((x) => ({ key: x.id, label: x.name }))} /> : none],
     [t('ci.field.ips'), ci.ips.length ? <span className="cn-mono">{ci.ips.join(', ')}</span> : none],
+    [t('ci.field.aliases'), <Aliases key={`a-${ci.id}`} ci={ci} editable={editable} onChanged={onChanged} />],
     [t('ci.field.tags'), ci.tags.length ? <Chips key="g" items={ci.tags.map((x) => ({ key: x, label: `#${x}` }))} /> : none],
   ]
   for (const a of ATTRS) if (ci.attrs[a]) rows.push([t(`ci.field.${a}`), ci.attrs[a]])
@@ -125,6 +128,7 @@ function Body({ ci }: { ci: CI }) {
       {ci.description && <p className="svc-description">{ci.description}</p>}
       {!ci.editable && <Banner kind="info" title={t('ci.imported')} />}
       <Rows rows={rows} />
+      <RoutePreview kind="cis" id={ci.id} version={ci.updated_at} />
     </>
   )
 }

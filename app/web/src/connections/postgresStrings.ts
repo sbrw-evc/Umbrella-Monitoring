@@ -15,6 +15,7 @@ export const postgresStrings: Dict = {
       'Umbrella runs in a container, so localhost is the Umbrella container itself. Use the PostgreSQL service name in the shared Docker network, for example postgres, or host.docker.internal when PostgreSQL runs on the host.',
     'pg.nocreate': 'The user cannot create tables in this database. Grant CREATE on the schema or pick another user.',
     'pg.state': 'This database already holds Umbrella data (saved {at})',
+    'pg.state.data': 'This database already holds Umbrella incidents or received requests',
   },
   ru: {
     'pg.host': 'Хост',
@@ -30,5 +31,6 @@ export const postgresStrings: Dict = {
       'Umbrella работает в контейнере, и localhost — это сам контейнер Umbrella. Укажите имя сервиса PostgreSQL в общей сети Docker, например postgres, или host.docker.internal, если PostgreSQL запущен на хосте.',
     'pg.nocreate': 'У пользователя нет права создавать таблицы в этой базе. Выдайте CREATE на схему или выберите другого пользователя.',
     'pg.state': 'В базе уже есть данные Umbrella (сохранены {at})',
+    'pg.state.data': 'В базе уже есть инциденты или принятые запросы Umbrella',
   },
 }

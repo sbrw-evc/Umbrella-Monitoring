@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -130,11 +131,25 @@ func (a *App) grafanaSave(w http.ResponseWriter, r *http.Request) {
 // grafanaRedirect sends a signed-in user to the Grafana context of an incident; PagerDuty links
 // point here, so the link stays right when Grafana settings change. Anybody else goes to the
 // incident in Umbrella, which asks them to sign in.
+//
+// The session cookie is SameSite=Strict, so a click in PagerDuty, a mail or a messenger (a
+// cross-site navigation) arrives without it. A request without the cookie gets a tiny page of
+// this origin that navigates here again: that navigation starts on Umbrella itself, so the
+// browser sends the cookie. The second request carries a marker, so somebody who is really not
+// signed in goes on to the incident page instead of looping.
 func (a *App) grafanaRedirect(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	fallback := "/incidents?id=" + url.QueryEscape(id)
+	fallback := model.IncidentURL("", id)
+	if a.alerts == nil || !a.ingestReady() {
+		http.Redirect(w, r, fallback, http.StatusFound)
+		return
+	}
 	c, err := r.Cookie(CookieName)
-	if err != nil || a.alerts == nil || !a.ingestReady() {
+	if err != nil {
+		if r.URL.Query().Get(sameSiteHop) == "" {
+			hopPage(w, model.GrafanaHopURL("", id)+"?"+sameSiteHop+"=1")
+			return
+		}
 		http.Redirect(w, r, fallback, http.StatusFound)
 		return
 	}
@@ -153,7 +168,7 @@ func (a *App) grafanaRedirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	al, _, err := a.alerts.Get(r.Context(), id)
-	if err != nil {
+	if err != nil || !al.InScope(a.incidentScope(*u)) {
 		http.Redirect(w, r, fallback, http.StatusFound)
 		return
 	}
@@ -163,4 +178,21 @@ func (a *App) grafanaRedirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, link, http.StatusFound)
+}
+
+// sameSiteHop marks the request made again from Umbrella's own page.
+const sameSiteHop = "same"
+
+var hopTemplate = template.Must(template.New("hop").Parse(`<!doctype html>
+<html><head><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="referrer" content="no-referrer">
+<meta http-equiv="refresh" content="0;url={{.}}"><title>Umbrella</title></head>
+<body><p><a href="{{.}}">Umbrella</a></p></body></html>`))
+
+// hopPage navigates to a path of this origin from a page of this origin, so that the request
+// is same-site and carries the SameSite=Strict session cookie.
+func hopPage(w http.ResponseWriter, path string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_ = hopTemplate.Execute(w, path)
 }

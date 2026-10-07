@@ -45,6 +45,7 @@ func init() {
 	statuses = append(statuses,
 		orgStatus{ErrMonitoringRunning, http.StatusConflict, "monitoring_running"},
 		orgStatus{ErrHostNotFound, http.StatusNotFound, "host_not_found"},
+		orgStatus{ErrSourceInUse, http.StatusConflict, "source_in_use"},
 	)
 }
 
@@ -60,7 +61,15 @@ type MonitoringService struct {
 	now     func() time.Time
 	mu      sync.Mutex
 	running map[string]bool
+	// polls tells the last poll of the alerts of a source (alertPoller.status).
+	polls func(id string) *model.MonitoringPoll
 }
+
+const (
+	defaultPollSeconds = 60
+	minPollSeconds     = 15
+	maxPollSeconds     = 3600
+)
 
 func NewMonitoringService(st *store.Store, creds *CredentialsService, cis *CIService) *MonitoringService {
 	return &MonitoringService{st: st, creds: creds, cis: cis, fetch: monitoring.Fetch, now: func() time.Time { return time.Now().UTC() },
@@ -77,6 +86,10 @@ type MonitoringSourceInput struct {
 	SyncMinutes  int    `json:"sync_minutes"`
 	Query        string `json:"query"`
 	HostLabel    string `json:"host_label"`
+	ConnectorID  string `json:"connector_id"`
+	PollAlerts   bool   `json:"poll_alerts"`
+	PollSeconds  int    `json:"poll_seconds"`
+	QuietMinutes int    `json:"quiet_minutes"`
 }
 
 type MonitoringSourceView struct {
@@ -87,6 +100,24 @@ type MonitoringSourceView struct {
 	Unmatched      int        `json:"unmatched"`
 	Running        bool       `json:"running"`
 	NextSyncAt     *time.Time `json:"next_sync_at,omitempty"`
+	// Connector receives the alerts of the system; Rules counts the RED and USE rules that
+	// query a Prometheus system.
+	Connector *SystemConnector `json:"connector,omitempty"`
+	Rules     int              `json:"rules"`
+	// Poll is the last poll of the alerts of a Grafana or Graylog system since Umbrella started.
+	Poll *model.MonitoringPoll `json:"poll,omitempty"`
+}
+
+// SystemConnector is the alert intake of a monitoring system. LastReceived is filled in by
+// the handler from the intake statistics.
+type SystemConnector struct {
+	ID           string     `json:"id"`
+	Name         string     `json:"name"`
+	Slug         string     `json:"slug"`
+	Status       string     `json:"status"`
+	IngestPath   string     `json:"ingest_path"`
+	LastReceived *time.Time `json:"last_received,omitempty"`
+	Received     int        `json:"received"`
 }
 
 type MonitoringView struct {
@@ -94,6 +125,12 @@ type MonitoringView struct {
 	Defaults struct {
 		Query     string `json:"query"`
 		HostLabel string `json:"host_label"`
+		// GrafanaHostLabels name the host of a Grafana alert when the system sets no label.
+		GrafanaHostLabels []string `json:"grafana_host_labels"`
+		PollSeconds       int      `json:"poll_seconds"`
+		// Graylog: the host field and the quiet time when the system sets none.
+		GraylogHostField    string `json:"graylog_host_field"`
+		GraylogQuietMinutes int    `json:"graylog_quiet_minutes"`
 	} `json:"defaults"`
 }
 
@@ -262,12 +299,28 @@ func (s *MonitoringService) sourceView(d *store.Data, m *hostMatcher, src *model
 	if c := d.Credentials[src.CredentialID]; c != nil {
 		v.CredentialName = c.Name
 	}
+	if cn := d.Connectors[src.ConnectorID]; cn != nil {
+		v.Connector = &SystemConnector{ID: cn.ID, Name: cn.Name, Slug: cn.Slug, Status: statusOf(cn), IngestPath: "/api/ingest/" + cn.Slug}
+	} else {
+		v.ConnectorID = ""
+	}
+	for _, r := range d.Rules {
+		if r.SourceID == src.ID {
+			v.Rules++
+		}
+	}
 	for _, h := range src.Hosts {
-		if m.match(src, h).CIID != "" {
+		// The same groups as the host list: a host said to be no item is neither matched nor
+		// unmatched.
+		switch hm := m.match(src, h); {
+		case hm.CIID != "":
 			v.Matched++
-		} else {
+		case hm.How != MatchExcluded:
 			v.Unmatched++
 		}
+	}
+	if s.polls != nil && pollable(src.Kind) {
+		v.Poll = s.polls(src.ID)
 	}
 	if src.Enabled && src.SyncMinutes > 0 {
 		next := src.Sync.StartedAt.Add(time.Duration(src.SyncMinutes) * time.Minute)
@@ -282,6 +335,8 @@ func (s *MonitoringService) sourceView(d *store.Data, m *hostMatcher, src *model
 func (s *MonitoringService) View() MonitoringView {
 	out := MonitoringView{Sources: []MonitoringSourceView{}}
 	out.Defaults.Query, out.Defaults.HostLabel = monitoring.DefaultQuery, monitoring.DefaultHostLabel
+	out.Defaults.GrafanaHostLabels, out.Defaults.PollSeconds = monitoring.GrafanaHostLabels, defaultPollSeconds
+	out.Defaults.GraylogHostField, out.Defaults.GraylogQuietMinutes = monitoring.DefaultGraylogHostField, int(monitoring.DefaultGraylogQuiet/time.Minute)
 	s.st.Read(func(d *store.Data) {
 		m := newHostMatcher(d)
 		for _, src := range sortedSources(d) {
@@ -296,7 +351,7 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 	if n := utf8.RuneCountInString(in.Name); n == 0 || n > 200 || strings.ContainsFunc(in.Name, unicode.IsControl) {
 		return invalid("name_invalid", nil)
 	}
-	if in.Kind != model.MonitoringZabbix && in.Kind != model.MonitoringPrometheus {
+	if in.Kind != model.MonitoringZabbix && in.Kind != model.MonitoringPrometheus && in.Kind != model.MonitoringGrafana && in.Kind != model.MonitoringGraylog {
 		return invalid("monitoring_kind", nil)
 	}
 	u, err := optionalURL(in.URL)
@@ -307,13 +362,47 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 	if in.SyncMinutes < 0 || in.SyncMinutes > 10080 {
 		return invalid("monitoring_interval", nil)
 	}
-	if in.Kind == model.MonitoringPrometheus {
+	switch in.Kind {
+	case model.MonitoringPrometheus:
 		in.Query, in.HostLabel = strings.TrimSpace(in.Query), strings.TrimSpace(in.HostLabel)
 		if len(in.Query) > 4000 || len(in.HostLabel) > 200 {
 			return invalid("monitoring_query", nil)
 		}
-	} else {
+	case model.MonitoringGrafana:
+		in.Query, in.HostLabel = "", strings.TrimSpace(in.HostLabel)
+		if len(in.HostLabel) > 200 {
+			return invalid("monitoring_query", nil)
+		}
+	case model.MonitoringGraylog:
+		in.Query, in.HostLabel = strings.TrimSpace(in.Query), strings.TrimSpace(in.HostLabel)
+		if len(in.Query) > 4000 || len(in.HostLabel) > 200 || strings.ContainsFunc(in.HostLabel, unicode.IsSpace) {
+			return invalid("monitoring_query", nil)
+		}
+	default:
 		in.Query, in.HostLabel = "", ""
+	}
+	if in.Kind == model.MonitoringGraylog {
+		if in.QuietMinutes == 0 {
+			in.QuietMinutes = int(monitoring.DefaultGraylogQuiet / time.Minute)
+		}
+		if in.QuietMinutes < 1 || in.QuietMinutes > 1440 {
+			return invalid("monitoring_quiet", nil)
+		}
+	} else {
+		in.QuietMinutes = 0
+	}
+	if pollable(in.Kind) {
+		if in.PollSeconds == 0 {
+			in.PollSeconds = defaultPollSeconds
+		}
+		if in.PollSeconds < minPollSeconds || in.PollSeconds > maxPollSeconds {
+			return invalid("monitoring_poll_interval", nil)
+		}
+	} else {
+		in.PollAlerts, in.PollSeconds = false, 0
+	}
+	if in.ConnectorID != "" && d.Connectors[in.ConnectorID] == nil {
+		return invalid("connector_not_found", nil)
 	}
 	if in.CredentialID == "" {
 		if in.Kind == model.MonitoringZabbix {
@@ -326,7 +415,7 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 		return invalid("credential_not_found", nil)
 	}
 	ok := c.Type == "bearer" || c.Type == "basic"
-	if in.Kind == model.MonitoringPrometheus {
+	if in.Kind != model.MonitoringZabbix {
 		ok = ok || c.Type == "header"
 	}
 	if !ok {
@@ -338,6 +427,7 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 func (in MonitoringSourceInput) apply(src *model.MonitoringSource) {
 	src.Name, src.Kind, src.URL, src.CredentialID, src.SkipVerify = in.Name, in.Kind, in.URL, in.CredentialID, in.SkipVerify
 	src.Enabled, src.SyncMinutes, src.Query, src.HostLabel = in.Enabled, in.SyncMinutes, in.Query, in.HostLabel
+	src.ConnectorID, src.PollAlerts, src.PollSeconds, src.QuietMinutes = in.ConnectorID, in.PollAlerts, in.PollSeconds, in.QuietMinutes
 }
 
 func (s *MonitoringService) Create(actor string, in MonitoringSourceInput) (MonitoringSourceView, error) {
@@ -372,9 +462,13 @@ func (s *MonitoringService) Update(actor, id string, in MonitoringSourceInput) (
 		if err = s.check(d, &in); err != nil {
 			return
 		}
+		if in.Kind != model.MonitoringPrometheus && rulesUse(d, id) {
+			err = ErrSourceInUse
+			return
+		}
 		// Another system means other hosts: what was read and linked before no longer applies.
 		if src.Kind != in.Kind || !strings.EqualFold(src.URL, in.URL) {
-			src.Hosts, src.Links, src.Sync = nil, map[string]string{}, model.MonitoringSync{}
+			src.Hosts, src.Links, src.Sync, src.Polled = nil, map[string]string{}, model.MonitoringSync{}, nil
 		}
 		in.apply(src)
 		src.UpdatedBy, src.UpdatedAt = actor, s.now()
@@ -391,9 +485,43 @@ func (s *MonitoringService) Delete(actor, id string) error {
 		if src == nil {
 			return
 		}
+		if rulesUse(d, id) {
+			err = ErrSourceInUse
+			return
+		}
 		delete(d.MonitoringSources, id)
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "monitoring.delete", Object: id, Detail: src.Name})
 		err = nil
+	})
+	return err
+}
+
+// rulesUse: RED or USE rules query the source.
+func rulesUse(d *store.Data, id string) bool {
+	for _, r := range d.Rules {
+		if r.SourceID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// LinkConnector makes a connector the alert intake of a monitoring system; an empty ID unlinks.
+func (s *MonitoringService) LinkConnector(actor, id, connectorID string) error {
+	err := ErrNotFound
+	s.st.Write(func(d *store.Data) {
+		src := d.MonitoringSources[id]
+		if src == nil {
+			return
+		}
+		if connectorID != "" && d.Connectors[connectorID] == nil {
+			err = invalid("connector_not_found", nil)
+			return
+		}
+		err = nil
+		src.ConnectorID = connectorID
+		src.UpdatedBy, src.UpdatedAt = actor, s.now()
+		d.AddAudit(store.AuditEntry{Actor: actor, Action: "monitoring.connector", Object: id, Detail: src.Name + ": connector " + firstSet(connectorID, "none")})
 	})
 	return err
 }
@@ -428,7 +556,13 @@ func (s *MonitoringService) Test(ctx context.Context, in MonitoringSourceInput) 
 	if err != nil {
 		return MonitoringTestReport{Error: err.Error(), Sample: []model.MonitoringHost{}}, nil
 	}
-	out := MonitoringTestReport{OK: true, Version: res.Version, Hosts: len(res.Hosts), Sample: res.Hosts[:min(len(res.Hosts), 5)]}
+	out := MonitoringTestReport{OK: true, Version: res.Version, Hosts: len(res.Hosts), Sample: slices.Clone(res.Hosts[:min(len(res.Hosts), 5)])}
+	if out.Sample == nil {
+		out.Sample = []model.MonitoringHost{}
+	}
+	for i := range out.Sample {
+		out.Sample[i].Normalize()
+	}
 	return out, nil
 }
 
@@ -506,17 +640,19 @@ func (s *MonitoringService) Sync(ctx context.Context, actor, id string) (model.M
 func (s *MonitoringService) Run(ctx context.Context) {
 	tk := time.NewTicker(time.Minute)
 	defer tk.Stop()
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tk.C:
 			for _, id := range s.due() {
-				go func() {
+				wg.Go(func() {
 					if _, err := s.Sync(ctx, monitoringActor, id); err != nil && !errors.Is(err, ErrMonitoringRunning) {
 						slog.Error("monitoring: reading hosts failed", "source", id, "err", err)
 					}
-				}()
+				})
 			}
 		}
 	}
@@ -587,6 +723,7 @@ func (s *MonitoringService) Hosts(f HostFilter) HostList {
 		var all []HostView
 		for _, src := range sortedSources(d) {
 			for _, h := range src.Hosts {
+				h.Normalize()
 				hm := m.match(src, h)
 				v := HostView{MonitoringHost: h, SourceID: src.ID, SourceName: src.Name, Kind: src.Kind, Match: hm.How,
 					Candidates: []ServiceRef{}, AlsoIn: []HostRef{}}

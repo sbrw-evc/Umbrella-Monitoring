@@ -68,9 +68,9 @@ var pages = []Page{
 		view,
 		{"edit", Text{"Plan, change, finish and delete maintenance windows", "Планирование, изменение, завершение и удаление сервисных окон"}},
 	}},
-	{"tv", GroupOverview, Text{"TV boards", "ТВ-панели"}, []Feature{
+	{"wallboards", GroupOverview, Text{"TV wallboards", "ТВ-панели"}, []Feature{
 		view,
-		{"edit", Text{"Create, change and delete boards, change their allowed networks and trusted proxies", "Создание, изменение и удаление панелей, их разрешённых сетей и доверенных прокси"}},
+		{"edit", Text{"Create, change and delete TV wallboards and their allowed networks", "Создание, изменение и удаление ТВ-панелей и разрешённых сетей"}},
 	}},
 	{"connectors", GroupAuto, Text{"Connectors", "Коннекторы"}, []Feature{
 		view,
@@ -91,9 +91,14 @@ var pages = []Page{
 	{"monitoring", GroupAuto, Text{"Monitoring systems", "Системы мониторинга"}, []Feature{
 		view,
 		test,
-		{"edit", Text{"Add, change and delete Zabbix and Prometheus connections", "Добавление, изменение и удаление подключений Zabbix и Prometheus"}},
-		{"sync", Text{"Read host lists", "Загрузка списков хостов"}},
+		{"edit", Text{"Add, change and delete Zabbix, Prometheus, Grafana and Graylog connections", "Добавление, изменение и удаление подключений Zabbix, Prometheus, Grafana и Graylog"}},
+		{"sync", Text{"Read host lists and poll alerts", "Загрузка списков хостов и опрос алертов"}},
 		{"link", Text{"Link hosts to configuration items and create items from hosts", "Привязка хостов к КЕ и создание КЕ из хостов"}},
+	}},
+	{"response", GroupAuto, Text{"Incident response", "Реагирование на инциденты"}, []Feature{
+		view,
+		{"test", Text{"Check the Jira, Microsoft Teams and Zoom connections", "Проверка подключений Jira, Microsoft Teams и Zoom"}},
+		{"edit", Text{"Change impact rules, priority policies, escalations and integrations", "Изменение правил влияния, политик приоритетов, эскалаций и интеграций"}},
 	}},
 	{"credentials", GroupAuto, Text{"Credentials", "Учётные данные"}, []Feature{
 		view,
@@ -127,17 +132,22 @@ func Pages() []Page { return slices.Clone(pages) }
 
 func Perm(page, feature string) string { return page + ":" + feature }
 
-func All() []string {
+// all and valid are computed once from pages: the catalog never changes at run time.
+var all, valid = func() ([]string, map[string]bool) {
 	var out []string
+	set := map[string]bool{}
 	for _, p := range pages {
 		for _, f := range p.Features {
 			out = append(out, Perm(p.ID, f.ID))
+			set[Perm(p.ID, f.ID)] = true
 		}
 	}
-	return out
-}
+	return out, set
+}()
 
-func Valid(perm string) bool { return slices.Contains(All(), perm) }
+func All() []string { return slices.Clone(all) }
+
+func Valid(perm string) bool { return valid[perm] }
 
 func Normalize(perms []string) []string {
 	set := map[string]bool{}
@@ -151,7 +161,7 @@ func Normalize(perms []string) []string {
 		set[Perm(page, View)] = true
 	}
 	out := make([]string, 0, len(set))
-	for _, p := range All() {
+	for _, p := range all {
 		if set[p] {
 			out = append(out, p)
 		}
@@ -173,7 +183,7 @@ func (s Set) Has(perm string) bool { return s[perm] }
 
 func (s Set) List() []string {
 	out := []string{}
-	for _, p := range All() {
+	for _, p := range all {
 		if s[p] {
 			out = append(out, p)
 		}

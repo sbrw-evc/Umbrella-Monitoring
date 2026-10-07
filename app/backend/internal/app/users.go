@@ -167,6 +167,14 @@ func (s *UserService) SetTimezone(id string, tz string) (model.User, error) {
 	})
 }
 
+// SetLocale keeps the interface language of the user; empty is the default of the installation.
+func (s *UserService) SetLocale(id string, locale string) (model.User, error) {
+	if locale != "" && !model.ValidLocale(locale) {
+		return model.User{}, invalid("invalid_locale", nil)
+	}
+	return s.update(id, func(d *store.Data, u *model.User) { u.Locale = locale })
+}
+
 // SetTelegram sets the Telegram chat backup notification sends to; empty clears it.
 func (s *UserService) SetTelegram(id string, chat string) (model.User, error) {
 	chat = strings.TrimSpace(chat)
@@ -179,6 +187,24 @@ func (s *UserService) SetTelegram(id string, chat string) (model.User, error) {
 		}
 		u.Telegram = chat
 		d.AddAudit(store.AuditEntry{Actor: u.Username, Action: "user.preferences", Object: u.ID, Detail: "telegram chat changed"})
+	})
+}
+
+// LinkTelegram ties a Telegram private chat to a user through the bot: the chat is taken away
+// from any other user, so a Telegram account acts for one user only.
+func (s *UserService) LinkTelegram(id, chat string) (model.User, error) {
+	if !notify.ValidChat(chat) {
+		return model.User{}, invalid("invalid_telegram", nil)
+	}
+	return s.update(id, func(d *store.Data, u *model.User) {
+		for _, other := range d.Users {
+			if other.ID != u.ID && other.Telegram == chat {
+				other.Telegram = ""
+				d.AddAudit(store.AuditEntry{Actor: u.Username, Action: "user.preferences", Object: other.ID, Detail: "telegram chat moved to another account"})
+			}
+		}
+		u.Telegram = chat
+		d.AddAudit(store.AuditEntry{Actor: u.Username, Action: "user.preferences", Object: u.ID, Detail: "telegram linked by the bot"})
 	})
 }
 

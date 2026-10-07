@@ -59,7 +59,7 @@ function PageRow({ page, value, onChange, readOnly }: { page: CatalogPage; value
             <motion.button
               key={f.id}
               type="button"
-              className={`perm-chip${on ? ' on' : ''}${f.id === VIEW ? ' view' : ''}`}
+              className={`chip perm-chip${on ? ' on' : ''}${f.id === VIEW ? ' view' : ''}`}
               aria-pressed={on}
               disabled={readOnly}
               onClick={() => onChange(value.toggle(page, f.id, !on))}

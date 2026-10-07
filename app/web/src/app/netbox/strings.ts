@@ -32,7 +32,12 @@ export const strings: Dict = {
     'nb.import.services': 'Services',
     'nb.contacts': 'Responsible people',
     'nb.contacts.hint':
-      'Contacts assigned to objects become their responsible people. An account with the same e-mail is used; otherwise an account is created and updated when the contact changes in NetBox. Such a person keeps the account when signing in through LDAP / AD or Entra ID.',
+      'Contacts assigned to objects become «Responsible for the CI»: they get an incident only when the item has no service with an owning team. The account with the same e-mail is used.',
+    'nb.createUsers': 'Create accounts for contacts',
+    'nb.createUsers.on':
+      'A contact without an account gets one (source NetBox, the role for new users), updated when the contact changes. The person keeps it when signing in through LDAP / AD or Entra ID. A deleted account comes back at the next synchronization.',
+    'nb.createUsers.off': 'Contacts without an account are skipped until the person signs in through LDAP / AD or Entra ID or gets a local account with the same e-mail.',
+    'nb.sync.users.skipped': ', {n} without an account skipped',
     'nb.directory': 'Match with the domain controller',
     'nb.directory.hint': 'Devices and virtual machines are matched with computer objects of Active Directory by name: DNS name, operating system, last logon, disabled accounts.',
     'nb.directory.none': 'Connect LDAP / AD of the Active Directory type in the settings to use this.',
@@ -72,6 +77,12 @@ export const strings: Dict = {
     'nb.sync.directory.off': 'Not checked',
     'nb.sync.done': 'Synchronization finished.',
     'nb.sync.by': 'by {actor}',
+    'nb.sync.held': 'Items missing from NetBox were kept: {count}',
+    'nb.sync.held.empty':
+      'NetBox returned no objects at all. This usually means the API token lost its permissions or a filter is wrong, so nothing was deleted or unlinked. Check NetBox and synchronize again.',
+    'nb.sync.held.share':
+      'More than half of the items linked to NetBox are missing from its answer. To keep the catalog safe from an incomplete answer they were not deleted or unlinked. If they were really removed in NetBox, confirm the removal.',
+    'nb.sync.held.confirm': 'Remove {count} missing items',
     'err.netbox_token_required': 'Enter the NetBox API token.',
     'err.netbox_invalid': 'NetBox settings are incomplete.',
     'err.netbox_unavailable': 'Umbrella cannot work with NetBox using these settings.',
@@ -110,7 +121,12 @@ export const strings: Dict = {
     'nb.import.services': 'Сервисы',
     'nb.contacts': 'Ответственные',
     'nb.contacts.hint':
-      'Контакты, назначенные объектам, становятся ответственными за КЕ. Если есть учётная запись с той же почтой, используется она; иначе учётная запись создаётся и обновляется при изменении контакта в NetBox. При входе через LDAP / AD или Entra ID человек получает эту же учётную запись.',
+      'Контакты, назначенные объектам, становятся «Ответственными за КЕ»: они получают инцидент, только если у КЕ нет сервиса с командой-владельцем. Используется учётная запись с той же почтой.',
+    'nb.createUsers': 'Создавать учётные записи для контактов',
+    'nb.createUsers.on':
+      'Контакт без учётной записи получает её (источник NetBox, роль для новых пользователей), она обновляется при изменении контакта. При входе через LDAP / AD или Entra ID человек получает эту же запись. Удалённая запись вернётся при следующей синхронизации.',
+    'nb.createUsers.off': 'Контакты без учётной записи пропускаются, пока человек не войдёт через LDAP / AD или Entra ID или не получит локальную запись с той же почтой.',
+    'nb.sync.users.skipped': ', без учётной записи пропущено {n}',
     'nb.directory': 'Сверка с контроллером домена',
     'nb.directory.hint':
       'Устройства и виртуальные машины сопоставляются с объектами компьютеров Active Directory по имени: DNS-имя, операционная система, последний вход, отключённые учётные записи.',
@@ -151,6 +167,12 @@ export const strings: Dict = {
     'nb.sync.directory.off': 'Не проверялся',
     'nb.sync.done': 'Синхронизация завершена.',
     'nb.sync.by': '{actor}',
+    'nb.sync.held': 'Объекты, которых нет в ответе NetBox, сохранены: {count}',
+    'nb.sync.held.empty':
+      'NetBox не вернул ни одного объекта. Обычно это значит, что API-токен потерял права или фильтр задан неверно, поэтому ничего не удалено и не отвязано. Проверьте NetBox и запустите синхронизацию снова.',
+    'nb.sync.held.share':
+      'В ответе NetBox нет больше половины связанных с ним объектов. Чтобы неполный ответ не опустошил каталог, они не удалены и не отвязаны. Если они действительно удалены в NetBox, подтвердите удаление.',
+    'nb.sync.held.confirm': 'Удалить отсутствующие объекты: {count}',
     'err.netbox_token_required': 'Введите API-токен NetBox.',
     'err.netbox_invalid': 'Настройки NetBox заполнены не полностью.',
     'err.netbox_unavailable': 'С этими настройками Umbrella не может работать с NetBox.',

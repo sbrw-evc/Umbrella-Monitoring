@@ -39,6 +39,8 @@ type MaintenanceView struct {
 	State    string      `json:"state"`
 	CIs      []TargetRef `json:"cis"`
 	Services []TargetRef `json:"services"`
+	// InScope: the viewer may change the window (its targets are within their scope).
+	InScope bool `json:"in_scope"`
 }
 
 type TargetRef struct {
@@ -49,6 +51,8 @@ type TargetRef struct {
 
 func (s *MaintenanceService) view(d *store.Data, m *model.Maintenance, now time.Time) MaintenanceView {
 	v := MaintenanceView{Maintenance: *m, State: m.State(now), CIs: []TargetRef{}, Services: []TargetRef{}}
+	// gob drops empty lists, so a window read back from the snapshot may have nil here.
+	v.CIIDs, v.ServiceIDs = nonNil(m.CIIDs), nonNil(m.ServiceIDs)
 	for _, id := range m.CIIDs {
 		if ci := d.ConfigItems[id]; ci != nil {
 			v.CIs = append(v.CIs, TargetRef{ID: id, Name: ci.Name})
@@ -69,12 +73,14 @@ func (s *MaintenanceService) view(d *store.Data, m *model.Maintenance, now time.
 var stateOrder = map[string]int{model.MaintenanceActive: 0, model.MaintenancePlanned: 1, model.MaintenanceFinished: 2}
 
 // List: active windows first, then planned ones by start, then finished ones, newest first.
-func (s *MaintenanceService) List() []MaintenanceView {
+func (s *MaintenanceService) List(sc viewScope) []MaintenanceView {
 	now := s.now()
 	out := []MaintenanceView{}
 	s.st.Read(func(d *store.Data) {
 		for _, m := range d.Maintenance {
-			out = append(out, s.view(d, m, now))
+			v := s.view(d, m, now)
+			v.InScope = sc.checkTargets(d, m.CIIDs, m.ServiceIDs, nil) == nil
+			out = append(out, v)
 		}
 	})
 	slices.SortFunc(out, func(a, b MaintenanceView) int {
@@ -148,12 +154,15 @@ func (s *MaintenanceService) purge(d *store.Data, now time.Time) {
 	}
 }
 
-func (s *MaintenanceService) Create(actor string, in MaintenanceInput) (MaintenanceView, error) {
+func (s *MaintenanceService) Create(actor string, sc viewScope, in MaintenanceInput) (MaintenanceView, error) {
 	now := s.now()
 	var out MaintenanceView
 	var err error
 	s.st.Write(func(d *store.Data) {
 		if err = s.check(d, &in); err != nil {
+			return
+		}
+		if err = sc.checkTargets(d, in.CIIDs, in.ServiceIDs, nil); err != nil {
 			return
 		}
 		s.purge(d, now)
@@ -162,11 +171,12 @@ func (s *MaintenanceService) Create(actor string, in MaintenanceInput) (Maintena
 		d.Maintenance[m.ID] = m
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "maintenance.create", Object: m.ID, Detail: m.Title})
 		out = s.view(d, m, now)
+		out.InScope = true
 	})
 	return out, err
 }
 
-func (s *MaintenanceService) Update(actor, id string, in MaintenanceInput) (MaintenanceView, error) {
+func (s *MaintenanceService) Update(actor string, sc viewScope, id string, in MaintenanceInput) (MaintenanceView, error) {
 	now := s.now()
 	var out MaintenanceView
 	err := ErrNotFound
@@ -178,16 +188,23 @@ func (s *MaintenanceService) Update(actor, id string, in MaintenanceInput) (Main
 		if err = s.check(d, &in); err != nil {
 			return
 		}
+		if err = sc.covers(d, m.CIIDs, m.ServiceIDs, nil); err != nil {
+			return
+		}
+		if err = sc.checkTargets(d, in.CIIDs, in.ServiceIDs, nil); err != nil {
+			return
+		}
 		m.Title, m.Comment, m.CIIDs, m.ServiceIDs, m.Start, m.End = in.Title, in.Comment, in.CIIDs, in.ServiceIDs, in.Start, in.End
 		m.UpdatedBy, m.UpdatedAt = actor, now
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "maintenance.update", Object: m.ID, Detail: m.Title})
 		out = s.view(d, m, now)
+		out.InScope = true
 	})
 	return out, err
 }
 
 // Finish ends an active window now; a planned one is cancelled by deleting it.
-func (s *MaintenanceService) Finish(actor, id string) (MaintenanceView, error) {
+func (s *MaintenanceService) Finish(actor string, sc viewScope, id string) (MaintenanceView, error) {
 	now := s.now().Truncate(time.Second)
 	var out MaintenanceView
 	err := ErrNotFound
@@ -196,7 +213,9 @@ func (s *MaintenanceService) Finish(actor, id string) (MaintenanceView, error) {
 		if m == nil {
 			return
 		}
-		err = nil
+		if err = sc.covers(d, m.CIIDs, m.ServiceIDs, nil); err != nil {
+			return
+		}
 		if m.State(now) != model.MaintenanceActive {
 			err = invalid("not_active", nil)
 			return
@@ -204,14 +223,18 @@ func (s *MaintenanceService) Finish(actor, id string) (MaintenanceView, error) {
 		m.End, m.UpdatedBy, m.UpdatedAt = now, actor, now
 		d.AddAudit(store.AuditEntry{Actor: actor, Action: "maintenance.finish", Object: m.ID, Detail: m.Title})
 		out = s.view(d, m, now)
+		out.InScope = true
 	})
 	return out, err
 }
 
-func (s *MaintenanceService) Delete(actor, id string) error {
+func (s *MaintenanceService) Delete(actor string, sc viewScope, id string) error {
 	err := ErrNotFound
 	s.st.Write(func(d *store.Data) {
 		if m := d.Maintenance[id]; m != nil {
+			if err = sc.covers(d, m.CIIDs, m.ServiceIDs, nil); err != nil {
+				return
+			}
 			delete(d.Maintenance, id)
 			d.AddAudit(store.AuditEntry{Actor: actor, Action: "maintenance.delete", Object: id, Detail: m.Title})
 			err = nil
@@ -220,18 +243,20 @@ func (s *MaintenanceService) Delete(actor, id string) error {
 	return err
 }
 
-// Targets finds configuration items and services by name for the window editor.
-func (s *MaintenanceService) Targets(q string) map[string][]TargetRef {
+// Targets finds configuration items and services by name for the window editor; a limited
+// user gets only those within their scope.
+func (s *MaintenanceService) Targets(q string, sc viewScope) map[string][]TargetRef {
 	q = strings.ToLower(strings.TrimSpace(q))
 	cis, svcs := []TargetRef{}, []TargetRef{}
 	s.st.Read(func(d *store.Data) {
 		for _, ci := range d.ConfigItems {
-			if q == "" || strings.Contains(strings.ToLower(ci.Name), q) || slices.ContainsFunc(ci.IPs, func(ip string) bool { return strings.HasPrefix(ip, q) }) {
+			if (q == "" || strings.Contains(strings.ToLower(ci.Name), q) || slices.ContainsFunc(ci.IPs, func(ip string) bool { return strings.HasPrefix(ip, q) })) &&
+				sc.hasCI(d, ci.ID) {
 				cis = append(cis, TargetRef{ID: ci.ID, Name: ci.Name})
 			}
 		}
 		for _, svc := range d.Services {
-			if svc.Status != model.ServiceRetired && (q == "" || strings.Contains(strings.ToLower(svc.Name), q)) {
+			if svc.Status != model.ServiceRetired && (q == "" || strings.Contains(strings.ToLower(svc.Name), q)) && sc.hasService(svc.ID) {
 				svcs = append(svcs, TargetRef{ID: svc.ID, Name: svc.Name})
 			}
 		}
@@ -256,11 +281,11 @@ func (a *App) registerMaintenance(mux *http.ServeMux) {
 }
 
 func (a *App) listMaintenance(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, a.maintenance.List())
+	httpx.JSON(w, http.StatusOK, a.maintenance.List(a.userScope(current(r).user)))
 }
 
 func (a *App) maintenanceTargets(w http.ResponseWriter, r *http.Request) {
-	httpx.JSON(w, http.StatusOK, a.maintenance.Targets(r.URL.Query().Get("q")))
+	httpx.JSON(w, http.StatusOK, a.maintenance.Targets(r.URL.Query().Get("q"), a.userScope(current(r).user)))
 }
 
 func (a *App) createMaintenance(w http.ResponseWriter, r *http.Request) {
@@ -268,7 +293,7 @@ func (a *App) createMaintenance(w http.ResponseWriter, r *http.Request) {
 	if !httpx.Decode(w, r, &in) {
 		return
 	}
-	out, err := a.maintenance.Create(current(r).user.Username, in)
+	out, err := a.maintenance.Create(current(r).user.Username, a.userScope(current(r).user), in)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -281,17 +306,17 @@ func (a *App) updateMaintenance(w http.ResponseWriter, r *http.Request) {
 	if !httpx.Decode(w, r, &in) {
 		return
 	}
-	out, err := a.maintenance.Update(current(r).user.Username, r.PathValue("id"), in)
+	out, err := a.maintenance.Update(current(r).user.Username, a.userScope(current(r).user), r.PathValue("id"), in)
 	settingsRespond(w, out, err)
 }
 
 func (a *App) finishMaintenance(w http.ResponseWriter, r *http.Request) {
-	out, err := a.maintenance.Finish(current(r).user.Username, r.PathValue("id"))
+	out, err := a.maintenance.Finish(current(r).user.Username, a.userScope(current(r).user), r.PathValue("id"))
 	settingsRespond(w, out, err)
 }
 
 func (a *App) deleteMaintenance(w http.ResponseWriter, r *http.Request) {
-	if err := a.maintenance.Delete(current(r).user.Username, r.PathValue("id")); err != nil {
+	if err := a.maintenance.Delete(current(r).user.Username, a.userScope(current(r).user), r.PathValue("id")); err != nil {
 		writeError(w, err)
 		return
 	}
