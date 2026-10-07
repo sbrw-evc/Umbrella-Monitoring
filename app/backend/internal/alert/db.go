@@ -83,6 +83,9 @@ func EnsureSchema(ctx context.Context, pool *pgxpool.Pool) error {
 		if _, err := tx.Exec(ctx, schema); err != nil {
 			return fmt.Errorf("create alert tables: %w", err)
 		}
+		if _, err := tx.Exec(ctx, feedSchema); err != nil {
+			return fmt.Errorf("create the incident change feed: %w", err)
+		}
 		if _, err := tx.Exec(ctx, pdOffMigration); err != nil {
 			return fmt.Errorf("mark alerts not sent to a disabled PagerDuty: %w", err)
 		}

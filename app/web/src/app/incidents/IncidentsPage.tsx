@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { RefreshCw, Search } from 'lucide-react'
+import { Search } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api'
 import { ErrorBanner } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
+import { useLiveReload } from './live'
 import { useT } from '../../i18n'
 import { Banner, Button, Input, Select } from '../../ui'
 import { useSession } from '../session'
@@ -18,7 +19,11 @@ import '../connectors/connectors.css'
 import '../cis/cis.css'
 import './incidents.css'
 
-const REFRESH_MS = 10_000
+// The stream brings changes at once; the list is also reloaded now and then, in case the stream
+// is down or a change does not touch an incident (a maintenance window that starts).
+const SAFETY_MS = 30_000
+const OFFLINE_MS = 10_000
+const CLOCK_MS = 10_000
 
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value)
@@ -49,13 +54,15 @@ export function IncidentsPage() {
   const bulk = useAction()
   const reload = useCallback(() => setEpoch((e) => e + 1), [])
 
+  const live = useLiveReload(reload)
   useEffect(() => {
     const id = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        setEpoch((e) => e + 1)
-        setNow(Date.now())
-      }
-    }, REFRESH_MS)
+      if (document.visibilityState === 'visible') reload()
+    }, live ? SAFETY_MS : OFFLINE_MS)
+    return () => window.clearInterval(id)
+  }, [live, reload])
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), CLOCK_MS)
     return () => window.clearInterval(id)
   }, [])
   useEffect(() => {
@@ -101,10 +108,10 @@ export function IncidentsPage() {
             <Search size={16} aria-hidden />
             <Input type="search" value={filters.q} placeholder={t('inc.search')} aria-label={t('inc.search')} onChange={(e) => set({ q: e.target.value })} />
           </label>
-          <Button variant="ghost" onClick={reload} busy={list.busy} title={t('inc.auto')}>
-            {!list.busy && <RefreshCw size={16} />}
-            {t('inc.refresh')}
-          </Button>
+          <span className={`inc-live${live ? ' on' : ''}`} role="status" title={live ? t('inc.live.hint') : t('inc.offline.hint')}>
+            <span className="inc-live-dot" aria-hidden />
+            {live ? t('inc.live') : t('inc.offline')}
+          </span>
         </div>
         <div className="svc-filters">
           <label>

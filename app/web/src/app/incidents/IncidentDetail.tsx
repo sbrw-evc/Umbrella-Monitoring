@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { CalendarClock, ExternalLink, Link2, Plus } from 'lucide-react'
 import { api } from '../../api'
 import { ErrorBanner } from '../../connections/ConnectionCard'
@@ -10,6 +10,7 @@ import { ResponseTab } from '../response/ResponseTab'
 import { useSession } from '../session'
 import { BindCIForm, CreateCIForm, ResolveConfirm } from './CatalogForms'
 import { entryText, severityTone } from './format'
+import { useLiveReload } from './live'
 import { strings } from './strings'
 import { severityText, type Detail, type Incident, type PD, type Person, type Severity } from './types'
 
@@ -76,11 +77,16 @@ export function IncidentDetail({ id, actor, onClose, onChanged, onOpen }: Props)
     act.clear()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+  const live = useLiveReload(
+    useCallback(() => {
+      if (id) setEpoch((e) => e + 1)
+    }, [id]),
+  )
   useEffect(() => {
     if (!id) return
-    const timer = window.setInterval(() => setEpoch((e) => e + 1), 10_000)
+    const timer = window.setInterval(() => setEpoch((e) => e + 1), live ? 30_000 : 10_000)
     return () => window.clearInterval(timer)
-  }, [id])
+  }, [id, live])
   const d = detail.data && detail.data.alert.id === id ? detail.data : null
   const a = d?.alert
   const refresh = () => {

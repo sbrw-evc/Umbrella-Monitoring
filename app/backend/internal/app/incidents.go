@@ -32,6 +32,7 @@ func (a *App) alertSink(ctx context.Context, tx pgx.Tx, connectorID string, even
 
 func (a *App) registerIncidents(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/incidents", a.authed(a.can("incidents:view", a.listIncidents)))
+	mux.HandleFunc("GET /api/incidents/stream", a.authed(a.can("incidents:view", a.incidentStream)))
 	mux.HandleFunc("GET /api/incidents/{id}", a.authed(a.can("incidents:view", a.getIncident)))
 	mux.HandleFunc("POST /api/incidents/{id}/{action}", a.authed(a.can("incidents:ack", a.actIncident)))
 	mux.HandleFunc("POST /api/incidents/bulk", a.authed(a.can("incidents:ack", a.bulkIncidents)))
