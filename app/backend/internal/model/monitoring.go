@@ -6,6 +6,7 @@ const (
 	MonitoringZabbix     = "zabbix"
 	MonitoringPrometheus = "prometheus"
 	MonitoringGrafana    = "grafana"
+	MonitoringGraylog    = "graylog"
 
 	HostUp       = "up"
 	HostPartial  = "partial"
@@ -18,7 +19,7 @@ const (
 	HostNoCI = "-"
 )
 
-// MonitoringSource is a monitoring system (Zabbix, a Prometheus-compatible API or Grafana)
+// MonitoringSource is a monitoring system (Zabbix, a Prometheus-compatible API, Grafana or Graylog)
 // whose host list is read and matched with configuration items. The credential, when set, is one of the
 // credential catalog.
 type MonitoringSource struct {
@@ -32,12 +33,18 @@ type MonitoringSource struct {
 	SyncMinutes  int    `json:"sync_minutes"`
 	// Prometheus: the instant query that lists targets and the label that names the host.
 	// Grafana: the label of alert instances that names the host (empty: instance, host…).
+	// Graylog: the search query that limits the messages hosts are read from (empty: all) and
+	// the message field that names the host (empty: source).
 	Query     string `json:"query,omitempty"`
 	HostLabel string `json:"host_label,omitempty"`
-	// Grafana: read the firing alerts through the API every PollSeconds and hand them to the
-	// connector as if the contact point had sent them. Alerts that stop firing are resolved.
+	// Grafana and Graylog: read the firing alerts through the API every PollSeconds and hand
+	// them to the connector as if the contact point (HTTP notification) had sent them. Alerts
+	// that stop firing are resolved.
 	PollAlerts  bool `json:"poll_alerts,omitempty"`
 	PollSeconds int  `json:"poll_seconds,omitempty"`
+	// QuietMinutes (Graylog): an alert is resolved once its event definition gave no event for
+	// its key for this long (0: 15 minutes).
+	QuietMinutes int `json:"quiet_minutes,omitempty"`
 	// Polled are the alerts the last poll found firing, by fingerprint: an alert missing from
 	// the next poll is resolved.
 	Polled map[string]PolledAlert `json:"-"`

@@ -91,7 +91,7 @@ var pages = []Page{
 	{"monitoring", GroupAuto, Text{"Monitoring systems", "Системы мониторинга"}, []Feature{
 		view,
 		test,
-		{"edit", Text{"Add, change and delete Zabbix, Prometheus and Grafana connections", "Добавление, изменение и удаление подключений Zabbix, Prometheus и Grafana"}},
+		{"edit", Text{"Add, change and delete Zabbix, Prometheus, Grafana and Graylog connections", "Добавление, изменение и удаление подключений Zabbix, Prometheus, Grafana и Graylog"}},
 		{"sync", Text{"Read host lists and poll alerts", "Загрузка списков хостов и опрос алертов"}},
 		{"link", Text{"Link hosts to configuration items and create items from hosts", "Привязка хостов к КЕ и создание КЕ из хостов"}},
 	}},

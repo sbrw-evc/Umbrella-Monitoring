@@ -1,5 +1,6 @@
 // Package logs reads the log lines of a machine over a time range from a log store: a
-// Loki-compatible server through LogQL or an OpenSearch- or Elasticsearch-compatible search API.
+// Loki-compatible server through LogQL, an OpenSearch- or Elasticsearch-compatible search API
+// or Graylog through its search API.
 package logs
 
 import (
@@ -90,6 +91,8 @@ func Fetch(ctx context.Context, src model.LogSource, auth *Auth, q Query) (Resul
 		out, err = fetchLoki(ctx, src, auth, q)
 	case model.LogOpenSearch:
 		out, err = fetchSearch(ctx, src, auth, q)
+	case model.LogGraylog:
+		out, err = fetchGraylog(ctx, src, auth, q)
 	default:
 		return Result{}, fmt.Errorf("unknown log store %q", src.Kind)
 	}
@@ -185,23 +188,33 @@ func base(raw string) (string, error) {
 }
 
 func do(src model.LogSource, req *http.Request) ([]byte, error) {
+	_, body, err := doStatus(src, req)
+	return body, err
+}
+
+// doStatus is do that also tells the status of the answer.
+func doStatus(src model.LogSource, req *http.Request) (int, []byte, error) {
 	resp, err := clients[src.SkipVerify].Do(req)
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
-	if resp.StatusCode/100 != 2 {
+	return resp.StatusCode, body, statusError(resp.StatusCode, body)
+}
+
+func statusError(status int, body []byte) error {
+	if status/100 != 2 {
 		msg := strings.TrimSpace(string(body))
 		if len(msg) > 300 {
 			msg = msg[:300] + "…"
 		}
 		if msg == "" {
-			return nil, fmt.Errorf("the source answered %d", resp.StatusCode)
+			return fmt.Errorf("the source answered %d", status)
 		}
-		return nil, fmt.Errorf("the source answered %d: %s", resp.StatusCode, msg)
+		return fmt.Errorf("the source answered %d: %s", status, msg)
 	}
-	return body, nil
+	return nil
 }
 
 func clip(s string) string {

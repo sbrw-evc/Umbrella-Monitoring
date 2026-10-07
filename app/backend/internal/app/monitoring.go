@@ -89,6 +89,7 @@ type MonitoringSourceInput struct {
 	ConnectorID  string `json:"connector_id"`
 	PollAlerts   bool   `json:"poll_alerts"`
 	PollSeconds  int    `json:"poll_seconds"`
+	QuietMinutes int    `json:"quiet_minutes"`
 }
 
 type MonitoringSourceView struct {
@@ -103,7 +104,7 @@ type MonitoringSourceView struct {
 	// query a Prometheus system.
 	Connector *SystemConnector `json:"connector,omitempty"`
 	Rules     int              `json:"rules"`
-	// Poll is the last poll of the alerts of a Grafana system since Umbrella started.
+	// Poll is the last poll of the alerts of a Grafana or Graylog system since Umbrella started.
 	Poll *model.MonitoringPoll `json:"poll,omitempty"`
 }
 
@@ -127,6 +128,9 @@ type MonitoringView struct {
 		// GrafanaHostLabels name the host of a Grafana alert when the system sets no label.
 		GrafanaHostLabels []string `json:"grafana_host_labels"`
 		PollSeconds       int      `json:"poll_seconds"`
+		// Graylog: the host field and the quiet time when the system sets none.
+		GraylogHostField    string `json:"graylog_host_field"`
+		GraylogQuietMinutes int    `json:"graylog_quiet_minutes"`
 	} `json:"defaults"`
 }
 
@@ -315,7 +319,7 @@ func (s *MonitoringService) sourceView(d *store.Data, m *hostMatcher, src *model
 			v.Unmatched++
 		}
 	}
-	if s.polls != nil && src.Kind == model.MonitoringGrafana {
+	if s.polls != nil && pollable(src.Kind) {
 		v.Poll = s.polls(src.ID)
 	}
 	if src.Enabled && src.SyncMinutes > 0 {
@@ -332,6 +336,7 @@ func (s *MonitoringService) View() MonitoringView {
 	out := MonitoringView{Sources: []MonitoringSourceView{}}
 	out.Defaults.Query, out.Defaults.HostLabel = monitoring.DefaultQuery, monitoring.DefaultHostLabel
 	out.Defaults.GrafanaHostLabels, out.Defaults.PollSeconds = monitoring.GrafanaHostLabels, defaultPollSeconds
+	out.Defaults.GraylogHostField, out.Defaults.GraylogQuietMinutes = monitoring.DefaultGraylogHostField, int(monitoring.DefaultGraylogQuiet/time.Minute)
 	s.st.Read(func(d *store.Data) {
 		m := newHostMatcher(d)
 		for _, src := range sortedSources(d) {
@@ -346,7 +351,7 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 	if n := utf8.RuneCountInString(in.Name); n == 0 || n > 200 || strings.ContainsFunc(in.Name, unicode.IsControl) {
 		return invalid("name_invalid", nil)
 	}
-	if in.Kind != model.MonitoringZabbix && in.Kind != model.MonitoringPrometheus && in.Kind != model.MonitoringGrafana {
+	if in.Kind != model.MonitoringZabbix && in.Kind != model.MonitoringPrometheus && in.Kind != model.MonitoringGrafana && in.Kind != model.MonitoringGraylog {
 		return invalid("monitoring_kind", nil)
 	}
 	u, err := optionalURL(in.URL)
@@ -368,10 +373,25 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 		if len(in.HostLabel) > 200 {
 			return invalid("monitoring_query", nil)
 		}
+	case model.MonitoringGraylog:
+		in.Query, in.HostLabel = strings.TrimSpace(in.Query), strings.TrimSpace(in.HostLabel)
+		if len(in.Query) > 4000 || len(in.HostLabel) > 200 || strings.ContainsFunc(in.HostLabel, unicode.IsSpace) {
+			return invalid("monitoring_query", nil)
+		}
 	default:
 		in.Query, in.HostLabel = "", ""
 	}
-	if in.Kind == model.MonitoringGrafana {
+	if in.Kind == model.MonitoringGraylog {
+		if in.QuietMinutes == 0 {
+			in.QuietMinutes = int(monitoring.DefaultGraylogQuiet / time.Minute)
+		}
+		if in.QuietMinutes < 1 || in.QuietMinutes > 1440 {
+			return invalid("monitoring_quiet", nil)
+		}
+	} else {
+		in.QuietMinutes = 0
+	}
+	if pollable(in.Kind) {
 		if in.PollSeconds == 0 {
 			in.PollSeconds = defaultPollSeconds
 		}
@@ -407,7 +427,7 @@ func (s *MonitoringService) check(d *store.Data, in *MonitoringSourceInput) erro
 func (in MonitoringSourceInput) apply(src *model.MonitoringSource) {
 	src.Name, src.Kind, src.URL, src.CredentialID, src.SkipVerify = in.Name, in.Kind, in.URL, in.CredentialID, in.SkipVerify
 	src.Enabled, src.SyncMinutes, src.Query, src.HostLabel = in.Enabled, in.SyncMinutes, in.Query, in.HostLabel
-	src.ConnectorID, src.PollAlerts, src.PollSeconds = in.ConnectorID, in.PollAlerts, in.PollSeconds
+	src.ConnectorID, src.PollAlerts, src.PollSeconds, src.QuietMinutes = in.ConnectorID, in.PollAlerts, in.PollSeconds, in.QuietMinutes
 }
 
 func (s *MonitoringService) Create(actor string, in MonitoringSourceInput) (MonitoringSourceView, error) {

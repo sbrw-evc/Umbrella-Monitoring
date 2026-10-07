@@ -163,7 +163,7 @@ func TestConnectorLifecycle(t *testing.T) {
 
 	var presets []map[string]any
 	f.expect(f.admin, http.MethodGet, "/api/connectors/presets", nil, http.StatusOK, &presets)
-	if len(presets) != 4 {
+	if len(presets) != 5 {
 		t.Fatalf("presets = %v", presets)
 	}
 	for _, p := range presets {

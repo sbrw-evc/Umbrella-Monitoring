@@ -27,7 +27,7 @@ import '../bulk/bulk.css'
 import { Flash, notify } from '../../notify'
 import { ask } from '../../confirm'
 
-type Kind = 'zabbix' | 'prometheus' | 'grafana'
+type Kind = 'zabbix' | 'prometheus' | 'grafana' | 'graylog'
 type Poll = { at: string; ok: boolean; error?: string; firing: number; sent: number }
 type Sync = { started_at: string; finished_at: string; ok: boolean; error?: string; actor: string; hosts: number; version?: string }
 type Source = {
@@ -44,6 +44,7 @@ type Source = {
   host_label?: string
   poll_alerts?: boolean
   poll_seconds?: number
+  quiet_minutes?: number
   poll?: Poll
   sync: Sync
   hosts: number
@@ -55,7 +56,10 @@ type Source = {
   connector?: { id: string; name: string; slug: string; status: string; ingest_path: string; last_received?: string; received: number }
   rules: number
 }
-type View = { sources: Source[]; defaults: { query: string; host_label: string; grafana_host_labels?: string[]; poll_seconds?: number } }
+type View = {
+  sources: Source[]
+  defaults: { query: string; host_label: string; grafana_host_labels?: string[]; poll_seconds?: number; graylog_host_field?: string; graylog_quiet_minutes?: number }
+}
 type Ref = { id: string; name: string }
 type Host = {
   key: string
@@ -359,7 +363,7 @@ function SystemAlerts({ s, onChanged }: { s: Source; onChanged: () => void }) {
         </dd>
       </dl>
       <CopyField label={t('sys.alerts.url')} value={`${window.location.origin}${c.ingest_path}`} />
-      {s.kind === 'grafana' && <PollBlock s={s} draft={c.status === 'draft'} onChanged={onChanged} />}
+      {(s.kind === 'grafana' || s.kind === 'graylog') && <PollBlock s={s} draft={c.status === 'draft'} onChanged={onChanged} />}
       <p className="muted">{t('sys.alerts.tokens')}</p>
       {c.status !== 'draft' && (can('connectors:edit') || editable) && <TestEvent connectorID={c.id} />}
       {editable && (
@@ -374,7 +378,8 @@ function SystemAlerts({ s, onChanged }: { s: Source; onChanged: () => void }) {
   )
 }
 
-// PollBlock is the state of polling the Grafana Alerting API, with a button to poll at once.
+// PollBlock is the state of polling the Grafana Alerting API or the Graylog events API, with a
+// button to poll at once.
 function PollBlock({ s, draft, onChanged }: { s: Source; draft: boolean; onChanged: () => void }) {
   const t = useT(systemStrings)
   const { can } = useSession()
@@ -387,9 +392,9 @@ function PollBlock({ s, draft, onChanged }: { s: Source; draft: boolean; onChang
     })
   return (
     <div className="mon-poll">
-      <h3>{t('sys.poll.title')}</h3>
+      <h3>{t(s.kind === 'graylog' ? 'sys.poll.title.graylog' : 'sys.poll.title')}</h3>
       {!s.poll_alerts && !p ? (
-        <p className="muted">{t('sys.poll.off')}</p>
+        <p className="muted">{t(s.kind === 'graylog' ? 'sys.poll.off.graylog' : 'sys.poll.off')}</p>
       ) : (
         <dl className="mon-kv">
           <dt>{t('sys.poll.last')}</dt>
@@ -779,6 +784,14 @@ type Draft = Omit<Source, 'id' | 'sync' | 'hosts' | 'matched' | 'unmatched' | 'r
   host_label: string
   poll_alerts: boolean
   poll_seconds: number
+  quiet_minutes: number
+}
+
+const placeholders: Record<Kind, string> = {
+  zabbix: 'https://zabbix.example.com',
+  prometheus: 'http://prometheus:9090',
+  grafana: 'https://grafana.example.com',
+  graylog: 'https://graylog.example.com',
 }
 
 function blank(kind: Kind = 'zabbix'): Draft {
@@ -795,6 +808,7 @@ function blank(kind: Kind = 'zabbix'): Draft {
     host_label: '',
     poll_alerts: false,
     poll_seconds: 60,
+    quiet_minutes: 15,
   }
 }
 
@@ -833,6 +847,7 @@ function SourceEditor({
             host_label: editing.host_label ?? '',
             poll_alerts: editing.poll_alerts ?? false,
             poll_seconds: editing.poll_seconds || 60,
+            quiet_minutes: editing.quiet_minutes || 15,
           }
         : blank(),
     )
@@ -893,11 +908,12 @@ function SourceEditor({
         <Segmented
           label={t('mon.kind')}
           value={d.kind}
-          onChange={(kind) => set({ kind, credential_id: '', name: d.name || '' })}
+          onChange={(kind) => set({ kind, credential_id: '', name: d.name || '', query: '', host_label: '' })}
           options={[
             { value: 'zabbix', label: t('mon.kind.zabbix') },
             { value: 'prometheus', label: t('mon.kind.prometheus') },
             { value: 'grafana', label: t('mon.kind.grafana') },
+            { value: 'graylog', label: t('mon.kind.graylog') },
           ]}
         />
         <Field label={t('mon.name')}>
@@ -910,7 +926,7 @@ function SourceEditor({
               value={d.url}
               spellCheck={false}
               autoComplete="off"
-              placeholder={d.kind === 'zabbix' ? 'https://zabbix.example.com' : d.kind === 'grafana' ? 'https://grafana.example.com' : 'http://prometheus:9090'}
+              placeholder={placeholders[d.kind]}
               onChange={(e) => set({ url: e.target.value })}
             />
           )}
@@ -956,6 +972,39 @@ function SourceEditor({
                   </div>
                 )}
               </Field>
+            )}
+          </>
+        )}
+        {d.kind === 'graylog' && (
+          <>
+            <div className="rl-grid">
+              <Field label={t('mon.gquery')} hint={t('mon.gquery.hint')}>
+                {(id) => <Input id={id} className="cn-mono" value={d.query} spellCheck={false} placeholder="*" onChange={(e) => set({ query: e.target.value })} />}
+              </Field>
+              <Field label={t('mon.gfield')} hint={t('mon.gfield.hint', { field: defaults.graylog_host_field ?? 'source' })}>
+                {(id) => (
+                  <Input id={id} value={d.host_label} spellCheck={false} placeholder={defaults.graylog_host_field ?? 'source'} onChange={(e) => set({ host_label: e.target.value })} />
+                )}
+              </Field>
+            </div>
+            <Switch checked={d.poll_alerts} onChange={(poll_alerts) => set({ poll_alerts })} label={t('mon.poll.graylog')} hint={t('mon.poll.graylog.hint')} />
+            {d.poll_alerts && (
+              <div className="rl-grid">
+                <Field label={t('mon.poll.every')}>
+                  {(id) => (
+                    <div className="nb-stepper">
+                      <Stepper id={id} value={d.poll_seconds} min={15} max={3600} suffix={t('mon.seconds')} onChange={(poll_seconds) => set({ poll_seconds })} />
+                    </div>
+                  )}
+                </Field>
+                <Field label={t('mon.quiet')} hint={t('mon.quiet.hint')}>
+                  {(id) => (
+                    <div className="nb-stepper">
+                      <Stepper id={id} value={d.quiet_minutes} min={1} max={1440} suffix={t('mon.minutes')} onChange={(quiet_minutes) => set({ quiet_minutes })} />
+                    </div>
+                  )}
+                </Field>
+              </div>
             )}
           </>
         )}
