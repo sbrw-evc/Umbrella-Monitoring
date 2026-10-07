@@ -82,6 +82,7 @@ export function LineChart({
   marks,
   formatTime,
   label,
+  threshold,
 }: {
   series: ChartSeries[]
   from: number
@@ -90,6 +91,8 @@ export function LineChart({
   marks: ChartMark[]
   formatTime: (ms: number, long?: boolean) => string
   label: string
+  // threshold: the line the alert fires at.
+  threshold?: number
 }) {
   const { ref, width } = useWidth()
   const [hover, setHover] = useState<number | null>(null)
@@ -103,11 +106,15 @@ export function LineChart({
         lo = Math.min(lo, v)
         hi = Math.max(hi, v)
       }
+    if (threshold !== undefined && Number.isFinite(threshold)) {
+      lo = Math.min(lo, threshold)
+      hi = Math.max(hi, threshold)
+    }
     if (!Number.isFinite(lo)) return { lo: 0, hi: 1 }
     if (unit === '%' && hi <= 100 && lo >= 0) return { lo: 0, hi: hi > 50 ? 100 : niceMax(hi) }
     const base = lo >= 0 ? 0 : -niceMax(-lo)
     return { lo: base, hi: hi <= base ? base + 1 : niceMax(hi) }
-  }, [series, unit])
+  }, [series, unit, threshold])
   const span = Math.max(1, to - from)
   const x = (t: number) => PAD.left + ((t - from) / span) * w
   const y = (v: number) => PAD.top + h - ((v - lo) / (hi - lo || 1)) * h
@@ -173,6 +180,11 @@ export function LineChart({
               </rect>
             ),
           )}
+        {threshold !== undefined && Number.isFinite(threshold) && (
+          <line className="mc-threshold" x1={PAD.left} x2={PAD.left + w} y1={y(threshold)} y2={y(threshold)}>
+            <title>{formatValue(threshold, unit)}</title>
+          </line>
+        )}
         {series.map((s, i) => (
           <path key={s.name} d={path(s)} fill="none" stroke={seriesColor(i)} strokeWidth={1.6} strokeLinejoin="round" />
         ))}

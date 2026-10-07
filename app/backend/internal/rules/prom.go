@@ -153,20 +153,8 @@ func call(ctx context.Context, src model.MetricSource, auth *Auth, path string, 
 		return out, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Accept", "application/json")
-	if auth != nil {
-		switch auth.Type {
-		case "bearer":
-			req.Header.Set("Authorization", "Bearer "+auth.Secrets["token"])
-		case "basic":
-			req.SetBasicAuth(auth.Fields["username"], auth.Secrets["password"])
-		case "header":
-			if h := auth.Fields["header"]; h != "" {
-				req.Header.Set(h, auth.Secrets["value"])
-			}
-		default:
-			return out, fmt.Errorf("a %s credential cannot be used to query metrics", auth.Type)
-		}
+	if err := authorize(req, auth); err != nil {
+		return out, err
 	}
 	resp, err := clients[src.SkipVerify].Do(req)
 	if err != nil {
@@ -188,6 +176,72 @@ func call(ctx context.Context, src model.MetricSource, auth *Auth, path string, 
 		return out, errors.New(msg)
 	}
 	return out, nil
+}
+
+// authorize puts the credential of a source on a request.
+func authorize(req *http.Request, auth *Auth) error {
+	req.Header.Set("Accept", "application/json")
+	if auth == nil {
+		return nil
+	}
+	switch auth.Type {
+	case "bearer":
+		req.Header.Set("Authorization", "Bearer "+auth.Secrets["token"])
+	case "basic":
+		req.SetBasicAuth(auth.Fields["username"], auth.Secrets["password"])
+	case "header":
+		if h := auth.Fields["header"]; h != "" {
+			req.Header.Set(h, auth.Secrets["value"])
+		}
+	default:
+		return fmt.Errorf("a %s credential cannot be used to query metrics", auth.Type)
+	}
+	return nil
+}
+
+// AlertRuleQuery is the expression of the alerting rule of that name on a Prometheus-compatible
+// server (the rules API); empty when the server has no such rule.
+func AlertRuleQuery(ctx context.Context, src model.MetricSource, auth *Auth, name string) (string, error) {
+	base, err := url.Parse(strings.TrimRight(src.URL, "/"))
+	if err != nil || (base.Scheme != "http" && base.Scheme != "https") {
+		return "", errors.New("the source address is not an http or https URL")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base.String()+"/api/v1/rules?type=alert", nil)
+	if err != nil {
+		return "", err
+	}
+	if err := authorize(req, auth); err != nil {
+		return "", err
+	}
+	resp, err := clients[src.SkipVerify].Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	var out struct {
+		Status string `json:"status"`
+		Data   struct {
+			Groups []struct {
+				Rules []struct {
+					Name  string `json:"name"`
+					Query string `json:"query"`
+					Type  string `json:"type"`
+				} `json:"rules"`
+			} `json:"groups"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil || out.Status != "success" {
+		return "", fmt.Errorf("the source did not list its rules (%d)", resp.StatusCode)
+	}
+	for _, g := range out.Data.Groups {
+		for _, r := range g.Rules {
+			if r.Name == name && (r.Type == "" || r.Type == "alerting") && strings.TrimSpace(r.Query) != "" {
+				return r.Query, nil
+			}
+		}
+	}
+	return "", nil
 }
 
 func number(v any) (float64, bool) {
