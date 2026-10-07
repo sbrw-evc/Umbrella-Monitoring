@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/model"
 )
 
 // Webhook is the compiled configuration of trigger.webhook, applied by the intake before a
@@ -55,12 +57,14 @@ const (
 
 var CredentialTypes = []string{CredBearer, CredBasic, CredHeader, CredHMAC}
 
-var severityOptions = []Option{
-	{SeverityCritical, Text{"Critical", "Критическая"}},
-	{SeverityError, Text{"Error", "Ошибка"}},
-	{SeverityWarning, Text{"Warning", "Предупреждение"}},
-	{SeverityInfo, Text{"Info", "Информация"}},
-}
+// severityOptions are the levels of model.Severities, most severe first, shown with their priority.
+var severityOptions = func() []Option {
+	out := make([]Option, 0, len(model.Severities))
+	for _, s := range model.Severities {
+		out = append(out, Option{s.Name, Text{s.Priority + " · " + s.Title.En, s.Priority + " · " + s.Title.Ru}})
+	}
+	return out
+}()
 
 func init() {
 	register(&NodeType{
@@ -307,8 +311,8 @@ func init() {
 		Type: "map.severity", Version: 1, Category: CategoryTransform, Inputs: 1, Outputs: []string{OutMain}, CanFail: true,
 		Title: Text{"Severity table", "Таблица severity"},
 		Description: Text{
-			"Translates the source's value into critical, error, warning or info by a table.",
-			"Переводит значение источника в critical, error, warning или info по таблице.",
+			"Translates the source's value into a priority by a table: P1 critical, P2 error, P3 warning, P4 low or P5 info.",
+			"Переводит значение источника в приоритет по таблице: P1 critical, P2 error, P3 warning, P4 low или P5 info.",
 		},
 		Params: []Param{
 			{Key: "source", Kind: KindTemplate, Required: true, Placeholder: "${labels.severity}",
@@ -443,7 +447,7 @@ func init() {
 			{Key: "method", Kind: KindSelect, Default: MethodOther, Title: Text{"Method", "Метод"},
 				Options: []Option{{MethodRED, Text{"RED", "RED"}}, {MethodUSE, Text{"USE", "USE"}}, {MethodOther, Text{"Other", "Другое"}}}},
 			{Key: "severity", Kind: KindTemplate, Default: "${severity}", Title: Text{"Severity", "Severity"},
-				Help: Text{"critical, error, warning or info; common synonyms are recognized.", "critical, error, warning или info; распространённые синонимы распознаются."}},
+				Help: Text{"critical (P1), error (P2), warning (P3), low (P4) or info (P5); common synonyms and P1…P5 are recognized.", "critical (P1), error (P2), warning (P3), low (P4) или info (P5); распространённые синонимы и P1…P5 распознаются."}},
 			{Key: "status", Kind: KindTemplate, Default: "${status}", Title: Text{"Status", "Статус"},
 				Help: Text{"resolved, ok, closed, recovery… mean resolved; empty means firing.", "resolved, ok, closed, recovery… — resolved; пусто — firing."}},
 			{Key: "external_id", Kind: KindTemplate, Placeholder: "${fingerprint}", Title: Text{"ID in the source", "ID в источнике"}},
@@ -488,7 +492,7 @@ func init() {
 				}
 				s, ok := NormalizeSeverity(out["severity"].(string))
 				if !ok {
-					return fmt.Errorf("severity %q is not critical, error, warning or info", out["severity"])
+					return fmt.Errorf("severity %q is not critical, error, warning, low or info", out["severity"])
 				}
 				out["severity"] = s
 				st, ok := NormalizeStatus(out["status"].(string))

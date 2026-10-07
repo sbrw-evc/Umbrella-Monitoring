@@ -9,10 +9,6 @@ export const strings: Dict = {
     remove: 'Remove',
     none: '—',
     keep: 'Saved; leave empty to keep it',
-    'sev.info': 'Info',
-    'sev.warning': 'Warning',
-    'sev.error': 'Error',
-    'sev.critical': 'Critical',
 
     'pd.title': 'PagerDuty',
     'pd.text':
@@ -194,10 +190,6 @@ export const strings: Dict = {
     remove: 'Удалить',
     none: '—',
     keep: 'Сохранён; оставьте пустым, чтобы не менять',
-    'sev.info': 'Инфо',
-    'sev.warning': 'Предупреждение',
-    'sev.error': 'Ошибка',
-    'sev.critical': 'Критично',
 
     'pd.title': 'PagerDuty',
     'pd.text':

@@ -19,6 +19,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { ErrorBanner } from '../../connections/ConnectionCard'
 import { useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
+import { SEVERITY_TONE, severityText, type Severity } from '../incidents/types'
 import { useTheme } from '../../theme'
 import { Banner, Button, formatDate, Input, Rows, Segmented, Switch } from '../../ui'
 import { useSession } from '../session'
@@ -431,11 +432,11 @@ function CIPanel({ ci: c, map, onSelect }: { ci: MapCI; map: CMDBMap; onSelect: 
             t('map.field.events'),
             firing ? (
               <div key="e" className="map-recent">
-                <span className="muted">{t('map.events.counts', { critical: c.events.critical, error: c.events.error, warning: c.events.warning, info: c.events.info })}</span>
+                <span className="muted">{t('map.events.counts', { critical: c.events.critical, error: c.events.error, warning: c.events.warning, low: c.events.low ?? 0, info: c.events.info })}</span>
                 <ul>
                   {c.events.recent.map((e, i) => (
                     <li key={i}>
-                      <span className={`pill map-sev-${e.severity}`}>{e.severity}</span> {e.title}
+                      <span className={`pill map-sev-${SEVERITY_TONE[e.severity as Severity] ?? 'info'}`}>{severityText(t, e.severity)}</span> {e.title}
                       <span className="muted"> · {formatDate(e.last_seen, locale, timezone)}</span>
                     </li>
                   ))}

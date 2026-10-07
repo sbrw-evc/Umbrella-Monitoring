@@ -358,7 +358,7 @@ func Build(publicURL string, grafana bool, routingKey string, cmd alert.Command)
 	ev.Payload = &Payload{
 		Summary:       truncate(fmt.Sprintf("[%s] %s", strings.ToUpper(a.Severity), a.Title), 1024),
 		Source:        truncate(source, 255),
-		Severity:      a.Severity,
+		Severity:      eventSeverity(a.Severity),
 		Timestamp:     a.OpenedAt.UTC().Format(time.RFC3339),
 		Component:     a.CIName,
 		Group:         group,
@@ -433,6 +433,17 @@ func (g *Gateway) SendTest(ctx context.Context, key string) error {
 }
 
 // truncate cuts to n characters, as the Events API counts its limits.
+// eventSeverity is the payload severity of Events v2, which knows critical, error, warning
+// and info only: low (P4) goes as info, so that PagerDuty urgency rules made for warning are
+// not triggered by a lower priority; anything unknown goes as info too.
+func eventSeverity(s string) string {
+	switch s {
+	case model.SeverityCritical, model.SeverityError, model.SeverityWarning:
+		return s
+	}
+	return model.SeverityInfo
+}
+
 func truncate(s string, n int) string { return textx.Runes(s, n) }
 
 var _ alert.Sender = (*Gateway)(nil)

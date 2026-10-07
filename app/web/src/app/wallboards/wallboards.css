@@ -243,8 +243,12 @@
   background: var(--error);
 }
 
-.wb-sev-warning {
+.wb-sev-warn {
   background: var(--warn);
+}
+
+.wb-sev-low {
+  background: var(--low);
 }
 
 .wb-inline {

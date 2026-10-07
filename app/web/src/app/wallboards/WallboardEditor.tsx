@@ -5,7 +5,7 @@ import { ErrorBanner } from '../../connections/ConnectionCard'
 import { useAction, useResource } from '../../connections/useRequest'
 import { useT } from '../../i18n'
 import { Banner, Button, Field, Input, Modal, Segmented, Stepper, Switch, Textarea } from '../../ui'
-import { SEVERITIES, METHODS } from '../incidents/types'
+import { SEVERITIES, SEVERITY_TONE, severityText, METHODS } from '../incidents/types'
 import { draftOf, inputOf, MAX_NETWORKS, networkOK, networksOf, opensToAll, publicURL, REFRESH_MAX, REFRESH_MIN, RESOLVED_MAX, slugOf, type Draft } from './model'
 import { strings } from './strings'
 import type { BoardLocale, BoardTheme, Ref, Sort, TargetKind, Targets, Wallboard } from './types'
@@ -165,8 +165,8 @@ export function WallboardEditor({
               {SEVERITIES.map((s) => (
                 <label key={s} className="wb-check">
                   <input type="checkbox" checked={d.severities.includes(s)} onChange={(e) => set({ severities: toggle(d.severities, s, e.target.checked) })} />
-                  <span className={`wb-sev-dot wb-sev-${s}`} aria-hidden />
-                  {t(`wb.sev.${s}`)}
+                  <span className={`wb-sev-dot wb-sev-${SEVERITY_TONE[s]}`} aria-hidden />
+                  {severityText(t, s)}
                 </label>
               ))}
               <div className="hint muted">{t('wb.severities.hint')}</div>

@@ -154,7 +154,7 @@ func (e *TemplateError) Unwrap() error { return e.Err }
 // Message is what the templates of a message see.
 type Message struct {
 	ID, Title string
-	// Severity: critical, error, warning or info; t turns it into a word.
+	// Severity: a name of model.Severities; t turns it into its priority and word ("P1 · critical").
 	Severity string
 	CI       string
 	Signal   string

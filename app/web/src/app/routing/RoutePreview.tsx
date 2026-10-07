@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { api } from '../../api'
 import { useT } from '../../i18n'
+import { severityText } from '../incidents/types'
 import { Rows } from '../../ui'
 import { strings } from './strings'
 import './routing.css'
@@ -83,7 +84,7 @@ function RouteRows({ data }: { data: RoutePreviewData }) {
     pd = (
       <span>
         {name}
-        {r.min_severity && <span className="muted"> · {t('rt.pd.min', { sev: r.min_severity })}</span>}
+        {r.min_severity && <span className="muted"> · {t('rt.pd.min', { sev: severityText(t, r.min_severity) })}</span>}
       </span>
     )
   }
@@ -99,7 +100,7 @@ function RouteRows({ data }: { data: RoutePreviewData }) {
         {more > 0 && <span className="muted"> {t('rt.backup.more', { n: more })}</span>}
         <span className="muted">
           {' '}
-          · {delay} · {t('rt.pd.min', { sev: b.min_severity })}
+          · {delay} · {t('rt.pd.min', { sev: severityText(t, b.min_severity) })}
         </span>
       </span>
     )

@@ -148,3 +148,13 @@ func TestWebhookOccurredAt(t *testing.T) {
 		t.Errorf("update = %+v", u)
 	}
 }
+
+func TestBuildSeverity(t *testing.T) {
+	for sev, want := range map[string]string{"critical": "critical", "error": "error", "warning": "warning", "low": "info", "info": "info"} {
+		a := alert.Alert{ID: "INC-1", PD: alert.PD{Key: "umb-INC-1"}, Title: "Down", Severity: sev, Sources: map[string]*alert.Source{}}
+		ev := pagerduty.Build("", false, "key", alert.Command{Action: alert.PDTrigger, Alert: a})
+		if ev.Payload == nil || ev.Payload.Severity != want {
+			t.Errorf("%s: payload severity = %+v, want %s", sev, ev.Payload, want)
+		}
+	}
+}

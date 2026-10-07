@@ -10,6 +10,7 @@ import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { reveal } from './PagerDutyCard'
 import { strings } from './strings'
+import { severityText } from '../../incidents/types'
 import { SEVERITIES, TEMPLATE_MESSAGES, TEMPLATE_PARTS, type NotifyPreview, type NotifyView } from './types'
 
 // Delays offered for backup notification, in seconds; '' is automatic.
@@ -130,7 +131,7 @@ export function NotifyCard() {
     [t('nt.email'), view.email.enabled ? [t('pd.state.on'), view.email.host].filter(Boolean).join(' · ') : t('pd.state.off')],
     [t('nt.telegram'), t(view.telegram.enabled ? 'pd.state.on' : 'pd.state.off')],
     [t('nt.extra'), extra],
-    [t('nt.summary.when'), t('nt.summary.when.value', { delay: delayText(view.delay_seconds), severity: t(`sev.${view.min_severity || 'error'}`).toLowerCase() })],
+    [t('nt.summary.when'), t('nt.summary.when.value', { delay: delayText(view.delay_seconds), severity: severityText(t, view.min_severity || 'error') })],
     [t('nt.tpl'), Object.keys(view.templates ?? {}).length ? t('nt.tpl.changed', { n: Object.keys(view.templates ?? {}).length }) : t('nt.tpl.builtin')],
   ]
 
@@ -220,7 +221,7 @@ export function NotifyCard() {
                 <Select id={id} value={draft.min_severity} onChange={(e) => setDraft({ ...draft, min_severity: e.target.value })}>
                   {SEVERITIES.map((s) => (
                     <option key={s} value={s}>
-                      {t(`sev.${s}`)}
+                      {severityText(t, s)}
                     </option>
                   ))}
                 </Select>

@@ -368,9 +368,19 @@
   background: var(--error-soft);
 }
 
-.map-sev-warning {
+.map-sev-warn {
   color: var(--warn);
   background: var(--warn-soft);
+}
+
+.map-sev-low {
+  color: var(--low);
+  background: var(--low-soft);
+}
+
+.map-sev-info {
+  color: var(--info);
+  background: var(--info-soft);
 }
 
 .link-btn {

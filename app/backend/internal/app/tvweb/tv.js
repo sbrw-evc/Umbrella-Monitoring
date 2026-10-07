@@ -7,18 +7,11 @@
   var NEW_FLASH_MS = 10000;
   var CURSOR_HIDE_MS = 3000;
   var FETCH_TIMEOUT_MS = 15000;
-  var SEVERITIES = ['critical', 'error', 'warning', 'info'];
+  // Keys of the counters that are not levels of the alert scale.
+  var COUNT_KEYS = { total: true, acknowledged: true, open: true };
 
   var STRINGS = {
     ru: {
-      'sev.critical': 'Критично',
-      'sev.error': 'Ошибка',
-      'sev.warning': 'Внимание',
-      'sev.info': 'Инфо',
-      'cnt.critical': 'Критичные',
-      'cnt.error': 'Ошибки',
-      'cnt.warning': 'Внимание',
-      'cnt.info': 'Инфо',
       'cnt.acknowledged': 'Подтверждены',
       'st.open': 'Открыт',
       'st.acknowledged': 'Подтверждён',
@@ -51,14 +44,6 @@
       'page': 'Страница {p} из {n}'
     },
     en: {
-      'sev.critical': 'Critical',
-      'sev.error': 'Error',
-      'sev.warning': 'Warning',
-      'sev.info': 'Info',
-      'cnt.critical': 'Critical',
-      'cnt.error': 'Error',
-      'cnt.warning': 'Warning',
-      'cnt.info': 'Info',
       'cnt.acknowledged': 'Acknowledged',
       'st.open': 'Open',
       'st.acknowledged': 'Acknowledged',
@@ -124,7 +109,8 @@
     pageTimer: 0,
     pageStarted: 0,
     lastCounts: '',
-    theme: ''
+    theme: '',
+    severities: []         // the alert scale, most severe first (see scaleOf)
   };
 
   var el = {};
@@ -166,7 +152,38 @@
     return n;
   }
   function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
-  function sevOf(s) { return SEVERITIES.indexOf(s) >= 0 ? s : 'info'; }
+  // scaleOf reads the alert scale of a payload: name, priority (P1…P5), tone and the words in
+  // each language, most severe first. A payload without it (an older server) gets a scale made
+  // of the severity counters it carries, in their order, shown by name.
+  function scaleOf(json) {
+    var out = [];
+    var list = Array.isArray(json.severities) ? json.severities : [];
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i];
+      if (!s || !s.name) continue;
+      out.push({ name: String(s.name), priority: s.priority ? String(s.priority) : '', tone: String(s.tone || s.name), title: s.title || {} });
+    }
+    if (out.length) return out;
+    var c = json.counts || {};
+    for (var k in c) {
+      if (Object.prototype.hasOwnProperty.call(c, k) && !COUNT_KEYS[k] && typeof c[k] === 'number') {
+        out.push({ name: k, priority: '', tone: k, title: {} });
+      }
+    }
+    return out;
+  }
+  // sevOf is the level of a severity name; an unknown one is shown as the mildest level.
+  function sevOf(name) {
+    var list = state.severities;
+    for (var i = 0; i < list.length; i++) if (list[i].name === name) return list[i];
+    if (list.length) return list[list.length - 1];
+    return { name: String(name || ''), priority: '', tone: 'info', title: {} };
+  }
+  // sevText is the priority and the word of a level, e.g. "P1 · Critical".
+  function sevText(s) {
+    var word = (s.title && (s.title[state.lang] || s.title.en)) || s.name;
+    return s.priority ? s.priority + ' · ' + word : word;
+  }
   function pickLang(l) {
     l = String(l || '').toLowerCase();
     if (l.indexOf('ru') === 0) return 'ru';
@@ -354,6 +371,10 @@
     }
     if (json.ready !== false) state.knownIds = ids;
 
+    var scale = scaleOf(json);
+    var scaleKey = JSON.stringify(scale);
+    if (scaleKey !== JSON.stringify(state.severities)) state.lastCounts = '';
+    state.severities = scale;
     state.data = json;
     state.lastOk = new Date();
     state.failing = false;
@@ -378,28 +399,30 @@
     document.title = title;
 
     var c = d.counts || {};
-    var key = state.lang + '|' + [c.critical, c.error, c.warning, c.info, c.acknowledged].join(',');
+    // One counter per level of the scale, then the acknowledged ones.
+    var items = [];
+    for (var j = 0; j < state.severities.length; j++) {
+      var s = state.severities[j];
+      items.push([s.name, s.tone, sevText(s)]);
+    }
+    items.push(['acknowledged', 'ack', t('cnt.acknowledged')]);
+    var values = [];
+    for (var v = 0; v < items.length; v++) values.push(c[items[v][0]]);
+    var key = state.lang + '|' + values.join(',');
     if (key === state.lastCounts) return;
     state.lastCounts = key;
     clear(el.counters);
     el.counters.setAttribute('aria-label', t('aria.counts'));
-    var items = [
-      ['critical', 'cnt-crit', 'mk-critical'],
-      ['error', 'cnt-err', 'mk-error'],
-      ['warning', 'cnt-warn', 'mk-warning'],
-      ['info', 'cnt-info', 'mk-info'],
-      ['acknowledged', 'cnt-ack', 'mk-ack']
-    ];
     for (var i = 0; i < items.length; i++) {
       var n = parseInt(c[items[i][0]], 10) || 0;
-      var box = node('div', 'cnt ' + items[i][1] + (n === 0 ? ' zero' : ''));
+      var box = node('div', 'cnt tone-' + items[i][1] + (n === 0 ? ' zero' : ''));
       var top = node('div', 'cnt-top');
-      var mk = node('span', 'mk ' + items[i][2]);
+      var mk = node('span', 'mk mk-' + items[i][1]);
       mk.setAttribute('aria-hidden', 'true');
       top.appendChild(mk);
       top.appendChild(node('span', 'cnt-num', n));
       box.appendChild(top);
-      box.appendChild(node('div', 'cnt-label', t('cnt.' + items[i][0])));
+      box.appendChild(node('div', 'cnt-label', items[i][2]));
       el.counters.appendChild(box);
     }
   }
@@ -483,7 +506,7 @@
   function buildRow(inc, now) {
     var sev = sevOf(inc.severity);
     var status = inc.status === 'acknowledged' || inc.status === 'resolved' ? inc.status : 'open';
-    var cls = 'row sev-' + sev;
+    var cls = 'row tone-' + sev.tone;
     if (status === 'acknowledged') cls += ' is-ack';
     if (status === 'resolved') cls += ' is-resolved';
     if (inc.id && state.newUntil[inc.id] && state.newUntil[inc.id] > now.getTime()) cls += ' is-new';
@@ -494,10 +517,13 @@
     row.appendChild(node('div', 'row-bar'));
 
     var sevBox = node('div', 'row-sev');
-    var mk = node('span', 'mk mk-' + sev);
+    var mk = node('span', 'mk mk-' + sev.tone);
     mk.setAttribute('aria-hidden', 'true');
     sevBox.appendChild(mk);
-    sevBox.appendChild(node('span', 'sev-label', t('sev.' + sev)));
+    var label = node('span', 'sev-label');
+    if (sev.priority) label.appendChild(node('span', 'sev-p', sev.priority));
+    label.appendChild(node('span', 'sev-word', (sev.title && (sev.title[state.lang] || sev.title.en)) || sev.name));
+    sevBox.appendChild(label);
     row.appendChild(sevBox);
 
     var main = node('div', 'row-main');

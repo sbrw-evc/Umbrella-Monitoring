@@ -18,6 +18,7 @@ const (
 	SeverityCritical = model.SeverityCritical
 	SeverityError    = model.SeverityError
 	SeverityWarning  = model.SeverityWarning
+	SeverityLow      = model.SeverityLow
 	SeverityInfo     = model.SeverityInfo
 
 	StatusFiring   = "firing"
@@ -48,14 +49,17 @@ type Event struct {
 	Key string `json:"key"`
 }
 
+// severityWords maps the words sources use for a level (lower case) to the level; the
+// priorities P1..P5 and sev1..sev5 are levels too.
 var severityWords = map[string]string{
 	"critical": SeverityCritical, "crit": SeverityCritical, "disaster": SeverityCritical, "fatal": SeverityCritical,
 	"emergency": SeverityCritical, "p1": SeverityCritical, "sev1": SeverityCritical,
 	"error": SeverityError, "err": SeverityError, "high": SeverityError, "major": SeverityError, "p2": SeverityError, "sev2": SeverityError,
 	"warning": SeverityWarning, "warn": SeverityWarning, "average": SeverityWarning, "medium": SeverityWarning, "minor": SeverityWarning,
 	"p3": SeverityWarning, "sev3": SeverityWarning,
-	"info": SeverityInfo, "information": SeverityInfo, "informational": SeverityInfo, "notice": SeverityInfo, "low": SeverityInfo,
-	"not classified": SeverityInfo, "none": SeverityInfo, "debug": SeverityInfo, "p4": SeverityInfo, "p5": SeverityInfo, "sev4": SeverityInfo,
+	"low": SeverityLow, "p4": SeverityLow, "sev4": SeverityLow,
+	"info": SeverityInfo, "information": SeverityInfo, "informational": SeverityInfo, "notice": SeverityInfo,
+	"not classified": SeverityInfo, "none": SeverityInfo, "debug": SeverityInfo, "p5": SeverityInfo, "sev5": SeverityInfo,
 }
 
 func NormalizeSeverity(v string) (string, bool) {
@@ -94,7 +98,7 @@ func EventFromData(d map[string]any) (Event, error) {
 	}
 	sev, ok := NormalizeSeverity(e.Severity)
 	if !ok {
-		return e, fmt.Errorf("severity %q is not critical, error, warning or info", e.Severity)
+		return e, fmt.Errorf("severity %q is not critical, error, warning, low or info", e.Severity)
 	}
 	e.Severity = sev
 	st, ok := NormalizeStatus(e.Status)

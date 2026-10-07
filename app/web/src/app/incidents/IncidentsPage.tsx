@@ -12,7 +12,7 @@ import { OnboardingChecklist } from '../onboarding/OnboardingChecklist'
 import { IncidentDetail, PDPill, SeverityPill, StatusPill } from './IncidentDetail'
 import { ago } from './format'
 import { strings } from './strings'
-import { filtersFromURL, METHODS, NO_FILTERS, queryOf, SEVERITIES, STATUSES, urlOf, type Filters, type Flag, type Incident, type Page, type Ref } from './types'
+import { filtersFromURL, METHODS, NO_FILTERS, queryOf, SEVERITIES, SEVERITY_TONE, severityText, STATUSES, urlOf, type Filters, type Flag, type Incident, type Page, type Ref } from './types'
 import '../services/services.css'
 import '../connectors/connectors.css'
 import '../cis/cis.css'
@@ -117,7 +117,7 @@ export function IncidentsPage() {
               ))}
             </Select>
           </label>
-          <Choose label={t('inc.filter.severity')} value={filters.severity} onChange={(severity) => set({ severity })} options={SEVERITIES.map((s) => [s, t(`inc.sev.${s}`)])} />
+          <Choose label={t('inc.filter.severity')} value={filters.severity} onChange={(severity) => set({ severity })} options={SEVERITIES.map((s) => [s, severityText(t, s)])} />
           <Choose label={t('inc.filter.method')} value={filters.method} onChange={(method) => set({ method })} options={METHODS.map((m) => [m, t(`inc.method.${m}`)])} />
           <Choose label={t('inc.filter.team')} value={filters.team} onChange={(team) => set({ team })} options={(refs.data?.teams ?? []).map((x) => [x.id, x.name])} />
           <Choose label={t('inc.filter.service')} value={filters.service} onChange={(service) => set({ service })} options={services.map((x) => [x.id, x.name])} />
@@ -268,12 +268,12 @@ function Tiles({ counts, filters, set }: { counts: Page['counts']; filters: Filt
         <button
           key={s}
           type="button"
-          className={`card ci-tile inc-tile-sev inc-sev-${s} ${filters.severity === s ? 'active' : ''}`}
+          className={`card ci-tile inc-tile-sev inc-sev-${SEVERITY_TONE[s]} ${filters.severity === s ? 'active' : ''}`}
           aria-pressed={filters.severity === s}
           onClick={() => set({ severity: filters.severity === s ? '' : s, status: 'active' })}
         >
           <span className="ci-tile-value">{counts.by_severity[s] ?? 0}</span>
-          <span className="muted">{t(`inc.sev.${s}`)}</span>
+          <span className="muted">{severityText(t, s)}</span>
         </button>
       ))}
       {/* Without PagerDuty nothing is "not taken by PagerDuty": the tile is hidden. */}
