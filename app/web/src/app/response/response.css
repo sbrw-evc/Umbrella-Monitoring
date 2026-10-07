@@ -69,7 +69,7 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 4px 14px 16px;
+  padding: 12px 14px 16px;
   border-top: 1px solid var(--border);
 }
 
@@ -143,7 +143,8 @@
 .rs-toggle.on {
   border-color: var(--accent);
   background: var(--accent-soft);
-  color: var(--accent-text);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .rs-toggle.on.warn {
