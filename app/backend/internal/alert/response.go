@@ -11,7 +11,8 @@ import (
 // business services the item affects and the rules that changed the result.
 type Impact struct {
 	// Level is the business impact: the highest criticality (model.Criticalities) of the
-	// affected services, empty when the alert affects none.
+	// affected services, model.ImpactNone when the item affects none, empty when it is not
+	// known (the item is not in the catalog, or the catalog has no services).
 	Level string `json:"level"`
 	// Services are the affected services, most critical first: those the item runs (Direct)
 	// and those that depend on them.

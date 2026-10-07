@@ -302,7 +302,8 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 			return nil, c.save(ctx, tx)
 		}
 		c.log(now, KindEvent, "event", eventArgs, "")
-		a.Severity = firingSeverity(a, a.Severity)
+		a.EventSeverity = firingSeverity(a, a.eventSeverity())
+		e.prioritize(c, w, now)
 		if allResolved(a) {
 			out.note(false, e.resolve(c, now, "sources_resolved", ""), a)
 			add(e.pdCmd(a, PDResolve, now))
@@ -317,7 +318,7 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 			return nil, err
 		}
 		a = &Alert{ID: id, DedupKey: key, Title: in.Title, CIName: name, Signal: signal, Method: in.Method, Severity: in.Severity,
-			Status: StatusOpen, Sources: map[string]*Source{}, Labels: map[string]string{}, FirstSeen: now, OpenedAt: now, LastSeen: now,
+			EventSeverity: in.Severity, Status: StatusOpen, Sources: map[string]*Source{}, Labels: map[string]string{}, FirstSeen: now, OpenedAt: now, LastSeen: now,
 			PD: PD{State: PDPending, Key: "umb-" + id}}
 		if a.Method == "" {
 			a.Method = model.MethodOther
@@ -343,12 +344,16 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 
 	src := a.Sources[srcKey]
 	if src != nil && src.Status == SourceFiring && src.Severity == in.Severity && !opened && !reopened {
-		// A repeated delivery: the alert is only touched.
+		// A repeated delivery: the alert is only touched (and its priority found again when it
+		// was just bound to its item).
 		src.LastSeen, src.Value = now, in.Value
 		a.Count++
 		a.LastSeen = now
 		c.dirty = true
-		return nil, c.save(ctx, tx)
+		if e.prioritize(c, w, now) {
+			add(e.raisedCmd(a, now))
+		}
+		return cmds, c.save(ctx, tx)
 	}
 	if src == nil {
 		src = &Source{ConnectorID: in.ConnectorID, Key: in.Key, FirstSeen: now}
@@ -360,7 +365,8 @@ func (e *Engine) fold(ctx context.Context, tx pgx.Tx, w *world, in Incoming, now
 	a.LastSeen = now
 	c.log(now, KindEvent, "event", eventArgs, "")
 	prev := a.Severity
-	a.Severity = firingSeverity(a, in.Severity)
+	a.EventSeverity = firingSeverity(a, in.Severity)
+	e.prioritize(c, w, now)
 	raised := SeverityRank(a.Severity) > SeverityRank(prev)
 	if raised && !opened {
 		c.log(now, KindStatus, "severity_raised", map[string]string{"from": prev, "to": a.Severity}, "")
@@ -958,48 +964,65 @@ func (e *Engine) retry(a *Alert, now time.Time) *Command {
 	return nil
 }
 
-// Reroute routes the active alerts of the given configuration items again, after the
-// catalog changed (an item moved to another service, a team got people).
+// Reroute routes the active alerts again and finds their priority again, after the catalog
+// or the settings changed (an item moved to another service, a team got people, a dependency
+// or the impact policy changed). Only the alerts whose route, priority or impact would change
+// are locked and written; a priority that rose goes to PagerDuty again.
 func (e *Engine) Reroute(ctx context.Context) error {
-	rows, err := e.db.Query(ctx, "SELECT id FROM alerts WHERE "+sqlActive+" AND ci_id <> ''")
+	rows, err := e.db.Query(ctx, "SELECT doc FROM alerts WHERE "+sqlActive+" ORDER BY seq")
 	if err != nil {
 		return err
 	}
-	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	docs, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (*Alert, error) { return scanAlert(row) })
 	if err != nil {
 		return err
 	}
 	w := e.world()
 	now := e.now()
-	for _, id := range ids {
+	for _, doc := range docs {
+		if doc == nil || !w.rerouteNeeded(doc, now) {
+			continue
+		}
+		var cmd *Command
 		err := pgx.BeginFunc(ctx, e.db, func(tx pgx.Tx) error {
-			a, err := lockByID(ctx, tx, id)
+			cmd = nil
+			a, err := lockByID(ctx, tx, doc.ID)
 			if err != nil || a == nil || !Active(a.Status) {
 				return err
 			}
-			ci, ok := w.cis[a.CIID]
-			if !ok {
-				return nil
-			}
-			r := w.route(&ci, now)
-			if sameRoute(a.Route, r) {
-				return nil
-			}
 			c := &change{a: a}
-			e.reroute(c, w, &ci, now)
+			if ci, ok := w.cis[a.CIID]; ok && !sameRoute(a.Route, w.route(&ci, now)) {
+				e.reroute(c, w, &ci, now)
+			}
+			if e.prioritize(c, w, now) {
+				cmd = e.raisedCmd(a, now)
+			}
 			return c.save(ctx, tx)
 		})
 		if err != nil {
 			return err
 		}
+		if cmd != nil {
+			e.pd.Send(*cmd)
+		}
 	}
 	return nil
+}
+
+// rerouteNeeded: the route, the priority or the impact of the alert is not what the catalog
+// and the settings give now.
+func (w *world) rerouteNeeded(a *Alert, now time.Time) bool {
+	if ci, ok := w.cis[a.CIID]; ok && !sameRoute(a.Route, w.route(&ci, now)) {
+		return true
+	}
+	sev, im := w.evaluate(a, now)
+	return sev != a.Severity || a.EventSeverity == "" || !sameImpact(a.Impact, im)
 }
 
 // mergeInto folds an alert into another active alert of the same item and signal: the sources
 // move there and the alert is resolved. Two active alerts may not share a dedup key, so an
 // alert that waited for its item (or moves to another item) joins the alert the item has.
-func (e *Engine) mergeInto(ctx context.Context, tx pgx.Tx, c *change, other *Alert, ciName, actor string, now time.Time) (*Command, error) {
+func (e *Engine) mergeInto(ctx context.Context, tx pgx.Tx, c *change, w *world, other *Alert, ciName, actor string, now time.Time) ([]Command, error) {
 	a := c.a
 	oc := &change{a: other}
 	for k, src := range a.Sources {
@@ -1014,14 +1037,23 @@ func (e *Engine) mergeInto(ctx context.Context, tx pgx.Tx, c *change, other *Ale
 	if a.LastSeen.After(other.LastSeen) {
 		other.LastSeen = a.LastSeen
 	}
-	other.Severity = firingSeverity(other, other.Severity)
 	oc.log(now, KindRoute, "merged_from", map[string]string{"alert": a.ID, "ci": ciName}, actor)
+	other.EventSeverity = firingSeverity(other, other.eventSeverity())
+	var cmds []Command
+	if e.prioritize(oc, w, now) {
+		if cmd := e.raisedCmd(other, now); cmd != nil {
+			cmds = append(cmds, *cmd)
+		}
+	}
 	if err := oc.save(ctx, tx); err != nil {
 		return nil, err
 	}
 	c.log(now, KindRoute, "merged_into", map[string]string{"alert": other.ID, "ci": ciName}, actor)
 	e.resolve(c, now, "merged", actor)
-	return e.pdCmd(a, PDResolve, now), nil
+	if cmd := e.pdCmd(a, PDResolve, now); cmd != nil {
+		cmds = append(cmds, *cmd)
+	}
+	return cmds, nil
 }
 
 // BindUnknown binds the active alerts whose item was not in the catalog to the item their
@@ -1065,16 +1097,19 @@ func (e *Engine) BindUnknown(ctx context.Context, actor string) ([]string, error
 			}
 			c := &change{a: a}
 			if other != nil {
-				cmd, err := e.mergeInto(ctx, tx, c, other, ci.Name, actor, now)
+				merged, err := e.mergeInto(ctx, tx, c, w, other, ci.Name, actor, now)
 				if err != nil {
 					return err
 				}
-				if cmd != nil {
-					cmds = append(cmds, *cmd)
-				}
+				cmds = append(cmds, merged...)
 			} else {
 				a.DedupKey = key
 				e.bind(c, w, ci, now)
+				if e.prioritize(c, w, now) {
+					if cmd := e.raisedCmd(a, now); cmd != nil {
+						cmds = append(cmds, *cmd)
+					}
+				}
 				if a.RelatedID == "" {
 					if err := e.link(ctx, tx, c, now); err != nil {
 						return err

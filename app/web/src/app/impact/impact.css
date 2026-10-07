@@ -1,0 +1,192 @@
+/* Page «Severity and impact» and the priority block of the incident card. */
+
+.im-page .status-card {
+  max-width: none;
+}
+
+.im-matrix-wrap {
+  overflow-x: auto;
+}
+
+.im-matrix {
+  border-collapse: separate;
+  border-spacing: 6px;
+  min-width: 640px;
+}
+
+.im-matrix th {
+  font-weight: 600;
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+  color: var(--muted);
+}
+
+.im-matrix th[scope='row'] {
+  padding-right: 6px;
+}
+
+.im-matrix td {
+  min-width: 120px;
+}
+
+.im-matrix .im-cell {
+  width: 100%;
+  border-color: transparent;
+}
+
+.im-matrix td.im-moved .im-cell {
+  border-color: currentColor;
+}
+
+.im-rules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.im-rules li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.im-rules li.im-rule-off {
+  opacity: 0.65;
+}
+
+.im-rule-main {
+  min-width: 0;
+  flex: 1 1 280px;
+  display: grid;
+  gap: 4px;
+}
+
+.im-rule-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.im-when,
+.im-mono textarea,
+.im-vars code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+}
+
+.im-when {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+
+.im-rule-tools {
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.im-rule-tools .switch-row label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.im-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.im-details summary {
+  cursor: pointer;
+  color: var(--accent-text);
+  font-size: 13px;
+}
+
+.im-vars {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.im-vars div {
+  display: grid;
+  grid-template-columns: minmax(150px, max-content) 1fr;
+  gap: 8px;
+}
+
+.im-vars dt,
+.im-vars dd {
+  margin: 0;
+  font-size: 13px;
+}
+
+.im-result {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.im-line {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.im-from {
+  color: var(--muted);
+  font-size: 13.5px;
+}
+
+.im-from b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.im-steps {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  display: grid;
+  gap: 2px;
+}
+
+.im-step-error {
+  color: var(--error);
+}
+
+.im-inc {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.im-inc-icon {
+  margin-top: 5px;
+  color: var(--muted);
+  flex: none;
+}
+
+.im-inc-body {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}

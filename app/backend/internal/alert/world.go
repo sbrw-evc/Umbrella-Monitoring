@@ -62,11 +62,17 @@ type world struct {
 	users       map[string]model.User
 	members     map[string][]string
 	maintenance []model.Maintenance
+	// impact is the impact policy; dependents are the services that depend on each service
+	// (the reverse of depends_on) and liveServices counts the services that are not retired.
+	impact       *impactPolicy
+	dependents   map[string][]model.Service
+	liveServices int
 }
 
 func snapshot(st *store.Store) *world {
 	w := &world{cis: map[string]model.ConfigItem{}, index: map[string][]string{}, teams: map[string]model.Team{},
 		users: map[string]model.User{}, members: map[string][]string{}}
+	var impact model.ImpactPolicy
 	add := func(key, id string) {
 		if key = strings.ToLower(strings.TrimSpace(key)); key != "" && !slices.Contains(w.index[key], id) {
 			w.index[key] = append(w.index[key], id)
@@ -85,7 +91,7 @@ func snapshot(st *store.Store) *world {
 		}
 		for _, s := range d.Services {
 			c := *s
-			c.CIIDs = slices.Clone(s.CIIDs)
+			c.CIIDs, c.DependsOn = slices.Clone(s.CIIDs), slices.Clone(s.DependsOn)
 			w.services = append(w.services, c)
 		}
 		for id, t := range d.Teams {
@@ -104,6 +110,7 @@ func snapshot(st *store.Store) *world {
 		for _, m := range d.Maintenance {
 			w.maintenance = append(w.maintenance, *m)
 		}
+		impact = d.Settings.Impact.Clone()
 	})
 	for _, ids := range w.index {
 		slices.Sort(ids)
@@ -112,6 +119,8 @@ func snapshot(st *store.Store) *world {
 		slices.Sort(ids)
 	}
 	slices.SortFunc(w.services, func(a, b model.Service) int { return cmp.Compare(a.ID, b.ID) })
+	w.indexDependents()
+	w.impact = compilePolicy(impact)
 	return w
 }
 
