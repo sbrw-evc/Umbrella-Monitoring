@@ -116,7 +116,7 @@ func TestBackupNotification(t *testing.T) {
 	if m.User != "relay" || m.Password != "secret" || m.From != "umbrella@example.com" {
 		t.Fatalf("envelope: %+v", m)
 	}
-	if !strings.Contains(m.Subject, "INC-7 · HTTP 5xx на app-01") || !strings.Contains(m.Subject, "критично") {
+	if !strings.Contains(m.Subject, "INC-7 · HTTP 5xx на app-01") || !strings.Contains(m.Subject, "P1 · критический") {
 		t.Fatalf("subject: %q", m.Subject)
 	}
 	for _, want := range []string{"Платежи", "Payments SRE", "05.10.2026 16:00 +07", "ошибка доставки: breaker open",
