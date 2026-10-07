@@ -7,7 +7,7 @@ import { useLocale, useT } from '../../i18n'
 import { Link } from '../../router'
 import { Banner, Button, Input, Segmented, Stepper, Switch } from '../../ui'
 import { useSession } from '../session'
-import { LineChart, panelTitle, seriesColor, type ChartMark } from './Chart'
+import { formatValue, LineChart, panelTitle, seriesColor, type ChartMark } from './Chart'
 import { severityTone } from './format'
 import { machineStrings } from './machineStrings'
 import { strings } from './strings'
@@ -15,7 +15,20 @@ import { severityText, type Detail } from './types'
 
 type Series = { name: string; unit?: string; points: [number, number][] }
 type SourceError = { source: string; error: string }
-type Panel = { id: string; title: string; unit: string; series: Series[]; errors: SourceError[] }
+type Panel = {
+  id: string
+  title: string
+  unit: string
+  series: Series[]
+  errors: SourceError[]
+  // alert: the metric the alert fired on; focus: a graph of the same kind.
+  alert?: boolean
+  query?: string
+  source?: string
+  op?: string
+  threshold?: number
+  focus?: boolean
+}
 type Host = { source_id: string; source_name: string; kind: string; key: string; host: string; name: string; state: string; url?: string }
 type Event = {
   connector_id: string
@@ -123,6 +136,8 @@ export function MachineTab({ d, onOpen }: { d: Detail; onOpen: (id: string) => v
     for (const o of m.incidents)
       if (o.id !== id) marks.push({ at: Date.parse(o.opened_at), tone: 'incident', label: `${at(o.opened_at)} · ${o.id}: ${o.title}` })
   }
+  // Without a host only the metric of the alert can be drawn (a rule of Umbrella has its own source).
+  const shown = m ? m.panels.filter((p) => p.alert || m.hosts.length > 0) : []
   const from = m ? Date.parse(m.from) : 0
   const to = m ? Date.parse(m.to) : 0
 
@@ -184,18 +199,40 @@ export function MachineTab({ d, onOpen }: { d: Detail; onOpen: (id: string) => v
               {d.alert.ci_id ? t('mc.hosts.none.text') : t('mc.hosts.none.ci', { name: d.alert.ci_name })}
             </Banner>
           )}
-          {m.hosts.length > 0 && m.panels.length === 0 && <Banner kind="info" title={t('mc.panels.none')} />}
-          {m.hosts.length > 0 && m.panels.length > 0 && (
+          {m.hosts.length > 0 && m.panels.filter((p) => !p.alert).length === 0 && <Banner kind="info" title={t('mc.panels.none')} />}
+          {shown.length > 0 && (
             <div className="mc-panels">
-              {m.panels.map((p) => (
-                <section key={p.id} className="mc-panel card">
+              {shown.map((p) => (
+                <section key={p.id} className={`mc-panel card ${p.alert ? 'mc-panel-alert' : p.focus ? 'mc-panel-focus' : ''}`}>
                   <header className="mc-panel-head">
-                    <b>{panelTitle(t, p)}</b>
-                    {p.unit && <span className="muted">{p.unit}</span>}
+                    <span className="mc-panel-title">
+                      <b>{p.alert ? p.title : panelTitle(t, p)}</b>
+                      {p.alert && <span className="pill pill-error">{t('mc.alert.metric')}</span>}
+                      {p.focus && <span className="pill pill-warn">{t('mc.alert.kind')}</span>}
+                    </span>
+                    <span className="muted">
+                      {p.source && `${p.source}${p.unit ? ' · ' : ''}`}
+                      {p.unit}
+                    </span>
                   </header>
+                  {p.query && (
+                    <code className="mc-query" title={p.query}>
+                      {p.query}
+                      {p.threshold !== undefined && p.op && !p.query.trim().endsWith(String(p.threshold)) && ` ${p.op} ${p.threshold}`}
+                    </code>
+                  )}
                   {p.series.length > 0 ? (
                     <>
-                      <LineChart series={p.series} from={from} to={to} unit={p.unit} marks={marks} formatTime={fmt} label={panelTitle(t, p)} />
+                      <LineChart
+                        series={p.series}
+                        from={from}
+                        to={to}
+                        unit={p.unit}
+                        marks={marks}
+                        formatTime={fmt}
+                        label={p.alert ? p.title : panelTitle(t, p)}
+                        threshold={p.threshold}
+                      />
                       <ul className="mc-legend">
                         {p.series.map((s, i) => (
                           <li key={s.name}>
@@ -203,6 +240,12 @@ export function MachineTab({ d, onOpen }: { d: Detail; onOpen: (id: string) => v
                             {s.name}
                           </li>
                         ))}
+                        {p.threshold !== undefined && (
+                          <li>
+                            <span className="mc-line mc-line-threshold" />
+                            {t('mc.threshold', { op: p.op ?? '', value: formatValue(p.threshold, p.unit) })}
+                          </li>
+                        )}
                       </ul>
                     </>
                   ) : (
@@ -217,7 +260,7 @@ export function MachineTab({ d, onOpen }: { d: Detail; onOpen: (id: string) => v
               ))}
             </div>
           )}
-          {m.hosts.length > 0 && m.panels.length > 0 && (
+          {shown.length > 0 && (
             <ul className="mc-legend mc-marks-legend muted">
               <li>
                 <span className="mc-line mc-line-open" />

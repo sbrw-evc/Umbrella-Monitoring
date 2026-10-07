@@ -457,6 +457,14 @@ type machinePanel struct {
 	Unit   string              `json:"unit"`
 	Series []monitoring.Series `json:"series"`
 	Errors []sourceError       `json:"errors"`
+	// Alert: the metric the alert fired on, with its query, source and threshold.
+	Alert     bool     `json:"alert,omitempty"`
+	Query     string   `json:"query,omitempty"`
+	Source    string   `json:"source,omitempty"`
+	Op        string   `json:"op,omitempty"`
+	Threshold *float64 `json:"threshold,omitempty"`
+	// Focus: a graph of the same kind as the alert (CPU for a CPU alert).
+	Focus bool `json:"focus,omitempty"`
 }
 
 type machineEvent struct {
@@ -527,15 +535,16 @@ func windowOf(r *http.Request, def int) (int, bool, error) {
 }
 
 // Machine reads the graphs of the machine of an incident.
-func (s *HostContextService) Machine(ctx context.Context, al alert.Alert, minutes int, span bool) machineView {
+func (s *HostContextService) Machine(ctx context.Context, al alert.Alert, minutes int, span bool) (v machineView) {
 	var (
 		set   model.HostContext
 		hosts []machineHost
-		v     machineView
+		rule  *ruleMetric
 	)
 	s.st.Read(func(d *store.Data) {
 		set = d.Settings.HostContext.Effective()
 		hosts, v.Names = machineOf(d, al)
+		rule = ruleOf(d, al)
 		for _, src := range d.LogSources {
 			if src.Enabled {
 				v.LogSources++
@@ -561,11 +570,22 @@ func (s *HostContextService) Machine(ctx context.Context, al alert.Alert, minute
 	for i, p := range set.Panels {
 		v.Panels[i] = machinePanel{ID: p.ID, Title: p.Title, Unit: p.Unit, Series: []monitoring.Series{}, Errors: []sourceError{}}
 	}
+	ctx, cancel := context.WithTimeout(ctx, machineTimeout)
+	defer cancel()
+	// The metric of the alert is read alongside the graphs and shown first.
+	var alertPanel *machinePanel
+	alertDone := make(chan struct{})
+	go func() {
+		defer close(alertDone)
+		alertPanel = s.alertPanel(ctx, al, rule, hosts, v.Names, v.From, v.To)
+	}()
+	defer func() {
+		<-alertDone
+		v.Panels = orderPanels(v.Panels, alertPanel, focusPanels(set.Panels, al))
+	}()
 	if len(hosts) == 0 || len(set.Panels) == 0 {
 		return v
 	}
-	ctx, cancel := context.WithTimeout(ctx, machineTimeout)
-	defer cancel()
 	auths := map[string]*monitoring.Auth{}
 	authErr := map[string]error{}
 	for _, h := range hosts {
