@@ -12,14 +12,20 @@ import { reveal } from './PagerDutyCard'
 import { strings } from './strings'
 import { SEVERITIES, TEMPLATE_MESSAGES, TEMPLATE_PARTS, type NotifyPreview, type NotifyView } from './types'
 
+type Channel = 'email' | 'telegram' | 'teams' | 'zoom'
+
 // Delays offered for backup notification, in seconds; '' is automatic.
 const DELAYS = [0, 60, 120, 300, 600, 900, 1800, 3600]
 
 type Draft = {
   email: NotifyView['email'] & { password: string; port_text: string }
   telegram: { enabled: boolean; api_url: string; token: string }
+  teams: { enabled: boolean }
+  zoom: { enabled: boolean; token: string }
   extra_emails: string
   extra_telegram: string
+  extra_teams: string
+  extra_zoom: string
   delay: string
   min_severity: string
   // templates: every template as edited, the built-in text where none is replaced.
@@ -30,8 +36,12 @@ function draftOf(v: NotifyView): Draft {
   return {
     email: { ...v.email, password: '', port_text: v.email.port ? String(v.email.port) : '' },
     telegram: { enabled: v.telegram.enabled, api_url: v.telegram.api_url ?? '', token: '' },
+    teams: { enabled: v.teams?.enabled ?? false },
+    zoom: { enabled: v.zoom?.enabled ?? false, token: '' },
     extra_emails: v.extra_emails.join('\n'),
     extra_telegram: v.extra_telegram.join('\n'),
+    extra_teams: (v.extra_teams ?? []).join('\n'),
+    extra_zoom: (v.extra_zoom ?? []).join('\n'),
     delay: v.delay_seconds === null || v.delay_seconds === undefined ? '' : String(v.delay_seconds),
     min_severity: v.min_severity || 'error',
     templates: { ...(v.default_templates ?? {}), ...(v.templates ?? {}) },
@@ -49,6 +59,13 @@ const lines = (v: string) =>
     .map((x) => x.trim())
     .filter(Boolean)
 
+// urls: webhook URLs one per line (a URL may have ; or , in its query).
+const urls = (v: string) =>
+  v
+    .split(/\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+
 function bodyOf(d: Draft, defaults: Record<string, string>) {
   return {
     email: {
@@ -62,8 +79,12 @@ function bodyOf(d: Draft, defaults: Record<string, string>) {
       from: d.email.from,
     },
     telegram: { enabled: d.telegram.enabled, token: d.telegram.token, api_url: d.telegram.api_url },
+    teams: d.teams,
+    zoom: d.zoom,
     extra_emails: lines(d.extra_emails),
     extra_telegram: lines(d.extra_telegram),
+    extra_teams: urls(d.extra_teams),
+    extra_zoom: urls(d.extra_zoom),
     delay_seconds: d.delay === '' ? null : Number(d.delay),
     min_severity: d.min_severity,
     // Without the built-in templates (an older server) the saved ones are kept.
@@ -81,7 +102,7 @@ export function NotifyCard() {
   const loader = useAction(strings)
   const saver = useAction(strings)
   const tester = useAction(strings)
-  const [testTo, setTestTo] = useState({ email: '', telegram: '' })
+  const [testTo, setTestTo] = useState<Record<Channel, string>>({ email: '', telegram: '', teams: '', zoom: '' })
 
   const apply = (v: NotifyView) => {
     setView(v)
@@ -103,13 +124,16 @@ export function NotifyCard() {
   const dirty = JSON.stringify(bodyOf(draft, defaults)) !== JSON.stringify(bodyOf(draftOf(view), defaults))
   const setEmail = (p: Partial<Draft['email']>) => setDraft({ ...draft, email: { ...draft.email, ...p } })
   const setTg = (p: Partial<Draft['telegram']>) => setDraft({ ...draft, telegram: { ...draft.telegram, ...p } })
+  const setZoom = (p: Partial<Draft['zoom']>) => setDraft({ ...draft, zoom: { ...draft.zoom, ...p } })
+  const teamsOn = view.teams?.enabled ?? false
+  const zoomOn = view.zoom?.enabled ?? false
 
   const save = () =>
     saver.run(async () => {
       apply(await api<NotifyView>('PUT', '/api/notifications', bodyOf(draft, defaults)))
       return t('saved')
     })
-  const test = (channel: 'email' | 'telegram') =>
+  const test = (channel: Channel) =>
     tester.run(async () => {
       const r = await api<{ to: string; bot?: string }>('POST', '/api/notifications/test', { channel, to: testTo[channel] })
       return r.bot ? t('nt.test.okBot', { to: r.to, bot: r.bot }) : t('nt.test.ok', { to: r.to })
@@ -119,16 +143,20 @@ export function NotifyCard() {
   const delayText = (v: number | null | undefined) =>
     v === null || v === undefined ? t('nt.delay.auto', { auto: autoText }) : v === 0 ? t('nt.delay.now') : v % 60 === 0 ? t('nt.delay.min', { n: v / 60 }) : `${v} s`
   const delays = draft.delay !== '' && !DELAYS.includes(Number(draft.delay)) ? [...DELAYS, Number(draft.delay)].sort((x, y) => x - y) : DELAYS
-  const on = view.email.enabled || view.telegram.enabled
+  const on = view.email.enabled || view.telegram.enabled || teamsOn || zoomOn
+  const hooks = (view.extra_teams?.length ?? 0) + (view.extra_zoom?.length ?? 0)
   const extra = [
     view.extra_emails.length ? t('nt.extra.n.emails', { n: view.extra_emails.length }) : '',
     view.extra_telegram.length ? t('nt.extra.n.chats', { n: view.extra_telegram.length }) : '',
+    hooks ? t('nt.extra.n.hooks', { n: hooks }) : '',
   ]
     .filter(Boolean)
     .join(', ')
   const rows: [string, ReactNode][] = [
     [t('nt.email'), view.email.enabled ? [t('pd.state.on'), view.email.host].filter(Boolean).join(' · ') : t('pd.state.off')],
     [t('nt.telegram'), t(view.telegram.enabled ? 'pd.state.on' : 'pd.state.off')],
+    [t('nt.teams'), t(teamsOn ? 'pd.state.on' : 'pd.state.off')],
+    [t('nt.zoom'), t(zoomOn ? 'pd.state.on' : 'pd.state.off')],
     [t('nt.extra'), extra],
     [t('nt.summary.when'), t('nt.summary.when.value', { delay: delayText(view.delay_seconds), severity: t(`sev.${view.min_severity || 'error'}`).toLowerCase() })],
     [t('nt.tpl'), Object.keys(view.templates ?? {}).length ? t('nt.tpl.changed', { n: Object.keys(view.templates ?? {}).length }) : t('nt.tpl.builtin')],
@@ -199,6 +227,23 @@ export function NotifyCard() {
               </Field>
             </Reveal>
           </div>
+          <div className="al-col stack">
+            <h3 className="al-sub">{t('nt.teams')}</h3>
+            <Switch checked={draft.teams.enabled} onChange={(enabled) => setDraft({ ...draft, teams: { enabled } })} label={t('nt.teams.enable')} />
+            <Reveal open={draft.teams.enabled}>
+              <p className="hint">{t('nt.teams.hint')}</p>
+            </Reveal>
+          </div>
+          <div className="al-col stack">
+            <h3 className="al-sub">{t('nt.zoom')}</h3>
+            <Switch checked={draft.zoom.enabled} onChange={(enabled) => setZoom({ enabled })} label={t('nt.zoom.enable')} />
+            <Reveal open={draft.zoom.enabled}>
+              <Field label={t('nt.zoom.token')} hint={view.has_zoom_token && !draft.zoom.token ? t('keep') : t('nt.zoom.token.hint')}>
+                {(id) => <Password id={id} value={draft.zoom.token} autoComplete="off" onChange={(e) => setZoom({ token: e.target.value })} />}
+              </Field>
+              <p className="hint">{t('nt.zoom.hint')}</p>
+            </Reveal>
+          </div>
         </fieldset>
         <section className="al-section">
           <h3 className="al-sub">{t('nt.when')}</h3>
@@ -237,12 +282,22 @@ export function NotifyCard() {
             <Field label={t('nt.extra.chats')} hint={t('nt.extra.chats.hint')}>
               {(id) => <Textarea id={id} rows={2} value={draft.extra_telegram} onChange={(e) => setDraft({ ...draft, extra_telegram: e.target.value })} />}
             </Field>
+            {(draft.teams.enabled || draft.extra_teams !== '') && (
+              <Field label={t('nt.extra.teams')} hint={t('nt.extra.teams.hint')}>
+                {(id) => <Textarea id={id} rows={2} spellCheck={false} value={draft.extra_teams} onChange={(e) => setDraft({ ...draft, extra_teams: e.target.value })} />}
+              </Field>
+            )}
+            {(draft.zoom.enabled || draft.extra_zoom !== '') && (
+              <Field label={t('nt.extra.zoom')} hint={t('nt.extra.zoom.hint')}>
+                {(id) => <Textarea id={id} rows={2} spellCheck={false} value={draft.extra_zoom} onChange={(e) => setDraft({ ...draft, extra_zoom: e.target.value })} />}
+              </Field>
+            )}
           </fieldset>
         </section>
         {Object.keys(defaults).length > 0 && (
           <Templates templates={draft.templates} defaults={defaults} canEdit={canEdit} onChange={(templates) => setDraft({ ...draft, templates })} />
         )}
-        {canTest && (view.email.enabled || view.telegram.enabled) && (
+        {canTest && on && (
           <section className="al-section">
             <h3 className="al-sub">{t('nt.test')}</h3>
             {dirty && <p className="hint">{t('nt.test.saveFirst')}</p>}
@@ -264,6 +319,17 @@ export function NotifyCard() {
                 </Button>
               </div>
             )}
+            {(['teams', 'zoom'] as const)
+              .filter((c) => (c === 'teams' ? teamsOn : zoomOn))
+              .map((c) => (
+                <div key={c} className="al-test-row">
+                  <Input aria-label={t('nt.test.to')} value={testTo[c]} placeholder={t('nt.test.to.hook')} onChange={(e) => setTestTo({ ...testTo, [c]: e.target.value })} />
+                  <Button busy={tester.busy} disabled={!testTo[c].trim()} onClick={() => void test(c)}>
+                    <Send size={15} aria-hidden />
+                    {c === 'teams' ? 'Teams' : 'Zoom'}
+                  </Button>
+                </div>
+              ))}
             {tester.notice && <Banner kind="ok" title={tester.notice} />}
             {tester.error && (
               <Banner kind="error" title={tester.error.message}>
