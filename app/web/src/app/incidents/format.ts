@@ -79,7 +79,43 @@ export function entryText(t: T, e: Entry, connectors: Record<string, string>) {
     case 'pd_accepted':
       if (a.action) a.action = t(`pd.action.${a.action}`)
       break
+    case 'response_assessed':
+    case 'response_priority_raised':
+      for (const k of ['priority', 'urgency', 'from', 'to'] as const) if (a[k]) a[k] = severityText(t, a[k])
+      if (a.impact) a.impact = t(`tl.ri.${a.impact}`)
+      if (e.code === 'response_assessed' && !a.services) key = 'tl.response_assessed.none'
+      break
+    case 'response_no_policy':
+      a.priority = severityText(t, a.priority)
+      break
+    case 'response_step':
+      a.methods = (a.methods ?? '')
+        .split(',')
+        .filter(Boolean)
+        .map((m) => t(`tl.rm.${m}`))
+        .join(', ')
+      if (a.off) {
+        key = 'tl.response_step.off'
+        a.off = a.off
+          .split(',')
+          .map((m) => t(`tl.rm.${m}`))
+          .join(', ')
+      }
+      break
+    case 'response_room':
+      if (a.missing) key = 'tl.response_room.missing'
+      break
+    case 'response_bridge':
+      a.provider = a.provider === 'zoom' ? 'Zoom' : 'Teams'
+      break
+    case 'response_failed':
+    case 'response_gave_up':
+    case 'response_skipped':
+    case 'response_forced':
+      a.action = t(`tl.ra.${a.action || 'assess'}`)
+      break
   }
-  const out = t(key, a)
+  let out = t(key, a)
+  if (out !== key && e.args?.dry === '1') out += t('tl.dry')
   return out === key ? [e.code, ...Object.entries(e.args ?? {}).map(([k, v]) => `${k}=${v}`)].join(' ') : out
 }
