@@ -41,7 +41,8 @@ export type Person = { user_id: string; name: string; email?: string; telegram?:
 export type Route = { services: Ref[]; team?: Ref; people: Person[]; owners: Person[]; via: 'service' | 'ci_owners' | 'none'; at: string }
 
 export type PD = {
-  state: 'pending' | 'accepted' | 'acked' | 'failed' | 'skipped' | 'off'
+  state: 'pending' | 'accepted' | 'acked' | 'failed' | 'skipped' | 'off' | 'standby'
+  escalated?: boolean
   key: string
   route?: string
   error?: string

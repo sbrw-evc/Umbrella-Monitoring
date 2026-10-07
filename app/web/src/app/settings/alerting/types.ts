@@ -11,6 +11,27 @@ export type PDStatus = {
   last_error?: string
   last_error_at?: string
   last_webhook_at?: string
+  last_sync_at?: string
+  last_sync_error?: string
+  sync_applied?: number
+  on_call_at?: string
+}
+
+// The role of PagerDuty next to the notification channels of Umbrella; '' is primary.
+export const PD_MODES = ['primary', 'backup', 'parallel', 'off'] as const
+export type PDMode = (typeof PD_MODES)[number]
+
+export type PDSync = { interval_seconds?: number; from_email?: string; notes: boolean; priority: boolean; on_call: boolean }
+
+export type PDOnCall = { name: string; email: string; level: number; policy: string; until?: string; user_id?: string }
+
+export type BotStatus = {
+  state: 'off' | 'starting' | 'polling' | 'standby' | 'error'
+  username?: string
+  last_update_at?: string
+  last_error?: string
+  last_error_at?: string
+  handled: number
 }
 
 export type PDRoute = {
@@ -35,6 +56,12 @@ export type PagerDutyView = {
   updated_at?: string
   updated_by?: string
   routes: PDRoute[]
+  mode?: PDMode | ''
+  modes?: Record<string, PDMode>
+  backup_after_seconds?: number
+  sync?: PDSync
+  // Who is on call for each route ('' is the default integration), as last read.
+  on_call?: Record<string, PDOnCall[]>
   has_routing_key: boolean
   has_api_token: boolean
   has_webhook_secret: boolean
@@ -55,7 +82,7 @@ export type NotifyView = {
     username: string
     from: string
   }
-  telegram: { enabled: boolean; api_url?: string }
+  telegram: { enabled: boolean; api_url?: string; bot?: boolean }
   // Absent on an older server.
   teams?: { enabled: boolean }
   zoom?: { enabled: boolean }
@@ -79,6 +106,7 @@ export type NotifyView = {
   // Message templates replaced by the administrator, by name ("fallback.text"…); absent: built-in.
   templates?: Record<string, string>
   default_templates?: Record<string, string>
+  bot_status?: BotStatus
 }
 
 // A message of the sample incident rendered by /api/notifications/preview.

@@ -1085,7 +1085,7 @@ func (e *Engine) escalate(c *change, reason, actor string, now time.Time) *Comma
 	a := c.a
 	a.PD.Escalated = true
 	a.PD.State, a.PD.Error, a.PD.ErrorCode, a.PD.Retry = PDPending, "", "", ""
-	c.log(now, KindPagerDuty, "pd_escalated", map[string]string{"reason": reason}, actor)
+	c.log(now, KindPagerDuty, "pd_handover", map[string]string{"reason": reason}, actor)
 	return e.pdCmd(a, PDTrigger, now)
 }
 

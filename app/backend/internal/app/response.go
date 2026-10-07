@@ -67,7 +67,8 @@ type ResponseView struct {
 	Jira        JiraView               `json:"jira"`
 	Graph       GraphView              `json:"graph"`
 	Zoom        ZoomAPIView            `json:"zoom"`
-	// Channels: the backup notification channels that are ready (email, telegram, teams, zoom):
+	// Channels: the backup notification channels that are ready (email, telegram, teams, zoom)
+	// and PagerDuty:
 	// escalation messages go through them.
 	Channels        map[string]bool        `json:"channels"`
 	DefaultImpact   model.ImpactPolicy     `json:"default_impact"`
@@ -78,8 +79,9 @@ type ResponseView struct {
 
 func (s *ResponseService) View() ResponseView {
 	var r model.Response
-	s.st.Read(func(d *store.Data) { r = d.Settings.Response.Effective() })
-	ch := map[string]bool{}
+	var pdOn bool
+	s.st.Read(func(d *store.Data) { r, pdOn = d.Settings.Response.Effective(), d.Settings.Alerting.PagerDuty.Enabled })
+	ch := map[string]bool{model.CommPagerDuty: pdOn}
 	for _, c := range notify.Channels() {
 		ch[c] = s.n.Ready(c)
 	}

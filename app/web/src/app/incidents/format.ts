@@ -61,11 +61,20 @@ export function entryText(t: T, e: Entry, connectors: Record<string, string>) {
       a.event = t(`fu.${a.event}`)
       break
     case 'pd_skipped':
-      if (a.code === 'test') key = 'tl.pd_skipped.test'
+      if (a.code === 'test' || a.code === 'mode_off') key = `tl.pd_skipped.${a.code}`
       else if (a.code === 'below_threshold') {
         key = 'tl.pd_skipped.below_threshold'
         a.min = a.min ? severityText(t, a.min) : '—'
       }
+      break
+    case 'pd_standby':
+      if (a.after_s !== undefined) a.after = minutes(t, Number(a.after_s))
+      break
+    case 'pd_handover':
+      key = `tl.pd_handover.${a.reason}`
+      break
+    case 'response_pd_priority':
+      if (a.priority) a.priority = severityText(t, a.priority)
       break
     case 'pd_failed':
       // Delivery errors are codes; old lines keep their text.

@@ -56,7 +56,7 @@ func TestPagerDutyBackupMode(t *testing.T) {
 	if a = active(t, e)[0]; !a.PD.Escalated || a.PD.State != alert.PDPending {
 		t.Fatalf("pd = %+v", a.PD)
 	}
-	if cs := codes(t, e, a.ID); cs["pd_escalated"] != 1 {
+	if cs := codes(t, e, a.ID); cs["pd_handover"] != 1 {
 		t.Fatalf("timeline = %v", cs)
 	}
 	// A repeated event does not put it back in standby.
@@ -118,7 +118,7 @@ func TestPagerDutyBackupNobodyReached(t *testing.T) {
 		t.Fatalf("cmds = %+v", cmds)
 	}
 	_, entries, _ := e.Get(ctx, a.ID)
-	if last := entries[len(entries)-1]; last.Code != "pd_escalated" || last.Args["reason"] != "nobody_reached" {
+	if last := entries[len(entries)-1]; last.Code != "pd_handover" || last.Args["reason"] != "nobody_reached" {
 		t.Fatalf("last = %+v", last)
 	}
 }
