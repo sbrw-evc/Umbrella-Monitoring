@@ -1,0 +1,23 @@
+{
+  "configured": false,
+  "enabled": true,
+  "upstream_depth": 3,
+  "matrix": {
+    "critical": {"critical": "critical", "high": "critical", "medium": "critical", "low": "critical", "none": "critical"},
+    "error":    {"critical": "error",    "high": "error",    "medium": "error",    "low": "error",    "none": "warning"},
+    "warning":  {"critical": "error",    "high": "warning",  "medium": "warning",  "low": "warning",  "none": "low"},
+    "low":      {"critical": "warning",  "high": "warning",  "medium": "low",      "low": "low",      "none": "info"},
+    "info":     {"critical": "info",     "high": "info",     "medium": "info",     "low": "info",     "none": "info"}
+  },
+  "rules": [
+    {
+      "id": "example-prod-db",
+      "name": "Production databases",
+      "enabled": false,
+      "when": "'env' in labels && labels['env'] == 'prod' && title.lowerAscii().contains('database')",
+      "action": "raise",
+      "n": 1,
+      "stop": false
+    }
+  ]
+}
