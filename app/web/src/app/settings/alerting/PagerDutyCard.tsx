@@ -10,6 +10,7 @@ import { SummaryCard } from '../../profile/SummaryCard'
 import { useAction } from '../../profile/useAction'
 import { useSession } from '../../session'
 import { strings } from './strings'
+import { severityText } from '../../incidents/types'
 import { SEVERITIES, type PagerDutyView, type PDService, type Refs } from './types'
 
 type RouteDraft = { key: string; id: string; name: string; team_id: string; service_id: string; routing_key: string; pd_service_id: string; has_key: boolean }
@@ -215,10 +216,10 @@ export function PagerDutyCard({ onSaved, reloadKey = 0 }: { onSaved?: () => void
                   <Field label={t('pd.min')} hint={t('pd.min.hint')}>
                     {(id) => (
                       <Select id={id} value={draft.min_severity} onChange={(e) => set({ min_severity: e.target.value })}>
-                        <option value="">{t('sev.info')}</option>
+                        <option value="">{severityText(t, 'info')}</option>
                         {SEVERITIES.filter((s) => s !== 'info').map((s) => (
                           <option key={s} value={s}>
-                            {t(`sev.${s}`)}
+                            {severityText(t, s)}
                           </option>
                         ))}
                       </Select>

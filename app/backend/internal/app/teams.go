@@ -40,6 +40,9 @@ type TeamInput struct {
 	LeadID      *string `json:"lead_id"`
 	Email       *string `json:"email"`
 	Telegram    *string `json:"telegram"`
+	// Teams and Zoom: incoming webhook URLs (https) of a Teams channel and a Zoom chat.
+	Teams *string `json:"teams"`
+	Zoom  *string `json:"zoom"`
 }
 
 type TeamView struct {
@@ -259,6 +262,20 @@ func applyTeamText(t *model.Team, in TeamInput) error {
 		}
 		t.Telegram = c
 	}
+	if in.Teams != nil {
+		v := strings.TrimSpace(*in.Teams)
+		if v != "" && !validWebhook(v) {
+			return invalid("invalid_teams", nil)
+		}
+		t.Teams = v
+	}
+	if in.Zoom != nil {
+		v := strings.TrimSpace(*in.Zoom)
+		if v != "" && !validWebhook(v) {
+			return invalid("invalid_zoom", nil)
+		}
+		t.Zoom = v
+	}
 	return nil
 }
 
@@ -403,10 +420,31 @@ func diffTeam(d *store.Data, cur, next *model.Team) string {
 	if cur.Email != next.Email || cur.Telegram != next.Telegram {
 		parts = append(parts, fmt.Sprintf("channel %q %q -> %q %q", cur.Email, cur.Telegram, next.Email, next.Telegram))
 	}
+	// Webhook URLs carry a secret: the record shows them redacted.
+	if cur.Teams != next.Teams {
+		parts = append(parts, fmt.Sprintf("teams webhook %q -> %q", redactedOrEmpty(cur.Teams), redactedOrEmpty(next.Teams)))
+	}
+	if cur.Zoom != next.Zoom {
+		parts = append(parts, fmt.Sprintf("zoom webhook %q -> %q", redactedOrEmpty(cur.Zoom), redactedOrEmpty(next.Zoom)))
+	}
 	if cur.LeadID != next.LeadID {
 		parts = append(parts, fmt.Sprintf("lead %q -> %q", leadName(d, cur.LeadID), leadName(d, next.LeadID)))
 	}
 	return strings.Join(parts, "; ")
+}
+
+// redacted is the team as people who cannot edit it see it: the webhook URLs of its channel carry
+// a secret and are redacted.
+func (v TeamView) redacted() TeamView {
+	v.Teams, v.Zoom = redactedOrEmpty(v.Teams), redactedOrEmpty(v.Zoom)
+	return v
+}
+
+func redactedOrEmpty(v string) string {
+	if v == "" {
+		return ""
+	}
+	return model.RedactURL(v)
 }
 
 func leadName(d *store.Data, id string) string {

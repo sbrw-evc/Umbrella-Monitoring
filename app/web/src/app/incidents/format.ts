@@ -1,4 +1,4 @@
-import { SEVERITY_TONE, type Entry, type Severity } from './types'
+import { SEVERITY_TONE, severityText, type Entry, type Severity } from './types'
 
 type T = (key: string, vars?: Record<string, string | number>) => string
 
@@ -26,7 +26,7 @@ function minutes(t: T, s: number) {
 export function entryText(t: T, e: Entry, connectors: Record<string, string>) {
   const a = { ...(e.args ?? {}) }
   if (a.connector) a.connector = connectors[a.connector] ?? a.connector
-  if (a.severity) a.severity = t(`inc.sev.${a.severity}`)
+  if (a.severity) a.severity = severityText(t, a.severity)
   if (a.status && e.code === 'event') a.status = t(`inc.src.${a.status}`)
   let key = `tl.${e.code}`
   switch (e.code) {
@@ -42,8 +42,8 @@ export function entryText(t: T, e: Entry, connectors: Record<string, string>) {
       else if (a.services) key = 'tl.routed.services'
       break
     case 'severity_raised':
-      a.from = t(`inc.sev.${a.from}`)
-      a.to = t(`inc.sev.${a.to}`)
+      a.from = severityText(t, a.from)
+      a.to = severityText(t, a.to)
       break
     case 'fallback':
       if (a.after_s !== undefined) a.after = minutes(t, Number(a.after_s))
@@ -64,7 +64,7 @@ export function entryText(t: T, e: Entry, connectors: Record<string, string>) {
       if (a.code === 'test') key = 'tl.pd_skipped.test'
       else if (a.code === 'below_threshold') {
         key = 'tl.pd_skipped.below_threshold'
-        a.min = a.min ? t(`inc.sev.${a.min}`) : '—'
+        a.min = a.min ? severityText(t, a.min) : '—'
       }
       break
     case 'pd_failed':

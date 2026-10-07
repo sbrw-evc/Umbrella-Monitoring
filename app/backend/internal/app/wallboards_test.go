@@ -239,6 +239,21 @@ func TestWallboardPublicAccess(t *testing.T) {
 	if payload["ready"] != false || payload["version"] != "test" || payload["default_locale"] != "ru" || len(payload["incidents"].([]any)) != 0 {
 		t.Fatalf("payload while not ready = %v", payload)
 	}
+	// The page takes the alert scale from the payload: five priorities, most severe first.
+	var scale struct {
+		Severities []model.Severity `json:"severities"`
+	}
+	_ = json.Unmarshal([]byte(allowed.body), &scale)
+	var levels []string
+	for _, s := range scale.Severities {
+		levels = append(levels, s.Priority+":"+s.Name+":"+s.Tone)
+		if s.Title.En == "" || s.Title.Ru == "" || s.Rank == 0 {
+			t.Errorf("severity without words or rank: %+v", s)
+		}
+	}
+	if want := []string{"P1:critical:critical", "P2:error:error", "P3:warning:warn", "P4:low:low", "P5:info:info"}; !slices.Equal(levels, want) {
+		t.Errorf("TV severities = %v, want %v", levels, want)
+	}
 	if fetch(t, h, "/api/public/tv/NOC", from("2001:db8::5")).status != http.StatusOK {
 		t.Error("IPv6 client inside the network, slug case-insensitive")
 	}

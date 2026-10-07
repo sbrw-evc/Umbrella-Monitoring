@@ -1,11 +1,11 @@
 === ru/fallback/full subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (критично)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P1 · критический)
 === ru/fallback/full text
 PagerDuty не принял инцидент — резервное оповещение
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 & co
 Сигнал: red.errors<1>
 Сервис: Платежи, Cards <EU>
@@ -23,7 +23,7 @@ Grafana: https://umbrella.example.com/go/incidents/INC-7/grafana
 🚨 <b>PagerDuty не принял инцидент — резервное оповещение</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 &amp; co
 Сигнал: red.errors&lt;1&gt;
 Сервис: Платежи, Cards &lt;EU&gt;
@@ -33,13 +33,13 @@ PagerDuty: ошибка доставки: не задан ключ интегр�
 
 <a href="https://umbrella.example.com/ack/SU5DLTcKdTp1MQoxNzkxMjc3NTAw.4G0lXB0m9BszyuV_z2pv9TOL">Подтвердить</a> · <a href="https://umbrella.example.com/incidents?id=INC-7">Открыть в Umbrella</a> · <a href="https://umbrella.example.com/go/incidents/INC-7/grafana">Grafana</a>
 === ru/fallback/failed_error subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (критично)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P1 · критический)
 === ru/fallback/failed_error text
 PagerDuty не принял инцидент — резервное оповещение
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 & co
 Сигнал: red.errors<1>
 Сервис: Платежи, Cards <EU>
@@ -56,7 +56,7 @@ PagerDuty: ошибка доставки: breaker <open>
 🚨 <b>PagerDuty не принял инцидент — резервное оповещение</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 &amp; co
 Сигнал: red.errors&lt;1&gt;
 Сервис: Платежи, Cards &lt;EU&gt;
@@ -66,13 +66,13 @@ PagerDuty: ошибка доставки: breaker &lt;open&gt;
 
 <a href="https://umbrella.example.com/ack/SU5DLTcKdTp1MQoxNzkxMjc3NTAw.4G0lXB0m9BszyuV_z2pv9TOL">Подтвердить</a> · <a href="https://umbrella.example.com/incidents?id=INC-7">Открыть в Umbrella</a>
 === ru/fallback/failed_bare subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (критично)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P1 · критический)
 === ru/fallback/failed_bare text
 PagerDuty не принял инцидент — резервное оповещение
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 & co
 Сигнал: red.errors<1>
 Сервис: Платежи, Cards <EU>
@@ -88,7 +88,7 @@ PagerDuty: ошибка доставки
 🚨 <b>PagerDuty не принял инцидент — резервное оповещение</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 &amp; co
 Сигнал: red.errors&lt;1&gt;
 Сервис: Платежи, Cards &lt;EU&gt;
@@ -98,13 +98,13 @@ PagerDuty: ошибка доставки
 
 <a href="https://umbrella.example.com/incidents?id=INC-7">Открыть в Umbrella</a>
 === ru/fallback/pending subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (критично)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P1 · критический)
 === ru/fallback/pending text
 PagerDuty не принял инцидент — резервное оповещение
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 & co
 Сигнал: red.errors<1>
 Сервис: Платежи, Cards <EU>
@@ -121,7 +121,7 @@ Grafana: https://umbrella.example.com/go/incidents/INC-7/grafana
 🚨 <b>PagerDuty не принял инцидент — резервное оповещение</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 &amp; co
 Сигнал: red.errors&lt;1&gt;
 Сервис: Платежи, Cards &lt;EU&gt;
@@ -131,13 +131,13 @@ PagerDuty: не ответил
 
 <a href="https://umbrella.example.com/incidents?id=INC-7">Открыть в Umbrella</a> · <a href="https://umbrella.example.com/go/incidents/INC-7/grafana">Grafana</a>
 === ru/fallback/off subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (инфо)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P5 · информационный)
 === ru/fallback/off text
 Новый инцидент — оповещение Umbrella
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Важность: инфо
+Важность: P5 · информационный
 КЕ: app-01 & co
 Открыт: 05.10.2026 16:00 +07
 
@@ -147,18 +147,18 @@ INC-7 · HTTP 5xx <b>&"app"</b>
 🚨 <b>Новый инцидент — оповещение Umbrella</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Важность: инфо
+Важность: P5 · информационный
 КЕ: app-01 &amp; co
 Открыт: 05.10.2026 16:00 +07
 
 === ru/fallback/skipped subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (предупреждение)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P3 · средний)
 === ru/fallback/skipped text
 Новый инцидент — оповещение Umbrella
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Важность: предупреждение
+Важность: P3 · средний
 КЕ: app-01 & co
 Сигнал: red.errors<1>
 Сервис: Платежи, Cards <EU>
@@ -175,7 +175,7 @@ PagerDuty: не отправлялся (ниже порога важности)
 🚨 <b>Новый инцидент — оповещение Umbrella</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Важность: предупреждение
+Важность: P3 · средний
 КЕ: app-01 &amp; co
 Сигнал: red.errors&lt;1&gt;
 Сервис: Платежи, Cards &lt;EU&gt;
@@ -246,13 +246,13 @@ INC-7 · HTTP 5xx <b>&"app"</b>
 ✅ <b>Проверка резервного оповещения Umbrella</b>
 Это проверочное сообщение. Если вы его видите, канал настроен.
 === en/fallback/full subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (critical)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P1 · critical)
 === en/fallback/full text
 PagerDuty did not take the incident — backup notification
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Severity: critical
+Severity: P1 · critical
 CI: app-01 & co
 Signal: red.errors<1>
 Service: Платежи, Cards <EU>
@@ -270,7 +270,7 @@ You get this because you are in the team that owns the service or you are respon
 🚨 <b>PagerDuty did not take the incident — backup notification</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Severity: critical
+Severity: P1 · critical
 CI: app-01 &amp; co
 Signal: red.errors&lt;1&gt;
 Service: Платежи, Cards &lt;EU&gt;
@@ -280,13 +280,13 @@ PagerDuty: delivery failed: no integration key is set
 
 <a href="https://umbrella.example.com/ack/SU5DLTcKdTp1MQoxNzkxMjc3NTAw.4G0lXB0m9BszyuV_z2pv9TOL">Acknowledge</a> · <a href="https://umbrella.example.com/incidents?id=INC-7">Open in Umbrella</a> · <a href="https://umbrella.example.com/go/incidents/INC-7/grafana">Grafana</a>
 === en/fallback/failed_error subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (critical)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P1 · critical)
 === en/fallback/failed_error text
 PagerDuty did not take the incident — backup notification
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Severity: critical
+Severity: P1 · critical
 CI: app-01 & co
 Signal: red.errors<1>
 Service: Платежи, Cards <EU>
@@ -303,7 +303,7 @@ You get this because you are in the team that owns the service or you are respon
 🚨 <b>PagerDuty did not take the incident — backup notification</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Severity: critical
+Severity: P1 · critical
 CI: app-01 &amp; co
 Signal: red.errors&lt;1&gt;
 Service: Платежи, Cards &lt;EU&gt;
@@ -313,13 +313,13 @@ PagerDuty: delivery failed: breaker &lt;open&gt;
 
 <a href="https://umbrella.example.com/ack/SU5DLTcKdTp1MQoxNzkxMjc3NTAw.4G0lXB0m9BszyuV_z2pv9TOL">Acknowledge</a> · <a href="https://umbrella.example.com/incidents?id=INC-7">Open in Umbrella</a>
 === en/fallback/failed_bare subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (critical)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P1 · critical)
 === en/fallback/failed_bare text
 PagerDuty did not take the incident — backup notification
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Severity: critical
+Severity: P1 · critical
 CI: app-01 & co
 Signal: red.errors<1>
 Service: Платежи, Cards <EU>
@@ -335,7 +335,7 @@ You get this because you are in the team that owns the service or you are respon
 🚨 <b>PagerDuty did not take the incident — backup notification</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Severity: critical
+Severity: P1 · critical
 CI: app-01 &amp; co
 Signal: red.errors&lt;1&gt;
 Service: Платежи, Cards &lt;EU&gt;
@@ -345,13 +345,13 @@ PagerDuty: delivery failed
 
 <a href="https://umbrella.example.com/incidents?id=INC-7">Open in Umbrella</a>
 === en/fallback/pending subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (critical)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P1 · critical)
 === en/fallback/pending text
 PagerDuty did not take the incident — backup notification
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Severity: critical
+Severity: P1 · critical
 CI: app-01 & co
 Signal: red.errors<1>
 Service: Платежи, Cards <EU>
@@ -368,7 +368,7 @@ You get this because you are in the team that owns the service or you are respon
 🚨 <b>PagerDuty did not take the incident — backup notification</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Severity: critical
+Severity: P1 · critical
 CI: app-01 &amp; co
 Signal: red.errors&lt;1&gt;
 Service: Платежи, Cards &lt;EU&gt;
@@ -378,13 +378,13 @@ PagerDuty: no answer
 
 <a href="https://umbrella.example.com/incidents?id=INC-7">Open in Umbrella</a> · <a href="https://umbrella.example.com/go/incidents/INC-7/grafana">Grafana</a>
 === en/fallback/off subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (info)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P5 · informational)
 === en/fallback/off text
 New incident — Umbrella notification
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Severity: info
+Severity: P5 · informational
 CI: app-01 & co
 Opened: 05.10.2026 16:00 +07
 
@@ -394,18 +394,18 @@ You get this because you are in the team that owns the service or you are respon
 🚨 <b>New incident — Umbrella notification</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Severity: info
+Severity: P5 · informational
 CI: app-01 &amp; co
 Opened: 05.10.2026 16:00 +07
 
 === en/fallback/skipped subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (warning)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P3 · medium)
 === en/fallback/skipped text
 New incident — Umbrella notification
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Severity: warning
+Severity: P3 · medium
 CI: app-01 & co
 Signal: red.errors<1>
 Service: Платежи, Cards <EU>
@@ -422,7 +422,7 @@ You get this because you are in the team that owns the service or you are respon
 🚨 <b>New incident — Umbrella notification</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Severity: warning
+Severity: P3 · medium
 CI: app-01 &amp; co
 Signal: red.errors&lt;1&gt;
 Service: Платежи, Cards &lt;EU&gt;
@@ -493,13 +493,13 @@ This is a test message. If you see it, the channel is set up.
 ✅ <b>Umbrella backup notification test</b>
 This is a test message. If you see it, the channel is set up.
 === /fallback/full subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (критично)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P1 · критический)
 === /fallback/full text
 PagerDuty не принял инцидент — резервное оповещение
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 & co
 Сигнал: red.errors<1>
 Сервис: Платежи, Cards <EU>
@@ -517,7 +517,7 @@ Grafana: https://umbrella.example.com/go/incidents/INC-7/grafana
 🚨 <b>PagerDuty не принял инцидент — резервное оповещение</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 &amp; co
 Сигнал: red.errors&lt;1&gt;
 Сервис: Платежи, Cards &lt;EU&gt;
@@ -527,13 +527,13 @@ PagerDuty: ошибка доставки: не задан ключ интегр�
 
 <a href="https://umbrella.example.com/ack/SU5DLTcKdTp1MQoxNzkxMjc3NTAw.4G0lXB0m9BszyuV_z2pv9TOL">Подтвердить</a> · <a href="https://umbrella.example.com/incidents?id=INC-7">Открыть в Umbrella</a> · <a href="https://umbrella.example.com/go/incidents/INC-7/grafana">Grafana</a>
 === /fallback/failed_error subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (критично)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P1 · критический)
 === /fallback/failed_error text
 PagerDuty не принял инцидент — резервное оповещение
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 & co
 Сигнал: red.errors<1>
 Сервис: Платежи, Cards <EU>
@@ -550,7 +550,7 @@ PagerDuty: ошибка доставки: breaker <open>
 🚨 <b>PagerDuty не принял инцидент — резервное оповещение</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 &amp; co
 Сигнал: red.errors&lt;1&gt;
 Сервис: Платежи, Cards &lt;EU&gt;
@@ -560,13 +560,13 @@ PagerDuty: ошибка доставки: breaker &lt;open&gt;
 
 <a href="https://umbrella.example.com/ack/SU5DLTcKdTp1MQoxNzkxMjc3NTAw.4G0lXB0m9BszyuV_z2pv9TOL">Подтвердить</a> · <a href="https://umbrella.example.com/incidents?id=INC-7">Открыть в Umbrella</a>
 === /fallback/failed_bare subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (критично)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P1 · критический)
 === /fallback/failed_bare text
 PagerDuty не принял инцидент — резервное оповещение
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 & co
 Сигнал: red.errors<1>
 Сервис: Платежи, Cards <EU>
@@ -582,7 +582,7 @@ PagerDuty: ошибка доставки
 🚨 <b>PagerDuty не принял инцидент — резервное оповещение</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 &amp; co
 Сигнал: red.errors&lt;1&gt;
 Сервис: Платежи, Cards &lt;EU&gt;
@@ -592,13 +592,13 @@ PagerDuty: ошибка доставки
 
 <a href="https://umbrella.example.com/incidents?id=INC-7">Открыть в Umbrella</a>
 === /fallback/pending subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (критично)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P1 · критический)
 === /fallback/pending text
 PagerDuty не принял инцидент — резервное оповещение
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 & co
 Сигнал: red.errors<1>
 Сервис: Платежи, Cards <EU>
@@ -615,7 +615,7 @@ Grafana: https://umbrella.example.com/go/incidents/INC-7/grafana
 🚨 <b>PagerDuty не принял инцидент — резервное оповещение</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Важность: критично
+Важность: P1 · критический
 КЕ: app-01 &amp; co
 Сигнал: red.errors&lt;1&gt;
 Сервис: Платежи, Cards &lt;EU&gt;
@@ -625,13 +625,13 @@ PagerDuty: не ответил
 
 <a href="https://umbrella.example.com/incidents?id=INC-7">Открыть в Umbrella</a> · <a href="https://umbrella.example.com/go/incidents/INC-7/grafana">Grafana</a>
 === /fallback/off subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (инфо)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P5 · информационный)
 === /fallback/off text
 Новый инцидент — оповещение Umbrella
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Важность: инфо
+Важность: P5 · информационный
 КЕ: app-01 & co
 Открыт: 05.10.2026 16:00 +07
 
@@ -641,18 +641,18 @@ INC-7 · HTTP 5xx <b>&"app"</b>
 🚨 <b>Новый инцидент — оповещение Umbrella</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Важность: инфо
+Важность: P5 · информационный
 КЕ: app-01 &amp; co
 Открыт: 05.10.2026 16:00 +07
 
 === /fallback/skipped subject
-[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (предупреждение)
+[Umbrella] INC-7 · HTTP 5xx <b>&"app"</b> (P3 · средний)
 === /fallback/skipped text
 Новый инцидент — оповещение Umbrella
 
 INC-7 · HTTP 5xx <b>&"app"</b>
 
-Важность: предупреждение
+Важность: P3 · средний
 КЕ: app-01 & co
 Сигнал: red.errors<1>
 Сервис: Платежи, Cards <EU>
@@ -669,7 +669,7 @@ PagerDuty: не отправлялся (ниже порога важности)
 🚨 <b>Новый инцидент — оповещение Umbrella</b>
 
 <b>INC-7 · HTTP 5xx &lt;b&gt;&amp;&#34;app&#34;&lt;/b&gt;</b>
-Важность: предупреждение
+Важность: P3 · средний
 КЕ: app-01 &amp; co
 Сигнал: red.errors&lt;1&gt;
 Сервис: Платежи, Cards &lt;EU&gt;

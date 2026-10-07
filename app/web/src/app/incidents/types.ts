@@ -1,5 +1,6 @@
 // The alert scale, most severe first: the one list of the interface (model.Severities on the server).
-export const SEVERITIES = ['critical', 'error', 'warning', 'info'] as const
+// The stored names predate priorities; each level is shown as its priority and word (sev.<name>).
+export const SEVERITIES = ['critical', 'error', 'warning', 'low', 'info'] as const
 export const STATUSES = ['active', 'open', 'acknowledged', 'resolved', 'all'] as const
 // Methods of an alert (model.Methods); rules are RED or USE only.
 export const METHODS = ['red', 'use', 'other'] as const
@@ -10,7 +11,17 @@ export type Method = (typeof METHODS)[number]
 export type RuleMethod = (typeof RULE_METHODS)[number]
 
 // SEVERITY_TONE is the colour each severity is shown in (model.Severity.Tone).
-export const SEVERITY_TONE: Record<Severity, string> = { critical: 'critical', error: 'error', warning: 'warn', info: 'info' }
+export const SEVERITY_TONE: Record<Severity, string> = { critical: 'critical', error: 'error', warning: 'warn', low: 'low', info: 'info' }
+
+// SEVERITY_PRIORITY is the incident priority of each severity (model.Severity.Priority).
+export const SEVERITY_PRIORITY: Record<Severity, string> = { critical: 'P1', error: 'P2', warning: 'P3', low: 'P4', info: 'P5' }
+
+// severityText shows a severity as its priority and word, e.g. "P1 · Critical"; t must know the
+// common words (sev.<name>). An unknown name shows as it is.
+export function severityText(t: (key: string) => string, s: string) {
+  const p = SEVERITY_PRIORITY[s as Severity]
+  return p ? `${p} · ${t(`sev.${s}`)}` : s
+}
 
 export type Source = {
   connector_id: string

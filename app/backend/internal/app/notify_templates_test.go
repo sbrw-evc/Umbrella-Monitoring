@@ -59,7 +59,7 @@ func TestNotifyTemplates(t *testing.T) {
 		Messages []notify.Preview `json:"messages"`
 	}
 	f.expect(f.admin, http.MethodPost, "/api/notifications/preview", map[string]any{"locale": "en"}, http.StatusOK, &preview)
-	if len(preview.Messages) != 4 || preview.Messages[0].Subject != "[CRITICAL] INC-1042" || !strings.Contains(preview.Messages[0].Text, "Severity: critical") {
+	if len(preview.Messages) != 4 || preview.Messages[0].Subject != "[CRITICAL] INC-1042" || !strings.Contains(preview.Messages[0].Text, "Severity: P1 · critical") {
 		t.Fatalf("preview saved: %+v", preview.Messages)
 	}
 	f.expect(f.admin, http.MethodPost, "/api/notifications/preview", map[string]any{"locale": "ru", "templates": map[string]string{"fallback.subject": "{{t \"severity\"}}"}}, http.StatusOK, &preview)

@@ -644,7 +644,7 @@
       },
       "map_severity": {
         "title": "Справочник severity",
-        "description": "Переводит значение поля источника в critical, error, warning или info.",
+        "description": "Переводит значение поля источника в critical, error, warning, low или info.",
         "fields": {
           "field": {
             "label": "Поле источника"

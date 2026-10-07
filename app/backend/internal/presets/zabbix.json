@@ -28,7 +28,7 @@
             {"from": "5", "to": "critical"},
             {"from": "4", "to": "error"},
             {"from": "3", "to": "warning"},
-            {"from": "2", "to": "warning"},
+            {"from": "2", "to": "low"},
             {"from": "1", "to": "info"},
             {"from": "0", "to": "info"}
           ]

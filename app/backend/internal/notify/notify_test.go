@@ -84,7 +84,7 @@ func setup(t *testing.T) (*notify.Service, *store.Store, *notifytest.SMTP, *noti
 			ExtraTelegram: []string{"-100200"},
 		}}
 	})
-	s := notify.New(st, secrets{"pw": "secret", "tg": tg.Token})
+	s := notify.New(st, secrets{"pw": "secret", "tg": tg.Token, "zm": "zoom-verification-token"})
 	s.Backoff = time.Millisecond
 	s.SetLinks(notify.NewLinks([]byte("0123456789abcdef0123456789abcdef")))
 	res := &results{}
@@ -116,7 +116,7 @@ func TestBackupNotification(t *testing.T) {
 	if m.User != "relay" || m.Password != "secret" || m.From != "umbrella@example.com" {
 		t.Fatalf("envelope: %+v", m)
 	}
-	if !strings.Contains(m.Subject, "INC-7 · HTTP 5xx на app-01") || !strings.Contains(m.Subject, "критично") {
+	if !strings.Contains(m.Subject, "INC-7 · HTTP 5xx на app-01") || !strings.Contains(m.Subject, "P1 · критический") {
 		t.Fatalf("subject: %q", m.Subject)
 	}
 	for _, want := range []string{"Платежи", "Payments SRE", "05.10.2026 16:00 +07", "ошибка доставки: breaker open",

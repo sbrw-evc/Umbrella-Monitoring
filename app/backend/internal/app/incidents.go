@@ -83,6 +83,9 @@ func (a *App) listIncidents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	for i := range page.Alerts {
+		page.Alerts[i] = page.Alerts[i].Redacted()
+	}
 	httpx.JSON(w, http.StatusOK, page)
 }
 
@@ -112,7 +115,7 @@ func (a *App) getIncident(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	names := map[string]string{}
-	view := incidentView{Alert: al, Timeline: entries, Grafana: a.grafanaLink(al), Connectors: names}
+	view := incidentView{Alert: al.Redacted(), Timeline: entries, Grafana: a.grafanaLink(al), Connectors: names}
 	a.deps.Store.Read(func(d *store.Data) {
 		incidentContext(d, al, &view)
 		for _, src := range al.Sources {
@@ -144,7 +147,7 @@ func (a *App) actIncident(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, out)
+	httpx.JSON(w, http.StatusOK, out.Redacted())
 }
 
 type bulkInput struct {

@@ -224,9 +224,9 @@ func (w *world) routeServices(svcs []model.Service, owners []Person, now time.Ti
 			}
 			seen[cur.ID] = true
 			r.People = w.teamPeople(cur)
-			if cur.Email != "" || cur.Telegram != "" {
+			if ch := TeamChannel(cur); !ch.Empty() {
 				// A team with its own channel: the channel and the lead, not every member.
-				r.Channel = &Channel{Email: cur.Email, Telegram: cur.Telegram}
+				r.Channel = &ch
 				r.People = slices.DeleteFunc(r.People, func(p Person) bool { return p.Role != "lead" })
 			}
 			p, ok := w.teams[cur.ParentID]

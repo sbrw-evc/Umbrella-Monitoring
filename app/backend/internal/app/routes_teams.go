@@ -3,9 +3,21 @@ package app
 import "net/http"
 
 func (a *App) registerTeams(mux *http.ServeMux) {
-	a.route(mux, "GET /api/teams", "teams:view", show(a.teams.List))
+	a.route(mux, "GET /api/teams", "teams:view", fetch(func(r *http.Request) ([]TeamView, error) {
+		out := a.teams.List()
+		if !a.access.Permissions(current(r).user).Has("teams:edit") {
+			for i := range out {
+				out[i] = out[i].redacted()
+			}
+		}
+		return out, nil
+	}))
 	a.route(mux, "GET /api/teams/{id}", "teams:view", fetch(func(r *http.Request) (TeamView, error) {
-		return a.teams.Get(r.PathValue("id"))
+		v, err := a.teams.Get(r.PathValue("id"))
+		if !a.access.Permissions(current(r).user).Has("teams:edit") {
+			v = v.redacted()
+		}
+		return v, err
 	}))
 	a.route(mux, "POST /api/teams", "teams:edit", submit(http.StatusCreated, func(r *http.Request, in TeamInput) (TeamView, error) {
 		return a.teams.Create(actorName(r), in)

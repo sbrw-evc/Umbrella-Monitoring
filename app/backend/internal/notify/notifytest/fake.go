@@ -1,4 +1,5 @@
-// Package notifytest has a fake SMTP server and a fake Telegram Bot API for tests.
+// Package notifytest has a fake SMTP server, a fake Telegram Bot API and a fake incoming
+// webhook (Teams, Zoom) for tests.
 package notifytest
 
 import (

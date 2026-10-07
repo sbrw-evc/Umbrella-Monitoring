@@ -10,14 +10,14 @@ import { useSession } from '../session'
 import { BindCIForm, CreateCIForm, ResolveConfirm } from './CatalogForms'
 import { entryText, severityTone } from './format'
 import { strings } from './strings'
-import type { Detail, Incident, PD, Person, Severity } from './types'
+import { severityText, type Detail, type Incident, type PD, type Person, type Severity } from './types'
 
 export function SeverityPill({ severity }: { severity: Severity }) {
   const t = useT(strings)
   return (
     <span className={`pill inc-sev inc-sev-${severityTone(severity)}`}>
       <span className="inc-dot" aria-hidden />
-      {t(`inc.sev.${severity}`)}
+      {severityText(t, severity)}
     </span>
   )
 }

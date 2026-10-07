@@ -99,10 +99,55 @@ type Route struct {
 	At      time.Time `json:"at"`
 }
 
-// Channel is a team channel backup notification goes to besides the people.
+// Channel is a team channel backup notification goes to besides the people. Teams and Zoom are
+// webhook URLs: they carry a secret and are shown redacted (Redacted).
 type Channel struct {
 	Email    string `json:"email,omitempty"`
 	Telegram string `json:"telegram,omitempty"`
+	Teams    string `json:"teams,omitempty"`
+	Zoom     string `json:"zoom,omitempty"`
+}
+
+// TeamChannel is the own channel of a team; empty when the team has none.
+func TeamChannel(t model.Team) Channel {
+	return Channel{Email: t.Email, Telegram: t.Telegram, Teams: t.Teams, Zoom: t.Zoom}
+}
+
+// Empty: no address is set.
+func (c Channel) Empty() bool { return c == Channel{} }
+
+// Redacted is the channel as it may be shown: webhook URLs cut to their host and last characters.
+func (c Channel) Redacted() Channel {
+	if c.Teams != "" {
+		c.Teams = model.RedactURL(c.Teams)
+	}
+	if c.Zoom != "" {
+		c.Zoom = model.RedactURL(c.Zoom)
+	}
+	return c
+}
+
+// secretAddress: channels whose addresses are webhook URLs that carry a secret.
+var secretAddress = map[string]bool{"teams": true, "zoom": true}
+
+// Redacted is the alert as the API shows it: webhook URLs of the team channel and of the
+// addresses reached are redacted. The stored alert keeps them for the follow-up.
+func (a Alert) Redacted() Alert {
+	if a.Route.Channel != nil {
+		ch := a.Route.Channel.Redacted()
+		a.Route.Channel = &ch
+	}
+	if len(a.Notified) > 0 {
+		out := make([]Notified, len(a.Notified))
+		for i, n := range a.Notified {
+			if secretAddress[n.Channel] {
+				n.Address = model.RedactURL(n.Address)
+			}
+			out[i] = n
+		}
+		a.Notified = out
+	}
+	return a
 }
 
 // Recipients are the people backup notification goes to; a team channel comes on top.
