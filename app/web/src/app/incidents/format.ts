@@ -41,6 +41,12 @@ export function entryText(t: T, e: Entry, connectors: Record<string, string>) {
       else if (a.via === 'none') key = 'tl.routed.none'
       else if (a.services) key = 'tl.routed.services'
       break
+    case 'priority_set':
+      if (a.event) a.event = severityText(t, a.event)
+      if (a.from) a.from = severityText(t, a.from)
+      if (a.impact) a.impact = t(`inc.impact.${a.impact}`)
+      if (a.rule) key = 'tl.priority_set.rule'
+      break
     case 'severity_raised':
       a.from = severityText(t, a.from)
       a.to = severityText(t, a.to)
