@@ -286,7 +286,7 @@ type JiraPolicy struct {
 // DefaultResponsePolicies are the policies of a new installation: P1 and P2 escalate, open a
 // war room, a bridge call and Jira issues; P3 notifies and creates a task; P4 and P5 only notify.
 func DefaultResponsePolicies() []ResponsePolicy {
-	return []ResponsePolicy{
+	ps := []ResponsePolicy{
 		{Priority: SeverityCritical, Enabled: true, StopOnAck: false, Bridge: "teams", Steps: []EscalationStep{
 			{AfterMinutes: 0, Targets: []string{TargetRoute}, Methods: []string{CommEmail, CommTelegram, CommTeams, CommWarRoom, CommCallTeams}},
 			{AfterMinutes: 10, Targets: []string{TargetLead, TargetServiceOwners}, Methods: []string{CommEmail, CommTelegram, CommWarRoom}},
@@ -308,6 +308,30 @@ func DefaultResponsePolicies() []ResponsePolicy {
 		}, WarRoom: WarRoomPolicy{Members: []string{TargetRoute}}, Jira: JiraPolicy{PostmortemDays: 10}},
 		{Priority: SeverityInfo, Enabled: false, StopOnAck: true, WarRoom: WarRoomPolicy{Members: []string{TargetRoute}}, Jira: JiraPolicy{PostmortemDays: 10}},
 	}
+	for i := range ps {
+		ps[i].fillLists()
+	}
+	return ps
+}
+
+// fillLists turns lists that were never set into empty ones, so the web interface gets [] and
+// not null: the defaults leave out the people and teams of a step, and settings saved before a
+// list existed have none.
+func (p *ResponsePolicy) fillLists() {
+	nonNil := func(v []string) []string {
+		if v == nil {
+			return []string{}
+		}
+		return v
+	}
+	if p.Steps == nil {
+		p.Steps = []EscalationStep{}
+	}
+	for i := range p.Steps {
+		s := &p.Steps[i]
+		s.Targets, s.UserIDs, s.TeamIDs, s.Methods = nonNil(s.Targets), nonNil(s.UserIDs), nonNil(s.TeamIDs), nonNil(s.Methods)
+	}
+	p.WarRoom.Members, p.WarRoom.UserIDs = nonNil(p.WarRoom.Members), nonNil(p.WarRoom.UserIDs)
 }
 
 const (
@@ -603,6 +627,9 @@ func (r Response) Effective() Response {
 	}
 	if r.Policies == nil {
 		r.Policies = DefaultResponsePolicies()
+	}
+	for i := range r.Policies {
+		r.Policies[i].fillLists()
 	}
 	def := DefaultJira()
 	if r.Jira.Mode == "" {
