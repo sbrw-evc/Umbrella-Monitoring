@@ -13,7 +13,7 @@ import { OnboardingChecklist } from '../onboarding/OnboardingChecklist'
 import { IncidentDetail, PDPill, SeverityPill, StatusPill } from './IncidentDetail'
 import { ago } from './format'
 import { strings } from './strings'
-import { filtersFromURL, METHODS, NO_FILTERS, queryOf, SEVERITIES, SEVERITY_TONE, severityText, STATUSES, urlOf, type Filters, type Flag, type Incident, type Page, type Ref } from './types'
+import { filtersFromURL, INCIDENTS_PATH, METHODS, NO_FILTERS, queryOf, SEVERITIES, SEVERITY_TONE, severityText, STATUSES, urlOf, type Filters, type Flag, type Incident, type Page, type Ref } from './types'
 import '../services/services.css'
 import '../connectors/connectors.css'
 import '../cis/cis.css'
@@ -67,17 +67,21 @@ export function IncidentsPage() {
     return () => window.clearInterval(id)
   }, [])
   // A link to the list (a light of the top bar, a notification) while it is open.
-  const { search, visit } = useRouter()
+  // While the page plays its exit animation the address already belongs to the next page:
+  // the list then neither reads it nor writes its filters into it, or the address would
+  // point back to /incidents and a click on Incidents in the menu would do nothing.
+  const { path, search, visit } = useRouter()
+  const here = path === INCIDENTS_PATH
   const arrived = useRef(visit)
   useEffect(() => {
-    if (visit === arrived.current) return
+    if (visit === arrived.current || !here) return
     arrived.current = visit
     setFilters(filtersFromURL(search))
     setOpenID(new URLSearchParams(search).get('id'))
-  }, [search, visit])
+  }, [search, visit, here])
   useEffect(() => {
-    window.history.replaceState(null, '', urlOf(filters, openID))
-  }, [filters, openID])
+    if (here) window.history.replaceState(null, '', urlOf(filters, openID))
+  }, [filters, openID, here])
   useEffect(() => setChecked(new Set()), [filters])
 
   const set = (patch: Partial<Filters>) => setFilters((f) => ({ ...f, ...patch }))

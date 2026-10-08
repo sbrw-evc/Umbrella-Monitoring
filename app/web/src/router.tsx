@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type AnchorHTMLAttributes, type MouseEvent, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type AnchorHTMLAttributes, type MouseEvent, type ReactNode } from 'react'
 
 type NavigateOptions = { replace?: boolean }
 
@@ -34,8 +34,13 @@ export function RouterProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('popstate', onPop)
   }, [moved])
 
+  // shown is the page on screen. A page may rewrite the address without telling the router;
+  // a click then still goes to its target instead of being taken for the current address.
+  const shown = useRef(path)
+  shown.current = path
+
   const navigate = useCallback((to: string, { replace = false }: NavigateOptions = {}) => {
-    if (to === currentPath() && !replace) return
+    if (to === currentPath() && to === shown.current && !replace) return
     if (replace) window.history.replaceState(null, '', to)
     else window.history.pushState(null, '', to)
     moved()

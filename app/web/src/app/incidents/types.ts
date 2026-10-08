@@ -166,11 +166,13 @@ export function filtersFromURL(search: string): Filters {
   return f
 }
 
+export const INCIDENTS_PATH = '/incidents'
+
 export function urlOf(f: Filters, id: string | null) {
   const p = new URLSearchParams()
   for (const k of ['q', 'severity', 'method', 'team', 'service', 'flag'] as const) if (f[k]) p.set(k, f[k])
   if (f.status !== NO_FILTERS.status) p.set('status', f.status)
   if (id) p.set('id', id)
   const s = p.toString()
-  return `/incidents${s ? `?${s}` : ''}`
+  return `${INCIDENTS_PATH}${s ? `?${s}` : ''}`
 }
