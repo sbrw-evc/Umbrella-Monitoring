@@ -9,7 +9,12 @@ import { PasswordExpiryNotice } from './profile/PasswordExpiryNotice'
 import { ProfilePage } from './profile/ProfilePage'
 import { PageBoundary } from './PageBoundary'
 import { PageHead } from './PageHead'
-import { resolve, visiblePages } from './pages'
+import { HOME_PATH, resolve, visiblePages } from './pages'
+import { DesktopOnly, forcedPages } from './mobile/DesktopOnly'
+import { MobileFrame } from './mobile/MobileFrame'
+import { hasOverview, mobileReady, OVERVIEW_PATH } from './mobile/mobilePages'
+import { Overview } from './mobile/Overview'
+import { useMobile } from './mobile/useMobile'
 import { SessionProvider, useSession, type Session } from './session'
 import { Sidebar, SidebarResizer, useCollapsed, useSidebarWidth } from './Sidebar'
 import { SignIn } from './SignIn'
@@ -124,6 +129,14 @@ function Shell({ meta }: { meta: Meta }) {
 function Frame({ hasSidebar, user, onSignOut }: { hasSidebar: boolean; user: string; onSignOut: () => void }) {
   const [collapsed, toggle] = useCollapsed(user)
   const [width, setWidth] = useSidebarWidth(user)
+  const mobile = useMobile()
+  if (mobile) {
+    return (
+      <MobileFrame onSignOut={onSignOut}>
+        <Pages mobile />
+      </MobileFrame>
+    )
+  }
   return (
     <div className="app-shell">
       <TopBar onSignOut={onSignOut} sidebar={hasSidebar ? { collapsed, toggle } : undefined} />
@@ -141,10 +154,15 @@ function Frame({ hasSidebar, user, onSignOut }: { hasSidebar: boolean; user: str
   )
 }
 
-function Pages() {
+// The phone layout starts on the overview and keeps the pages made for a computer behind a note.
+type Target = ReturnType<typeof resolve> | { kind: 'overview' }
+
+function Pages({ mobile = false }: { mobile?: boolean }) {
   const { path, navigate } = useRouter()
   const { user, refresh, can } = useSession()
-  const target = resolve(path, can)
+  const [forced, setForced] = useState(forcedPages)
+  const home = mobile && hasOverview(can)
+  const target: Target = home && path === OVERVIEW_PATH ? { kind: 'overview' } : home && path === HOME_PATH ? { kind: 'redirect', to: OVERVIEW_PATH } : resolve(path, can)
 
   useEffect(() => {
     if (user.source === 'local') void refresh()
@@ -155,7 +173,8 @@ function Pages() {
   }, [target, navigate])
 
   if (target.kind === 'redirect') return null
-  const key = target.kind === 'page' ? target.page.id : 'profile'
+  const key = target.kind === 'page' ? target.page.id : target.kind
+  const desk = mobile && target.kind === 'page' && !mobileReady(target.page) && !forced.has(target.page.id)
 
   return (
     <AnimatePresence mode="wait" initial={false}>
@@ -167,14 +186,21 @@ function Pages() {
         exit={{ opacity: 0, y: -6 }}
         transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
       >
-        {target.kind === 'profile' ? (
+        {target.kind === 'overview' ? (
+          <PageBoundary resetKey={path}>
+            <PasswordExpiryNotice link />
+            <Overview />
+          </PageBoundary>
+        ) : target.kind === 'profile' ? (
           <PageBoundary resetKey={path}>
             <ProfilePage />
           </PageBoundary>
+        ) : desk ? (
+          <DesktopOnly page={target.page} onOpen={() => setForced(forcedPages())} />
         ) : (
           <>
             <PasswordExpiryNotice link />
-            {target.page.subtitle && <PageHead page={target.page} />}
+            {target.page.subtitle && !mobile && <PageHead page={target.page} />}
             <PageBoundary resetKey={path}>
               <target.page.Component />
             </PageBoundary>

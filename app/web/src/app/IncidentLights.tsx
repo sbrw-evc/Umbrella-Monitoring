@@ -7,6 +7,7 @@ import { useLiveReload } from './incidents/live'
 import { SEVERITIES, SEVERITY_PRIORITY, SEVERITY_TONE, severityText, type Incident, type Page, type Severity } from './incidents/types'
 import { useSession } from './session'
 import { topbarStrings } from './topbarStrings'
+import { publishCounts } from './mobile/lightsStore'
 
 // The top bar keeps an eye on the active incidents of the user's scope: the lights count them by
 // priority, and an incident that opens (or opens again) while the application is open pops up.
@@ -18,12 +19,14 @@ const WATCH = 50
 
 const KIND: Record<Severity, NoteKind> = { critical: 'error', error: 'error', warning: 'warn', low: 'info', info: 'info' }
 
-export function IncidentLights() {
+// compact: the phone layout shows one light, the highest priority that has incidents and how
+// many incidents are active in all.
+export function IncidentLights({ compact = false }: { compact?: boolean }) {
   const { can } = useSession()
-  return can('incidents:view') ? <Lights /> : null
+  return can('incidents:view') ? <Lights compact={compact} /> : null
 }
 
-function Lights() {
+function Lights({ compact }: { compact: boolean }) {
   const t = useT(topbarStrings)
   const { navigate } = useRouter()
   const [counts, setCounts] = useState<Page['counts']['by_severity'] | null>(null)
@@ -73,6 +76,7 @@ function Lights() {
         try {
           const page = await api<Page>('GET', `/api/incidents?status=active&limit=${WATCH}`)
           setCounts(page.counts.by_severity)
+          publishCounts(page.counts.by_severity)
           setFailed(false)
           const known = seen.current
           const fresh: Incident[] = []
@@ -102,6 +106,29 @@ function Lights() {
     }, live ? SAFETY_MS : OFFLINE_MS)
     return () => window.clearInterval(id)
   }, [live, load])
+
+  useEffect(() => () => publishCounts(null), [])
+
+  if (compact) {
+    const top = SEVERITIES.find((s) => (counts?.[s] ?? 0) > 0)
+    const total = SEVERITIES.reduce((n, s) => n + (counts?.[s] ?? 0), 0)
+    const label = top ? t('lights.compact', { priority: severityText(t, top), n: total }) : t('lights.calm')
+    return (
+      <button
+        type="button"
+        className={`lights lights-compact${failed && !counts ? ' lights-off' : ''}`}
+        aria-label={label}
+        title={failed ? t('lights.offline') : label}
+        onClick={() => navigate(top ? `/incidents?severity=${top}` : '/incidents')}
+      >
+        <span className={`light light-${top ? SEVERITY_TONE[top] : 'ok'}${top ? ' on' : ''}${top === 'critical' ? ' light-top' : ''}`}>
+          <span className="light-dot" aria-hidden />
+          {top && <span className="light-p">{SEVERITY_PRIORITY[top]}</span>}
+          <span className="light-n">{counts ? total : '–'}</span>
+        </span>
+      </button>
+    )
+  }
 
   return (
     <div className={`lights${failed && !counts ? ' lights-off' : ''}`} role="group" aria-label={t('lights.label')} title={failed ? t('lights.offline') : undefined}>
