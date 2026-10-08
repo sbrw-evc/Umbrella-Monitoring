@@ -19,16 +19,19 @@ import { AnimatePresence, motion } from 'motion/react'
 import { ErrorBanner } from '../../connections/ConnectionCard'
 import { useResource } from '../../connections/useRequest'
 import { useLocale, useT } from '../../i18n'
-import { SEVERITY_TONE, severityText, type Severity } from '../incidents/types'
+import { SEVERITIES, SEVERITY_PRIORITY, SEVERITY_TONE, severityText, type Severity } from '../incidents/types'
 import { useTheme } from '../../theme'
 import { Banner, Button, formatDate, Input, Rows, Segmented, Switch } from '../../ui'
 import { Link } from '../../router'
 import { useSession } from '../session'
 import { CI_H, CI_W, layout, SERVICE_H, SERVICE_W } from './layout'
 import { strings } from './strings'
-import { LEVELS, problem, type CMDBMap, type Health, type Level, type MapCI, type MapService } from './types'
+import { LEVELS, problem, rank, type CMDBMap, type Health, type Level, type MapCI, type MapService } from './types'
 import './cmdb.css'
 import { SetupGuide } from '../guide/SetupGuide'
+import { Sheet } from '../mobile/Sheet'
+import { mobileStrings } from '../mobile/mobileStrings'
+import { useMobile } from '../mobile/useMobile'
 
 const REFRESH_MS = 60_000
 
@@ -135,7 +138,12 @@ function MapView() {
   const [view, setView] = useState<View>('all')
   const [showCIs, setShowCIs] = useState(true)
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<Selected>(null)
+  const mobile = useMobile()
+  // ?focus=<id> opens a service or an item, as the overview of the phone layout links to it.
+  const [selected, setSelected] = useState<Selected>(() => {
+    const id = new URLSearchParams(window.location.search).get('focus')
+    return id ? { kind: id.startsWith('SVC-') ? 'service' : 'ci', id } : null
+  })
   const res = useResource<CMDBMap>('/api/cmdb', epoch)
   const map = res.data
 
@@ -259,6 +267,8 @@ function MapView() {
         <div className="card svc-empty">
           <p>{t('map.empty')}</p>
         </div>
+      ) : mobile ? (
+        <HealthList map={map} view={view} showCIs={showCIs} q={q} selected={selected} onSelect={setSelected} />
       ) : (
         <div className="map-stage">
           <div className="map-canvas">
@@ -329,6 +339,118 @@ function MapView() {
       </details>
       {!map.events.available && map.events.error && <Banner kind="warn" title={t('map.basis.noEvents', { reason: map.events.error })} />}
     </div>
+  )
+}
+
+// HealthList is the map of the phone layout: the services and items as lists, the worst first,
+// and the card of the chosen one in a bottom sheet. A graph is not readable on a phone screen.
+function HealthList({
+  map,
+  view,
+  showCIs,
+  q,
+  selected,
+  onSelect,
+}: {
+  map: CMDBMap
+  view: View
+  showCIs: boolean
+  q: string
+  selected: Selected
+  onSelect: (s: Selected) => void
+}) {
+  const t = useT(strings)
+  const tm = useT(mobileStrings)
+  const keep = (x: { name: string; health: Health }, extra: string[] = []) =>
+    (view === 'all' || problem(x.health.level)) && (q === '' || matches(x.name, q) || extra.some((v) => matches(v, q)))
+  const order = <T extends { name: string; health: Health }>(a: T, b: T) => rank[b.health.level] - rank[a.health.level] || a.name.localeCompare(b.name)
+  const services = map.services.filter((s) => keep(s)).sort(order)
+  const cis = showCIs ? map.cis.filter((c) => keep(c, c.ips)).sort(order) : []
+  const detail = selected ? (selected.kind === 'service' ? map.services.find((s) => s.id === selected.id) : map.cis.find((c) => c.id === selected.id)) : undefined
+  const reasons = (h: Health) => h.reasons.length
+  return (
+    <>
+      {services.length + cis.length === 0 && <p className="muted m-ov-empty">{view === 'problems' && q === '' ? t('map.empty.problems') : tm('m.map.empty')}</p>}
+      {services.length > 0 && (
+        <section className="m-ov-section">
+          <header>
+            <h2>
+              <Briefcase size={16} aria-hidden />
+              {tm('m.map.services')}
+            </h2>
+          </header>
+          <div className="m-list card">
+            {services.map((s) => {
+              const sick = map.cis.filter((c) => s.ci_ids.includes(c.id) && problem(c.health.level)).length
+              return (
+                <button key={s.id} type="button" className="m-list-row" onClick={() => onSelect({ kind: 'service', id: s.id })}>
+                  <span className={`m-health-dot health-${s.health.level}`} aria-hidden />
+                  <span className="m-list-text">
+                    <strong>{s.name}</strong>
+                    <small className="muted">
+                      {[t(`map.crit.${s.criticality}`), s.owner, sick ? tm('m.ov.services.cis', { n: sick }) : tm('m.map.cis.n', { n: s.ci_ids.length })].filter(Boolean).join(' · ')}
+                    </small>
+                  </span>
+                  <span className={`m-health health-${s.health.level}`}>{tm(`m.health.${s.health.level}`)}</span>
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      )}
+      {cis.length > 0 && (
+        <section className="m-ov-section">
+          <header>
+            <h2>
+              <Server size={16} aria-hidden />
+              {tm('m.map.cis')}
+            </h2>
+          </header>
+          <div className="m-list card">
+            {cis.map((c) => {
+              const Icon = ciIcons[c.kind] ?? CircleHelp
+              const firing = SEVERITIES.flatMap((sev) => {
+                const n = sev === 'low' ? (c.events.low ?? 0) : c.events[sev]
+                return n > 0 ? [`${SEVERITY_PRIORITY[sev]}×${n}`] : []
+              }).join(' ')
+              return (
+                <button key={c.id} type="button" className="m-list-row" onClick={() => onSelect({ kind: 'ci', id: c.id })}>
+                  <span className={`m-health-dot health-${c.health.level}`} aria-hidden />
+                  <span className="m-list-text">
+                    <strong>
+                      <Icon size={13} aria-hidden /> {c.name}
+                    </strong>
+                    <small className="muted">
+                      {[firing, t(`map.ci.${c.kind}`), c.ips[0]]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </small>
+                  </span>
+                  {reasons(c.health) > 0 && <span className={`m-health health-${c.health.level}`}>{tm(`m.health.${c.health.level}`)}</span>}
+                </button>
+              )
+            })}
+          </div>
+        </section>
+      )}
+      <Sheet
+        open={!!detail}
+        title={
+          detail && selected ? (
+            <>
+              <small className="muted m-sheet-kicker">{selected.kind === 'service' ? t('map.kind.service') : t(`map.ci.${(detail as MapCI).kind}`)}</small>
+              {detail.name}
+            </>
+          ) : (
+            ''
+          )
+        }
+        onClose={() => onSelect(null)}
+      >
+        {detail && selected?.kind === 'service' && <ServicePanel service={detail as MapService} map={map} onSelect={onSelect} />}
+        {detail && selected?.kind === 'ci' && <CIPanel ci={detail as MapCI} map={map} onSelect={onSelect} />}
+      </Sheet>
+    </>
   )
 }
 

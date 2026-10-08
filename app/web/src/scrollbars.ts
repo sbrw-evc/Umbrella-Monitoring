@@ -18,8 +18,9 @@ const OPTIONS: PartialOptions = {
 }
 
 // Subtrees that manage their own scrolling (the flow canvas), opt out with
-// data-native-scroll, or are the library's own scrollbars.
-const SKIP_TREE = '[data-native-scroll], .react-flow, .os-scrollbar'
+// data-native-scroll, are the library's own scrollbars, or belong to the phone
+// layout, where touch scrolling shows the system's own overlay scrollbars.
+const SKIP_TREE = '[data-native-scroll], .react-flow, .os-scrollbar, .m-shell, .m-sheet-backdrop'
 // Elements that can't host extra children.
 const SKIP = `textarea, select, input, iframe, ${SKIP_TREE}`
 

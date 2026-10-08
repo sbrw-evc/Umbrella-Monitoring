@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Search } from 'lucide-react'
+import { ListChecks, Search, SlidersHorizontal } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api } from '../../api'
 import { ErrorBanner, ErrorFlash } from '../../connections/ConnectionCard'
@@ -19,6 +19,9 @@ import '../connectors/connectors.css'
 import '../cis/cis.css'
 import './incidents.css'
 import { useRouter } from '../../router'
+import { IncidentCard } from './IncidentCard'
+import { mobileStrings } from '../mobile/mobileStrings'
+import { useMobile } from '../mobile/useMobile'
 import { notify } from '../../notify'
 
 // The stream brings changes at once; the list is also reloaded now and then, in case the stream
@@ -40,8 +43,13 @@ type TeamRef = { id: string; name: string }
 
 export function IncidentsPage() {
   const t = useT(strings)
+  const tm = useT(mobileStrings)
+  const mobile = useMobile()
   const { can, user } = useSession()
   const actor = can('incidents:ack')
+  const [showFilters, setShowFilters] = useState(false)
+  const [selecting, setSelecting] = useState(false)
+  const [acking, setAcking] = useState<string | null>(null)
   const scoped = user.role !== 'admin' && (user.scope_mode === 'teams' || user.scope_mode === 'services' || (!user.scope_mode && (user.service_ids?.length ?? 0) > 0))
   const [filters, setFilters] = useState<Filters>(() => filtersFromURL(window.location.search))
   const [openID, setOpenID] = useState<string | null>(() => new URLSearchParams(window.location.search).get('id'))
@@ -83,6 +91,9 @@ export function IncidentsPage() {
     if (here) window.history.replaceState(null, '', urlOf(filters, openID))
   }, [filters, openID, here])
   useEffect(() => setChecked(new Set()), [filters])
+  useEffect(() => {
+    if (!selecting) setChecked(new Set())
+  }, [selecting])
 
   const set = (patch: Partial<Filters>) => setFilters((f) => ({ ...f, ...patch }))
   const filtered = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS)
@@ -110,8 +121,23 @@ export function IncidentsPage() {
       const failed = Object.keys(out.failed).length
       notify({ kind: failed ? 'warn' : 'ok', title: t('inc.bulk.done', { done: out.done.length, failed }) })
       setChecked(new Set())
+      setSelecting(false)
       reload()
     })
+
+  // The quick acknowledgement of a card in the phone layout.
+  const ack = (id: string) =>
+    void bulk.run(async () => {
+      setAcking(id)
+      try {
+        await api('POST', `/api/incidents/${encodeURIComponent(id)}/ack`)
+        notify({ kind: 'ok', title: tm('m.acked.toast', { id }) })
+        reload()
+      } finally {
+        setAcking(null)
+      }
+    })
+  const active = [filters.severity, filters.method, filters.team, filters.service, filters.flag].filter(Boolean).length + (filters.status !== NO_FILTERS.status ? 1 : 0)
 
   return (
     <div className="ci-page inc-page">
@@ -128,6 +154,22 @@ export function IncidentsPage() {
             {live ? t('inc.live') : t('inc.offline')}
           </span>
         </div>
+        {mobile && (
+          <div className="m-inc-tools">
+            <Button variant={showFilters || active > 0 ? 'secondary' : 'ghost'} className={active > 0 ? 'm-on' : undefined} aria-expanded={showFilters} onClick={() => setShowFilters((v) => !v)}>
+              <SlidersHorizontal size={16} aria-hidden />
+              {active > 0 ? tm('m.filters.n', { n: active }) : tm('m.filters')}
+            </Button>
+            {actor && actionable.length > 0 && (
+              <Button variant={selecting ? 'secondary' : 'ghost'} aria-pressed={selecting} onClick={() => setSelecting((v) => !v)}>
+                <ListChecks size={16} aria-hidden />
+                {selecting ? tm('m.select.done') : tm('m.select')}
+              </Button>
+            )}
+            <span className="muted svc-count">{t('inc.count', { shown: alerts.length })}</span>
+          </div>
+        )}
+        {(!mobile || showFilters) && (
         <div className="svc-filters">
           <label>
             <span>{t('inc.filter.status')}</span>
@@ -144,6 +186,13 @@ export function IncidentsPage() {
           <Choose label={t('inc.filter.team')} value={filters.team} onChange={(team) => set({ team })} options={(refs.data?.teams ?? []).map((x) => [x.id, x.name])} />
           <Choose label={t('inc.filter.service')} value={filters.service} onChange={(service) => set({ service })} options={services.map((x) => [x.id, x.name])} />
         </div>
+        )}
+        {mobile && showFilters && filtered && (
+          <Button variant="ghost" onClick={() => setFilters(NO_FILTERS)}>
+            {t('inc.filter.reset')}
+          </Button>
+        )}
+        {!mobile && (
         <div className="svc-toolbar-row">
           <div className="row">
             {actor && checked.size > 0 && (
@@ -167,7 +216,23 @@ export function IncidentsPage() {
             <span className="muted svc-count">{t('inc.count', { shown: alerts.length })}</span>
           </div>
         </div>
+        )}
       </div>
+      {mobile && (
+        <AnimatePresence>
+          {checked.size > 0 && (
+            <motion.div className="m-bulkbar" initial={{ y: 24, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 24, opacity: 0 }}>
+              <span>{t('inc.selected', { n: checked.size })}</span>
+              <Button busy={bulk.busy} onClick={() => setConfirming('ack')}>
+                {t('inc.ack')}
+              </Button>
+              <Button variant="primary" busy={bulk.busy} onClick={() => setConfirming('resolve')}>
+                {t('inc.resolve')}
+              </Button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      )}
       <ErrorFlash error={bulk.error} strings={strings} />
       {list.error ? <ErrorBanner error={list.error} strings={strings} /> : null}
       {more && <Banner kind="info" title={t('inc.more', { n: alerts.length })} />}
@@ -191,6 +256,29 @@ export function IncidentsPage() {
                 }
               />
             )}
+          </motion.div>
+        ) : mobile ? (
+          <motion.div key="cards" className="m-inc-list" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            {alerts.map((a) => (
+              <IncidentCard
+                key={a.id}
+                a={a}
+                now={now}
+                onOpen={() => setOpenID(a.id)}
+                onAck={actor ? () => ack(a.id) : undefined}
+                busy={acking === a.id}
+                selecting={selecting}
+                checked={checked.has(a.id)}
+                onCheck={(v) =>
+                  setChecked((s) => {
+                    const n = new Set(s)
+                    if (v) n.add(a.id)
+                    else n.delete(a.id)
+                    return n
+                  })
+                }
+              />
+            ))}
           </motion.div>
         ) : (
           <motion.div key="list" className="card cn-table-wrap" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
