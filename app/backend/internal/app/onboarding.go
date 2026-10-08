@@ -24,13 +24,15 @@ const (
 	StepPublicURL = "public_url"
 )
 
-// OnboardingStep is one item of the «first steps» checklist. Path is the page that fixes it;
+// OnboardingStep is one item of the «first steps» checklist or of a page setup guide. Path is
+// the page that fixes it; Action, in a page guide, is the button of the page itself that does;
 // CanFix tells whether the signed-in user has the permissions to do that.
 type OnboardingStep struct {
 	ID       string `json:"id"`
 	Done     bool   `json:"done"`
 	Optional bool   `json:"optional"`
 	Path     string `json:"path"`
+	Action   string `json:"action,omitempty"`
 	CanFix   bool   `json:"can_fix"`
 }
 

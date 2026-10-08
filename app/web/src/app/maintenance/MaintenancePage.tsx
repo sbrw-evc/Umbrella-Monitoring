@@ -11,6 +11,7 @@ import '../connectors/connectors.css'
 import '../cis/cis.css'
 import './maintenance.css'
 import { ask } from '../../confirm'
+import { SetupGuide } from '../guide/SetupGuide'
 
 type Ref = { id: string; name: string; missing?: boolean }
 type State = 'active' | 'planned' | 'finished'
@@ -94,6 +95,7 @@ export function MaintenancePage() {
 
   return (
     <div className="stack">
+      <SetupGuide page="maintenance" actions={{ create: () => setEditing('new') }} />
       <div className="ci-tiles mw-tiles">
         {(['active', 'planned', 'finished'] as State[]).map((s) => (
           <button key={s} type="button" className={`card ci-tile ${filter === s ? 'active' : ''}`} aria-pressed={filter === s} onClick={() => setFilter(filter === s ? '' : s)}>

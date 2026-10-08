@@ -30,6 +30,22 @@ export class ApiError extends Error {
 
 let csrf = ''
 
+// changeListeners are told after every successful change (any request but GET), so views that
+// follow the state of the installation, such as the setup guides, can read it again.
+const changeListeners = new Set<() => void>()
+
+export function onChange(fn: () => void) {
+  changeListeners.add(fn)
+  return () => {
+    changeListeners.delete(fn)
+  }
+}
+
+function changed(method: string) {
+  if (method === 'GET') return
+  for (const fn of changeListeners) fn()
+}
+
 export function setCsrf(v: string) {
   csrf = v
 }
@@ -50,9 +66,13 @@ export async function api<T>(method: string, path: string, body?: unknown, heade
   } catch (e) {
     throw new ApiError(0, 'network', e instanceof Error ? e.message : String(e))
   }
-  if (res.status === 204) return undefined as T
+  if (res.status === 204) {
+    changed(method)
+    return undefined as T
+  }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new ApiError(res.status, data.error ?? `http_${res.status}`, data.detail)
+  changed(method)
   return data as T
 }
 
@@ -70,5 +90,6 @@ export async function upload<T>(method: string, path: string, body: Blob): Promi
   }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new ApiError(res.status, data.error ?? `http_${res.status}`, data.detail)
+  changed(method)
   return data as T
 }

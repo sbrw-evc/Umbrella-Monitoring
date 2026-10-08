@@ -16,6 +16,7 @@ import { strings } from './strings'
 import type { ConnectorList, ConnectorSummary, Connector, CredentialChoice, ImportCheck, Preset, Slot } from './types'
 import './connectors.css'
 import { Flash } from '../../notify'
+import { SetupGuide } from '../guide/SetupGuide'
 
 export function ConnectorsPage() {
   const { path } = useRouter()
@@ -73,6 +74,7 @@ function ConnectorListPage() {
           </div>
         )}
       </div>
+      <SetupGuide page="connectors" actions={{ ...(quick ? { connect: () => setConnecting(true) } : {}), create: () => setCreating(true) }} />
       {list.error ? <ErrorBanner error={list.error} strings={strings} /> : null}
       {list.data && !list.data.ingest && <Banner kind="warn" title={t('cn.ingestDown')} />}
       {!list.data && !list.error && <p className="muted">{t('loading')}</p>}

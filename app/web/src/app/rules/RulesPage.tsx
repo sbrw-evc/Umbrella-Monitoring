@@ -14,6 +14,7 @@ import '../connectors/connectors.css'
 import './rules.css'
 import { notify } from '../../notify'
 import { ask } from '../../confirm'
+import { SetupGuide } from '../guide/SetupGuide'
 
 type Method = RuleMethod
 type Rule = {
@@ -66,6 +67,13 @@ export function RulesPage() {
   return (
     <div className="stack">
       <SourcesExplainer />
+      <SetupGuide
+        page="rules"
+        actions={{
+          create: () => (setTab('rules'), setRule('new')),
+          source: () => (setTab('sources'), setSource('new')),
+        }}
+      />
       <div className="row rl-head">
         <Segmented
           label={t('rl.tab.rules')}

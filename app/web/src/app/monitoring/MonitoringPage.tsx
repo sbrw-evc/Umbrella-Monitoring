@@ -26,6 +26,7 @@ import './monitoring.css'
 import '../bulk/bulk.css'
 import { Flash, notify } from '../../notify'
 import { ask } from '../../confirm'
+import { SetupGuide } from '../guide/SetupGuide'
 
 type Kind = 'zabbix' | 'prometheus' | 'grafana' | 'graylog'
 type Poll = { at: string; ok: boolean; error?: string; firing: number; sent: number }
@@ -133,6 +134,7 @@ export function MonitoringPage() {
   return (
     <div className="stack">
       <SourcesExplainer />
+      <SetupGuide page="monitoring" actions={{ create: () => setEditing('new') }} />
       <div className="row rl-head">
         <Segmented
           label={t('mon.tab.hosts')}

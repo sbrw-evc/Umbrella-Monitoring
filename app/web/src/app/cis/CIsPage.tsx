@@ -19,6 +19,7 @@ import '../services/services.css'
 import '../connectors/connectors.css'
 import './cis.css'
 import '../bulk/bulk.css'
+import { SetupGuide } from '../guide/SetupGuide'
 
 const pageStrings = mergeDicts(strings, bulkStrings)
 
@@ -57,6 +58,7 @@ export function CIsPage() {
 
   return (
     <div className="ci-page">
+      <SetupGuide page="cis" actions={{ create: () => setEditing({ ci: null }) }} />
       <Tiles summary={summary} flag={filters.flag} onFlag={(flag) => set({ flag: filters.flag === flag ? '' : flag })} />
       <div className="card svc-toolbar">
         <div className="svc-toolbar-row">
