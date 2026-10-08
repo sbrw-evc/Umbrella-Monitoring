@@ -47,6 +47,7 @@ Control plane Kubernetes — три узла по 2 vCPU / 4 ГБ на кажд�
 | Узлы ClickHouse между собой | ClickHouse, Keeper | 9010 HTTPS (репликация), 9281 TLS (Keeper) |
 | Сетевые устройства, системы с syslog | Балансировщик → слушатель syslog Connector Runtime | 6514 syslog TLS; 514 только в изолированном сегменте по согласованию с ИБ |
 | Connector Runtime, CMDB Discovery | API систем мониторинга | HTTPS, порт задаётся в коннекторе |
+| CMDB Discovery (инвентарь-коннектор), Connector Runtime (коннектор статусов) | Inventory DB REST API (внутренняя сеть) | 443 HTTPS |
 | Connector Runtime, CMDB Discovery | БД систем мониторинга | порт СУБД, TLS |
 | Connector Runtime | брокеры сообщений, почтовые ящики | порт брокера с TLS, 993 IMAPS |
 | Connector Runtime, CMDB Discovery | API облаков через egress-прокси | 443 HTTPS |
