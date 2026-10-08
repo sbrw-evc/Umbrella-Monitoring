@@ -1415,8 +1415,9 @@ code {
 }
 
 .app-body {
+  position: relative;
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: var(--side-width, 280px) minmax(0, 1fr);
   min-height: 0;
   padding: 0 8px 8px 0;
 }
@@ -1551,6 +1552,63 @@ code {
   grid-template-columns: 68px minmax(0, 1fr);
 }
 
+/* The edge between the sidebar and the page; dragging it changes the width of the sidebar. */
+.side-resizer {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  bottom: 8px;
+  left: calc(var(--side-width, 280px) - 6px);
+  width: 6px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.side-resizer::after {
+  content: '';
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 2px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.side-resizer:hover::after,
+.side-resizer.dragging::after,
+.side-resizer:focus-visible::after {
+  background: var(--accent);
+}
+
+.side-resizer:focus-visible {
+  outline: none;
+}
+
+body.side-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.side-resizing .app-body {
+  transition: none;
+}
+
+.side-label,
+.side-accordion > span:not(.side-chevron) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-link > svg,
+.side-accordion > svg,
+.side-chevron {
+  flex-shrink: 0;
+}
+
 .sidebar.collapsed {
   gap: 6px;
   padding: 8px 12px 16px;
@@ -1628,7 +1686,8 @@ code {
     border: 0;
   }
 
-  .side-accordion {
+  .side-accordion,
+  .side-resizer {
     display: none;
   }
 

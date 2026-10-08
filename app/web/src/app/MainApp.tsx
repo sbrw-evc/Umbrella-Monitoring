@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { api, ApiError, setCsrf, type Meta } from '../api'
 import { defaultPolicy, type PasswordPolicy } from '../policy'
@@ -11,7 +11,7 @@ import { PageBoundary } from './PageBoundary'
 import { PageHead } from './PageHead'
 import { resolve, visiblePages } from './pages'
 import { SessionProvider, useSession, type Session } from './session'
-import { Sidebar, useCollapsed } from './Sidebar'
+import { Sidebar, SidebarResizer, useCollapsed, useSidebarWidth } from './Sidebar'
 import { SignIn } from './SignIn'
 import { strings } from './strings'
 import { TopBar } from './TopBar'
@@ -123,11 +123,16 @@ function Shell({ meta }: { meta: Meta }) {
 
 function Frame({ hasSidebar, user, onSignOut }: { hasSidebar: boolean; user: string; onSignOut: () => void }) {
   const [collapsed, toggle] = useCollapsed(user)
+  const [width, setWidth] = useSidebarWidth(user)
   return (
     <div className="app-shell">
       <TopBar onSignOut={onSignOut} sidebar={hasSidebar ? { collapsed, toggle } : undefined} />
-      <div className={`app-body ${hasSidebar ? (collapsed ? 'side-collapsed' : '') : 'no-sidebar'}`}>
+      <div
+        className={`app-body ${hasSidebar ? (collapsed ? 'side-collapsed' : '') : 'no-sidebar'}`}
+        style={{ '--side-width': `${width}px` } as CSSProperties}
+      >
         {hasSidebar && <Sidebar collapsed={collapsed} />}
+        {hasSidebar && !collapsed && <SidebarResizer width={width} onChange={setWidth} />}
         <div id={SCROLL_ROOT_ID} className="app-main">
           <Pages />
         </div>
