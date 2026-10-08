@@ -26,10 +26,11 @@ export function Toggles<T extends string>({
   // off marks values that are on but cannot work now (a channel that is turned off).
   off?: (v: T) => boolean
 }) {
+  const sel = selected ?? []
   return (
     <div className="rs-toggles" role="group" aria-label={label}>
       {values.map((v) => {
-        const on = selected.includes(v)
+        const on = sel.includes(v)
         return (
           <button
             key={v}
@@ -37,7 +38,7 @@ export function Toggles<T extends string>({
             aria-pressed={on}
             disabled={disabled}
             className={`chip rs-toggle${on ? ' on' : ''}${on && off?.(v) ? ' warn' : ''}`}
-            onClick={() => onChange(on ? selected.filter((x) => x !== v) : [...selected, v])}
+            onClick={() => onChange(on ? sel.filter((x) => x !== v) : [...sel, v])}
           >
             {word(v)}
           </button>
@@ -61,22 +62,23 @@ export function PickList({
   label: string
   disabled?: boolean
 }) {
+  const sel = selected ?? []
   const byId = new Map(items.map((i) => [i.id, i.name]))
-  const rest = items.filter((i) => !selected.includes(i.id))
+  const rest = items.filter((i) => !sel.includes(i.id))
   return (
     <div className="rs-picks">
-      {selected.map((id) => (
+      {sel.map((id) => (
         <span key={id} className="rs-pick">
           {byId.get(id) ?? id}
           {!disabled && (
-            <button type="button" className="icon-btn" aria-label={`${label}: ${byId.get(id) ?? id}`} onClick={() => onChange(selected.filter((x) => x !== id))}>
+            <button type="button" className="icon-btn" aria-label={`${label}: ${byId.get(id) ?? id}`} onClick={() => onChange(sel.filter((x) => x !== id))}>
               <X size={12} />
             </button>
           )}
         </span>
       ))}
       {!disabled && rest.length > 0 && (
-        <Select aria-label={label} value="" className="rs-pick-add" onChange={(e) => e.target.value && onChange([...selected, e.target.value])}>
+        <Select aria-label={label} value="" className="rs-pick-add" onChange={(e) => e.target.value && onChange([...sel, e.target.value])}>
           <option value="">{`+ ${label}`}</option>
           {rest.map((i) => (
             <option key={i.id} value={i.id}>
