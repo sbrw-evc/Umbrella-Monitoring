@@ -45,9 +45,10 @@
   gap: 10px;
   min-height: 56px;
   padding: calc(6px + env(safe-area-inset-top, 0px)) 8px 6px 14px;
-  background: color-mix(in srgb, var(--chrome) 88%, transparent);
+  /* No backdrop-filter here or on the tab bar: it would make the bar the containing block of
+     fixed children, and the notification panel opened from it would be cut to the bar. */
+  background: var(--chrome);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: saturate(1.4) blur(10px);
 }
 
 .m-top-brand {
@@ -125,9 +126,8 @@
   grid-auto-columns: minmax(0, 1fr);
   grid-auto-flow: column;
   padding: 6px 6px calc(6px + var(--m-safe-b));
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  background: var(--surface);
   border-top: 1px solid var(--border);
-  backdrop-filter: saturate(1.4) blur(12px);
 }
 
 .m-tab {
