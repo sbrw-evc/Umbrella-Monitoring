@@ -14,6 +14,10 @@ import { useSession } from './session'
 const COMPACT = '(max-width: 860px)'
 const openKey = (group: string) => `umbrella.sidebar.${group}`
 const collapsedKey = (user: string) => `umbrella.sidebar.collapsed.${user}`
+const widthKey = (user: string) => `umbrella.sidebar.width.${user}`
+// The width of the expanded sidebar the user can drag between these bounds.
+export const SIDEBAR_WIDTH = { min: 232, max: 440, initial: 280 }
+const WIDTH_STEP = 16
 // The groups, their titles and order come from the access catalog; only the icons are here.
 const GROUP_ICONS: Record<string, LucideIcon> = { overview: LayoutGrid, automation: Workflow, org: Building2, settings: Settings }
 
@@ -106,6 +110,98 @@ export function useCollapsed(user: string) {
   return [collapsed, toggle] as const
 }
 
+const clampWidth = (w: number) => Math.round(Math.min(SIDEBAR_WIDTH.max, Math.max(SIDEBAR_WIDTH.min, w)))
+
+function readWidth(user: string) {
+  try {
+    const v = Number(window.localStorage.getItem(widthKey(user)))
+    return v > 0 ? clampWidth(v) : SIDEBAR_WIDTH.initial
+  } catch {
+    return SIDEBAR_WIDTH.initial
+  }
+}
+
+function writeWidth(user: string, w: number) {
+  try {
+    if (w === SIDEBAR_WIDTH.initial) window.localStorage.removeItem(widthKey(user))
+    else window.localStorage.setItem(widthKey(user), String(w))
+  } catch {
+    // The width then lasts until the page is reloaded.
+  }
+}
+
+// useSidebarWidth keeps the width of the expanded sidebar per user in this browser.
+export function useSidebarWidth(user: string) {
+  const [width, setWidth] = useState(() => readWidth(user))
+  useEffect(() => setWidth(readWidth(user)), [user])
+  const change = useCallback(
+    (w: number) => {
+      const next = clampWidth(w)
+      setWidth(next)
+      writeWidth(user, next)
+    },
+    [user],
+  )
+  return [width, change] as const
+}
+
+// SidebarResizer is the edge between the sidebar and the page: dragging it changes the width
+// of the sidebar, arrow keys move it by a step, a double click returns the initial width.
+export function SidebarResizer({ width, onChange }: { width: number; onChange: (w: number) => void }) {
+  const t = useT(navStrings)
+  const [dragging, setDragging] = useState(false)
+  const start = useRef<{ x: number; width: number } | null>(null)
+
+  useEffect(() => {
+    if (!dragging) return
+    document.body.classList.add('side-resizing')
+    return () => document.body.classList.remove('side-resizing')
+  }, [dragging])
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-controls="app-sidebar"
+      aria-label={t('nav.resize')}
+      title={t('nav.resize.hint')}
+      aria-valuemin={SIDEBAR_WIDTH.min}
+      aria-valuemax={SIDEBAR_WIDTH.max}
+      aria-valuenow={width}
+      tabIndex={0}
+      className={`side-resizer ${dragging ? 'dragging' : ''}`}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        e.preventDefault()
+        e.currentTarget.setPointerCapture(e.pointerId)
+        start.current = { x: e.clientX, width }
+        setDragging(true)
+      }}
+      onPointerMove={(e) => {
+        if (start.current) onChange(start.current.width + e.clientX - start.current.x)
+      }}
+      onPointerUp={() => {
+        start.current = null
+        setDragging(false)
+      }}
+      onPointerCancel={() => {
+        start.current = null
+        setDragging(false)
+      }}
+      onDoubleClick={() => onChange(SIDEBAR_WIDTH.initial)}
+      onKeyDown={(e) => {
+        const step = e.shiftKey ? WIDTH_STEP * 4 : WIDTH_STEP
+        if (e.key === 'ArrowLeft') onChange(width - step)
+        else if (e.key === 'ArrowRight') onChange(width + step)
+        else if (e.key === 'Home') onChange(SIDEBAR_WIDTH.min)
+        else if (e.key === 'End') onChange(SIDEBAR_WIDTH.max)
+        else return
+        e.preventDefault()
+      }}
+    />
+  )
+}
+
 // Tip is the label shown next to an icon of the collapsed sidebar. It is drawn in a portal
 // because the sidebar scrolls and would clip it.
 function Tip({ anchor, children }: { anchor: HTMLElement | null; children: ReactNode }) {
@@ -158,7 +254,9 @@ function SideLink({ page, active, rail }: { page: PageDef; active: boolean; rail
     >
       {active && <motion.span layoutId="side-pill" className="side-pill" transition={spring} />}
       <page.icon size={17} aria-hidden />
-      <span className="side-label">{label}</span>
+      <span className="side-label" title={rail ? undefined : label}>
+        {label}
+      </span>
       {rail && <Tip anchor={tip}>{label}</Tip>}
     </Link>
   )
