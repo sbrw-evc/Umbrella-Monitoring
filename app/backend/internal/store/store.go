@@ -31,10 +31,14 @@ type Data struct {
 	// NetBoxContacts maps NetBox contact IDs to the user accounts made or found for them.
 	NetBoxContacts map[int]string
 	NetBoxSync     model.SyncState
-	GroupSync      model.GroupSyncState
-	Settings       model.Settings
-	Audit          []AuditEntry
-	Seq            map[string]int
+	// InventoryDBSync is the last read of devices from Inventory DB.
+	InventoryDBSync model.SyncState
+	// InventoryDBPushed is the last alert state sent to Inventory DB, by alert ID.
+	InventoryDBPushed map[string]model.PushedAlert
+	GroupSync         model.GroupSyncState
+	Settings          model.Settings
+	Audit             []AuditEntry
+	Seq               map[string]int
 }
 
 type AuditEntry struct {
@@ -114,6 +118,9 @@ func (d *Data) init() {
 			u.MigrateTeams()
 			u.MigrateScope()
 		}
+	}
+	if d.InventoryDBPushed == nil {
+		d.InventoryDBPushed = map[string]model.PushedAlert{}
 	}
 	if d.NetBoxContacts == nil {
 		d.NetBoxContacts = map[int]string{}

@@ -282,6 +282,15 @@ function Main({ d, onOpen }: { d: Detail; onOpen: (id: string) => void }) {
             </a>
           </>
         )}
+        {ci?.inventory_url && (
+          <>
+            {' · '}
+            <a href={ci.inventory_url} target="_blank" rel="noopener noreferrer">
+              Inventory DB
+              <ExternalLink size={13} aria-hidden />
+            </a>
+          </>
+        )}
       </span>,
     ],
     [t('inc.field.signal'), a.signal],

@@ -11,7 +11,8 @@ export function StatusPill({ status }: { status: string }) {
 
 export function SourcePill({ ci }: { ci: CI }) {
   const t = useT(strings)
-  const key = ci.source === 'netbox' ? 'ci.source.netbox' : ci.netbox ? 'ci.source.local.registered' : 'ci.source.local'
+  const key =
+    ci.source === 'netbox' ? 'ci.source.netbox' : ci.source === 'inventory-db' ? 'ci.source.inventory-db' : ci.netbox ? 'ci.source.local.registered' : 'ci.source.local'
   return <span className={`pill ci-source ci-source-${ci.source}`}>{t(key)}</span>
 }
 

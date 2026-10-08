@@ -109,7 +109,7 @@ export type Page = { alerts: Incident[]; counts: Counts; more: boolean }
 
 export type Entry = { id: number; at: string; kind: string; code: string; args?: Record<string, string>; author?: string }
 
-export type CardCI = { id: string; name: string; kind: string; imported: boolean; netbox_url?: string; aliases: string[] }
+export type CardCI = { id: string; name: string; kind: string; imported: boolean; netbox_url?: string; inventory_url?: string; aliases: string[] }
 
 export type CardService = { id: string; name: string; links: { title: string; url: string }[] }
 

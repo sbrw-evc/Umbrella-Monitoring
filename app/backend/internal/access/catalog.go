@@ -89,6 +89,12 @@ var pages = []Page{
 		{"edit", Text{"Change the connection and synchronization settings", "Изменение подключения и настроек синхронизации"}},
 		{"sync", Text{"Run synchronization", "Запуск синхронизации"}},
 	}},
+	{"inventorydb", GroupAuto, Text{"Inventory DB", "Inventory DB"}, []Feature{
+		view,
+		test,
+		{"edit", Text{"Change the connection, synchronization and alert state settings", "Изменение подключения, синхронизации и отправки статусов тревог"}},
+		{"sync", Text{"Run synchronization", "Запуск синхронизации"}},
+	}},
 	{"monitoring", GroupAuto, Text{"Monitoring systems", "Системы мониторинга"}, []Feature{
 		view,
 		test,

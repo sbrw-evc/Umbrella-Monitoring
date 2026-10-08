@@ -10,6 +10,7 @@ import (
 
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/directory"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/entra"
+	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/inventorydb"
 	"github.com/sbrw-evc/umbrella-monitoring/app/backend/internal/netbox"
 )
 
@@ -144,8 +145,10 @@ type Settings struct {
 	LDAP          directory.Config `json:"ldap"`
 	Entra         entra.Config     `json:"entra"`
 	NetBox        netbox.Config    `json:"netbox"`
-	Groups        GroupMappings    `json:"groups"`
-	Alerting      Alerting         `json:"alerting"`
+	// InventoryDB is the optional Inventory DB connection: devices in, alert states out.
+	InventoryDB inventorydb.Config `json:"inventory_db"`
+	Groups      GroupMappings      `json:"groups"`
+	Alerting    Alerting           `json:"alerting"`
 	// Response is incident response: impact, priority policies, escalation, war rooms, Jira.
 	Response Response `json:"response"`
 	// HostContext is how the incident card shows the machine of the incident.

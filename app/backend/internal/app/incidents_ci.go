@@ -18,12 +18,14 @@ import (
 // can create the item or name an existing one.
 
 type incidentCI struct {
-	ID        string   `json:"id"`
-	Name      string   `json:"name"`
-	Kind      string   `json:"kind"`
-	Imported  bool     `json:"imported"`
-	NetBoxURL string   `json:"netbox_url,omitempty"`
-	Aliases   []string `json:"aliases"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Imported  bool   `json:"imported"`
+	NetBoxURL string `json:"netbox_url,omitempty"`
+	// InventoryURL is the device card in Inventory DB.
+	InventoryURL string   `json:"inventory_url,omitempty"`
+	Aliases      []string `json:"aliases"`
 }
 
 type incidentService struct {
@@ -49,6 +51,9 @@ func incidentContext(d *store.Data, al alert.Alert, v *incidentView) {
 		}
 		if ci.NetBox != nil {
 			c.NetBoxURL = ci.NetBox.URL
+		}
+		if ci.InventoryDB != nil {
+			c.InventoryURL = ci.InventoryDB.URL
 		}
 		v.CI = c
 	}

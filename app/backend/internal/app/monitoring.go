@@ -974,6 +974,7 @@ func dropHostLinks(d *store.Data, id string) {
 
 const (
 	PresenceNetBox    = "netbox"
+	PresenceInventory = "inventory-db"
 	PresenceDirectory = "directory"
 
 	Present = "present"
@@ -1002,6 +1003,11 @@ func presence(d *store.Data, ci *model.ConfigItem, mons []CIMonitor, sources []*
 		out = append(out, CIPresence{Kind: PresenceNetBox, Name: "NetBox", State: Present, Detail: ci.NetBox.Kind + " #" + strconv.Itoa(ci.NetBox.ID), URL: ci.NetBox.URL})
 	} else if d.Settings.NetBox.Enabled {
 		out = append(out, CIPresence{Kind: PresenceNetBox, Name: "NetBox", State: Missing})
+	}
+	if ref := ci.InventoryDB; ref != nil {
+		out = append(out, CIPresence{Kind: PresenceInventory, Name: "Inventory DB", State: Present, Detail: "device #" + strconv.Itoa(ref.ID), URL: ref.URL})
+	} else if d.Settings.InventoryDB.Enabled && d.Settings.InventoryDB.ImportDevices && (ci.Kind == model.CIKindDevice) {
+		out = append(out, CIPresence{Kind: PresenceInventory, Name: "Inventory DB", State: Missing})
 	}
 	if dir := ci.Directory; dir != nil {
 		p := CIPresence{Kind: PresenceDirectory, Name: "Active Directory", State: Missing}
