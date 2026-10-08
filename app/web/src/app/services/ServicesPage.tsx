@@ -16,6 +16,7 @@ import { strings } from './strings'
 import { TeamTree } from './teams'
 import { CRITICALITIES, NO_FILTERS, queryOf, STATUSES, type Filters, type Refs, type Service, type ServiceList } from './types'
 import './services.css'
+import { SetupGuide } from '../guide/SetupGuide'
 
 type Editing = { service: Service | null } | null
 
@@ -56,6 +57,7 @@ export function ServicesPage() {
 
   return (
     <div className="svc-page">
+      <SetupGuide page="services" actions={{ create: () => setEditing({ service: null }) }} />
       <div className="card svc-toolbar">
         <div className="svc-toolbar-row">
           <label className="svc-search">

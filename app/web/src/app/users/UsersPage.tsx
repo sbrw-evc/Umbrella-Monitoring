@@ -13,6 +13,7 @@ import { UsersList } from './UsersList'
 import { UsersToolbar } from './UsersToolbar'
 import './users.css'
 import { notify } from '../../notify'
+import { SetupGuide } from '../guide/SetupGuide'
 
 export function UsersPage() {
   const t = useT(strings)
@@ -76,6 +77,7 @@ export function UsersPage() {
 
   return (
     <div className="stack usr-page">
+      <SetupGuide page="users" actions={{ create: () => setCreating((k) => Math.abs(k) + 1) }} />
       <UsersToolbar refs={refs} filters={filters} onChange={setFilters} onCreate={() => setCreating((k) => Math.abs(k) + 1)} />
       <AnimatePresence initial={false}>
         {loader.error && (

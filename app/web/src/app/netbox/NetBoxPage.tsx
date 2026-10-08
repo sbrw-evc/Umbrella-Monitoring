@@ -12,6 +12,7 @@ import { useSession } from '../session'
 import { strings } from './strings'
 import './netbox.css'
 import { Flash } from '../../notify'
+import { SetupGuide } from '../guide/SetupGuide'
 
 type NetBoxConfig = {
   enabled: boolean
@@ -142,6 +143,7 @@ export function NetBoxPage() {
 
   return (
     <>
+      <SetupGuide page="netbox" />
       <SyncCard view={view} onSynced={apply} />
       <ProfileCard
         title={t('nb.settings')}

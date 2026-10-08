@@ -28,6 +28,7 @@ import { CI_H, CI_W, layout, SERVICE_H, SERVICE_W } from './layout'
 import { strings } from './strings'
 import { LEVELS, problem, type CMDBMap, type Health, type Level, type MapCI, type MapService } from './types'
 import './cmdb.css'
+import { SetupGuide } from '../guide/SetupGuide'
 
 const REFRESH_MS = 60_000
 
@@ -222,6 +223,7 @@ function MapView() {
 
   return (
     <div className="map-page">
+      <SetupGuide page="cmdb" />
       <div className="card map-toolbar">
         <label className="svc-search map-search">
           <Search size={16} aria-hidden />

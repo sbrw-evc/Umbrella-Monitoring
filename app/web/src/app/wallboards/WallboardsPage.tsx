@@ -20,6 +20,7 @@ import './wallboards.css'
 import { WallboardEditor } from './WallboardEditor'
 import { notify } from '../../notify'
 import { ask } from '../../confirm'
+import { SetupGuide } from '../guide/SetupGuide'
 
 type T = (key: string, vars?: Record<string, string | number>) => string
 
@@ -52,6 +53,7 @@ export function WallboardsPage() {
 
   return (
     <div className="stack">
+      <SetupGuide page="wallboards" actions={{ create: () => setEditing('new') }} />
       {editor && boards.length > 0 && (
         <div className="row">
           <Button variant="primary" onClick={() => setEditing('new')}>

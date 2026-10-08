@@ -14,6 +14,7 @@ import { PoliciesTab } from './PoliciesTab'
 import './response.css'
 import { responseStrings } from './strings'
 import type { ImpactPolicy, Mode, Policy, ResponseView } from './types'
+import { SetupGuide } from '../guide/SetupGuide'
 
 type Tab = 'policies' | 'impact' | 'integrations' | 'check'
 
@@ -96,6 +97,7 @@ export function ResponsePage() {
   }
   return (
     <div className="rs-page">
+      <SetupGuide page="response" actions={{ integrations: () => setTab('integrations') }} />
       <ProfileCard
         title={t('rs.mode')}
         action={saver}

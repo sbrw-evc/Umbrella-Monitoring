@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { SetupGuide } from '../../guide/SetupGuide'
 import { GrafanaCard } from './GrafanaCard'
 import { NotifyCard } from './NotifyCard'
 import { PagerDutyCard } from './PagerDutyCard'
@@ -12,6 +13,7 @@ export function AlertingSettings() {
   const [epoch, setEpoch] = useState(0)
   return (
     <>
+      <SetupGuide page="settings.alerting" />
       <PublicURLCard onSaved={() => setEpoch((e) => e + 1)} />
       <PagerDutyCard reloadKey={epoch} />
       <NotifyCard key={epoch} />
