@@ -1,6 +1,6 @@
 export const KINDS = ['device', 'vm', 'service', 'other'] as const
 export const STATUSES = ['active', 'planned', 'staged', 'offline', 'failed', 'decommissioning'] as const
-export const SOURCES = ['netbox', 'local'] as const
+export const SOURCES = ['netbox', 'inventory-db', 'local'] as const
 export const FLAGS = ['no_owners', 'directory_missing', 'not_monitored'] as const
 
 export type Kind = (typeof KINDS)[number]
@@ -38,12 +38,13 @@ export type CI = {
   kind: Kind
   status: string
   description: string
-  source: 'netbox' | 'local'
+  source: 'netbox' | 'inventory-db' | 'local'
   ips: string[]
   aliases?: string[]
   tags: string[]
   attrs: Attrs
   netbox?: NetBoxRef
+  inventory_db?: { id: number; url: string; ref: string }
   directory?: DirectoryInfo
   owners: Owner[]
   services: { id: string; name: string }[]
@@ -73,7 +74,7 @@ export type Monitor = {
 
 // Presence: whether a system (NetBox, the domain, a monitoring system) knows the item.
 export type Presence = {
-  kind: 'netbox' | 'directory' | 'zabbix' | 'prometheus' | 'grafana' | 'graylog'
+  kind: 'netbox' | 'inventory-db' | 'directory' | 'zabbix' | 'prometheus' | 'grafana' | 'graylog'
   source_id?: string
   name: string
   state: 'present' | 'missing'
@@ -85,6 +86,7 @@ export type Presence = {
 export type Summary = {
   total: number
   netbox: number
+  inventory_db?: number
   local: number
   registered: number
   no_owners: number

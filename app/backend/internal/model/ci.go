@@ -6,7 +6,8 @@ import (
 )
 
 const (
-	SourceNetBox = "netbox"
+	SourceNetBox      = "netbox"
+	SourceInventoryDB = "inventory-db"
 
 	CIKindDevice  = "device"
 	CIKindVM      = "vm"
@@ -58,6 +59,14 @@ type NetBoxRef struct {
 	URL  string `json:"url"`
 }
 
+// InventoryRef points at the Inventory DB device a configuration item is read from.
+type InventoryRef struct {
+	ID  int    `json:"id"`
+	URL string `json:"url"`
+	// Ref is the source reference Inventory DB gives the device (inventory-db:dcim.device:12).
+	Ref string `json:"ref"`
+}
+
 // CIDirectory is the computer object of the domain controller matched to the item.
 type CIDirectory struct {
 	Status    string     `json:"status"`
@@ -73,39 +82,45 @@ type CIDirectory struct {
 // ConfigItem is a configuration item (CI): a device, virtual machine, service or other
 // object monitoring refers to. Items imported from NetBox are kept read-only here.
 type ConfigItem struct {
-	ID          string       `json:"id"`
-	Name        string       `json:"name"`
-	Kind        string       `json:"kind"`
-	Status      string       `json:"status"`
-	Description string       `json:"description"`
-	Source      string       `json:"source"`
-	Owners      []CIOwner    `json:"-"`
-	IPs         []string     `json:"ips"`
-	Tags        []string     `json:"tags"`
-	Attrs       CIAttrs      `json:"attrs"`
-	NetBox      *NetBoxRef   `json:"netbox,omitempty"`
-	Directory   *CIDirectory `json:"directory,omitempty"`
-	CreatedAt   time.Time    `json:"created_at"`
-	CreatedBy   string       `json:"created_by"`
-	UpdatedAt   time.Time    `json:"updated_at"`
-	UpdatedBy   string       `json:"updated_by"`
-	SyncedAt    *time.Time   `json:"synced_at,omitempty"`
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Kind        string     `json:"kind"`
+	Status      string     `json:"status"`
+	Description string     `json:"description"`
+	Source      string     `json:"source"`
+	Owners      []CIOwner  `json:"-"`
+	IPs         []string   `json:"ips"`
+	Tags        []string   `json:"tags"`
+	Attrs       CIAttrs    `json:"attrs"`
+	NetBox      *NetBoxRef `json:"netbox,omitempty"`
+	// InventoryDB is set on items read from Inventory DB.
+	InventoryDB *InventoryRef `json:"inventory_db,omitempty"`
+	Directory   *CIDirectory  `json:"directory,omitempty"`
+	CreatedAt   time.Time     `json:"created_at"`
+	CreatedBy   string        `json:"created_by"`
+	UpdatedAt   time.Time     `json:"updated_at"`
+	UpdatedBy   string        `json:"updated_by"`
+	SyncedAt    *time.Time    `json:"synced_at,omitempty"`
 
 	// Aliases are other names events call the item by (a host name in a monitoring system, a
 	// Prometheus instance). They are kept in Umbrella, also for items imported from NetBox.
 	Aliases []string `json:"aliases,omitempty"`
 }
 
-// Imported items mirror NetBox and change only there.
-func (c *ConfigItem) Imported() bool { return c.Source == SourceNetBox }
+// Imported items mirror NetBox or Inventory DB and change only there.
+func (c *ConfigItem) Imported() bool {
+	return c.Source == SourceNetBox || c.Source == SourceInventoryDB
+}
 
 // SyncStats counts what one NetBox synchronization changed.
 type SyncStats struct {
-	Objects      int `json:"objects"`
-	Created      int `json:"created"`
-	Updated      int `json:"updated"`
-	Deleted      int `json:"deleted"`
-	Unlinked     int `json:"unlinked"`
+	Objects  int `json:"objects"`
+	Created  int `json:"created"`
+	Updated  int `json:"updated"`
+	Deleted  int `json:"deleted"`
+	Unlinked int `json:"unlinked"`
+	// Linked: existing items an Inventory DB device was attached to by name.
+	Linked       int `json:"linked,omitempty"`
 	Contacts     int `json:"contacts"`
 	UsersCreated int `json:"users_created"`
 	UsersUpdated int `json:"users_updated"`
@@ -134,4 +149,14 @@ type SyncState struct {
 	Error      string    `json:"error,omitempty"`
 	Actor      string    `json:"actor"`
 	Stats      SyncStats `json:"stats"`
+}
+
+// PushedAlert is the alert state last sent to Inventory DB, to send only changes and to report
+// the alert resolved once it is no longer active.
+type PushedAlert struct {
+	Key   string    `json:"key"`
+	Ref   string    `json:"ref"`
+	Title string    `json:"title"`
+	Sev   string    `json:"severity"`
+	At    time.Time `json:"at"`
 }

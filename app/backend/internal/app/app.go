@@ -60,25 +60,27 @@ type Deps struct {
 }
 
 type App struct {
-	opt        Options
-	deps       Deps
-	auth       *AuthService
-	users      *UserService
-	accounts   *UsersService
-	settings   *SettingsService
-	status     *StatusService
-	limiter    *loginGuard
-	entraRate  *Limiter // Microsoft sign-in starts per client address
-	policy     *PolicyService
-	access     *AccessService
-	directory  *DirectoryService
-	entra      *EntraService
-	postgres   *PostgresService
-	openbao    *OpenBaoService
-	roles      *RolesService
-	teams      *TeamsService
-	services   *ServicesService
-	netbox     *NetBoxService
+	opt       Options
+	deps      Deps
+	auth      *AuthService
+	users     *UserService
+	accounts  *UsersService
+	settings  *SettingsService
+	status    *StatusService
+	limiter   *loginGuard
+	entraRate *Limiter // Microsoft sign-in starts per client address
+	policy    *PolicyService
+	access    *AccessService
+	directory *DirectoryService
+	entra     *EntraService
+	postgres  *PostgresService
+	openbao   *OpenBaoService
+	roles     *RolesService
+	teams     *TeamsService
+	services  *ServicesService
+	netbox    *NetBoxService
+	// inventory is the optional Inventory DB connection: devices in, alert states out.
+	inventory  *InventoryDBService
 	cis        *CIService
 	cmdb       *CMDBService
 	groups     *GroupsService
@@ -207,6 +209,7 @@ func New(opt Options, deps Deps) *App {
 		}
 	}
 	a.cmdb = NewCMDBService(deps.Store, active)
+	a.inventory = NewInventoryDBService(deps.Store, vault, active)
 	a.monitoring = NewMonitoringService(deps.Store, creds, a.cis)
 	a.alertPoll = newAlertPoller(a)
 	a.monitoring.polls = a.alertPoll.status
@@ -232,7 +235,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("GET /api/users/{id}/avatar", a.authed(a.avatar))
 	mux.HandleFunc("PUT /api/settings", a.authed(a.can("status:defaults", a.updateSettings)))
 	mux.HandleFunc("GET /api/system", a.authed(a.can("status:view", a.system)))
-	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerWallboards, a.registerRules, a.registerGrafana, a.registerOnboarding, a.registerGuides, a.registerResponse, a.registerTelegram, a.registerHostContext} {
+	for _, register := range []func(*http.ServeMux){a.registerRefs, a.registerPostgres, a.registerOpenBao, a.registerDirectory, a.registerEntra, a.registerPolicy, a.registerUsers, a.registerRoles, a.registerTeams, a.registerServices, a.registerConnectors, a.registerNetBox, a.registerInventoryDB, a.registerMonitoring, a.registerCMDB, a.registerGroups, a.registerIncidents, a.registerPagerDuty, a.registerNotifications, a.registerMaintenance, a.registerWallboards, a.registerRules, a.registerGrafana, a.registerOnboarding, a.registerGuides, a.registerResponse, a.registerTelegram, a.registerHostContext} {
 		register(mux)
 	}
 	a.registerRoutePreview(mux)
@@ -249,6 +252,7 @@ func (a *App) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	wg.Go(func() { a.netbox.Run(ctx) })
+	wg.Go(func() { a.inventory.Run(ctx) })
 	wg.Go(func() { a.groups.Run(ctx) })
 	wg.Go(func() { a.monitoring.Run(ctx) })
 	wg.Go(func() { a.alertPoll.Run(ctx) })

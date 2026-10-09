@@ -78,6 +78,7 @@ type CIView struct {
 type CISummary struct {
 	Total            int `json:"total"`
 	NetBox           int `json:"netbox"`
+	InventoryDB      int `json:"inventory_db"`
 	Local            int `json:"local"`
 	Registered       int `json:"registered"`
 	NoOwners         int `json:"no_owners"`
@@ -181,7 +182,9 @@ func (s *CIService) List(f CIFilter) CIList {
 		for _, ci := range d.ConfigItems {
 			sum := &out.Summary
 			sum.Total++
-			if ci.Imported() {
+			if ci.Source == model.SourceInventoryDB {
+				sum.InventoryDB++
+			} else if ci.Imported() {
 				sum.NetBox++
 			} else {
 				sum.Local++
@@ -249,6 +252,9 @@ func (f CIFilter) matches(v CIView, q string) bool {
 	}
 	if v.NetBox != nil {
 		fields = append(fields, "netbox:"+strconv.Itoa(v.NetBox.ID))
+	}
+	if v.InventoryDB != nil {
+		fields = append(fields, v.InventoryDB.Ref)
 	}
 	if v.Directory != nil {
 		fields = append(fields, v.Directory.DNSName)

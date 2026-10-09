@@ -1,5 +1,5 @@
 import type { ComponentType } from 'react'
-import { Activity, BellRing, Boxes, CalendarClock, Briefcase, Cable, Database, Gauge, KeyRound, LockKeyhole, Megaphone, Network, Radar, Server, ShieldCheck, Siren, Tv, UserCog, Users, UsersRound, Waypoints, type LucideIcon } from 'lucide-react'
+import { Activity, BellRing, Boxes, CalendarClock, Briefcase, Cable, Database, Gauge, KeyRound, LockKeyhole, Megaphone, Network, Radar, Server, ShieldCheck, Siren, Tv, UserCog, Users, UsersRound, Warehouse, Waypoints, type LucideIcon } from 'lucide-react'
 import { CIsPage } from './cis/CIsPage'
 import { IncidentsPage } from './incidents/IncidentsPage'
 import { CMDBMapPage } from './cmdb/CMDBMapPage'
@@ -8,6 +8,7 @@ import { CredentialsPage } from './connectors/CredentialsPage'
 import { MaintenancePage } from './maintenance/MaintenancePage'
 import { MonitoringPage } from './monitoring/MonitoringPage'
 import { NetBoxPage } from './netbox/NetBoxPage'
+import { InventoryDBPage } from './inventorydb/InventoryDBPage'
 import { ResponsePage } from './response/ResponsePage'
 import { RulesPage } from './rules/RulesPage'
 import { RolesPage } from './roles/RolesPage'
@@ -51,6 +52,7 @@ export const PAGES: PageDef[] = [
   { id: 'response', path: '/response', icon: Megaphone, Component: ResponsePage, subtitle: 'page.response.subtitle' },
   { id: 'rules', path: '/rules', icon: Gauge, Component: RulesPage, subtitle: 'page.rules.subtitle' },
   { id: 'netbox', path: '/netbox', icon: Server, Component: NetBoxPage, subtitle: 'page.netbox.subtitle' },
+  { id: 'inventorydb', path: '/inventory-db', icon: Warehouse, Component: InventoryDBPage, subtitle: 'page.inventorydb.subtitle' },
   { id: 'monitoring', path: '/monitoring', icon: Radar, Component: MonitoringPage, subtitle: 'page.monitoring.subtitle' },
   { id: 'credentials', path: '/credentials', icon: LockKeyhole, Component: CredentialsPage, subtitle: 'page.credentials.subtitle' },
   { id: 'users', path: '/users', icon: Users, Component: UsersPage, subtitle: 'page.users.subtitle' },
