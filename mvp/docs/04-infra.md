@@ -30,6 +30,7 @@ Kubernetes, каждый сервис минимум в двух реплика�
 | Сервисы Umbrella, Grafana OSS (если развёрнута) | PostgreSQL | 5432 TLS |
 | Сервисы Umbrella, агент OpenBao в подах Grafana | OpenBao | 8200 TLS |
 | Connector Runtime, CMDB Discovery | API систем мониторинга во внутренней сети | HTTPS, порт задаётся в коннекторе |
+| CMDB Discovery (инвентарь-коннектор), Connector Runtime (коннектор статусов) | Inventory DB REST API (внутренняя сеть) | 443 HTTPS |
 | Connector Runtime, CMDB Discovery | БД систем мониторинга | порт СУБД, TLS |
 | Connector Runtime | брокеры очередей, почтовые ящики | порт брокера с TLS, 993 IMAPS |
 | Сетевые устройства | слушатель syslog Connector Runtime за балансировщиком | 6514 syslog TLS (514 только в изолированном сегменте по согласованию с ИБ) |
